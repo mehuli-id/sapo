@@ -1,0 +1,10 @@
+# Paket di sistem live selain kernel (dipilih live-build). Paket sistem inti
+# ikut terpasang lewat Depends paket sapo (manifest fitur "always").
+sapo
+live-boot
+live-config
+live-config-systemd
+# Membuat user live (user/live) untuk debugging dari konsol.
+user-setup
+sudo
+# SSH sengaja tidak dipasang: user live memakai password bawaan.

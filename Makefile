@@ -9,7 +9,7 @@ DEV_LISTEN ?= 127.0.0.1:5000
 LDFLAGS   := -s -w -X main.version=$(VERSION)
 ARCH      ?= $(shell dpkg --print-architecture 2>/dev/null || go env GOARCH)
 
-.PHONY: all build go web deb check test lint dev clean
+.PHONY: all build go web deb iso check test lint dev clean
 
 all: build
 
@@ -24,6 +24,12 @@ web: ## Build panel ke web/dist
 
 deb: web ## Bangun paket .deb ke dist/ (ARCH=amd64|arm64)
 	ARCH=$(ARCH) packaging/deb/build.sh
+
+# ISO live dev (butuh Debian dengan live-build; build ISO memakai sudo). Arsitektur
+# ISO diatur di packaging/iso/iso.conf; paket .deb dibangun untuk arsitektur itu.
+iso: ## Bangun ISO live dev ke dist/
+	$(MAKE) deb ARCH=$$(. packaging/iso/iso.conf && echo $$ARCH)
+	sudo packaging/iso/build.sh
 
 check: lint test ## Lint + test (wajib sebelum pull request)
 
@@ -48,4 +54,4 @@ dev: go
 	  wait
 
 clean:
-	rm -rf $(BIN) $(DEV_DIR) web/dist dist
+	rm -rf $(BIN) $(DEV_DIR) web/dist dist build
