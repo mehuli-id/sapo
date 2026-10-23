@@ -36,7 +36,6 @@ go test -race ./...
 - `git commit -s` (DCO). Pesan: kalimat perintah singkat, Bahasa Indonesia.
 
 ## Status & langkah berikutnya (per 23 Okt 2026)
-Sudah: kerangka, login + wizard setup awal + 2FA, paket `.deb`, tiga ronde review keamanan (`docs/security/2026-10-23-review.md`), repo publik `mehuli-id/sapo`, ISO live dev (`packaging/iso/`, workflow **ISO dev**: build + uji boot QEMU, artifact `sapo-iso-dev`).
+Sudah: kerangka, login + wizard setup awal + 2FA, paket `.deb`, tiga ronde review keamanan (`docs/security/2026-10-23-review.md`), repo publik `mehuli-id/sapo`, ISO live dev (`packaging/iso/`, workflow **ISO dev**: build + uji boot QEMU, artifact `sapo-iso-dev`), Storage Manager baca saja (`storage.disks`/`storage.smart` di `sapod`, program eksternal hanya lewat `runTool` di `internal/agent/tool.go`).
 Berikutnya:
-1. Storage Manager versi baca saja (daftar disk + SMART) sebagai operasi `sapod` baru.
-2. HTTPS lokal, pemulihan akses 2FA, repo APT bertanda tangan.
+1. HTTPS lokal, pemulihan akses 2FA, repo APT bertanda tangan.
