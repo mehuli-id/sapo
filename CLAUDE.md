@@ -23,7 +23,7 @@ Sapo by Mehuli adalah sistem operasi NAS open source (GPL-3.0) ala Synology DSM 
 ## Perintah
 ```bash
 make build      # sapod, sapo-api, panel
-make dev        # mode pengembangan; panel di http://localhost:5173
+make dev        # mode pengembangan (tanpa HTTPS); panel di http://localhost:5173
 make check      # gofmt + vet + typecheck + test (wajib sebelum commit)
 make deb        # paket .deb ke dist/ (ARCH=amd64|arm64)
 make iso        # ISO live dev ke dist/ (Debian + live-build, memakai sudo)
@@ -36,6 +36,6 @@ go test -race ./...
 - `git commit -s` (DCO). Pesan: kalimat perintah singkat, Bahasa Indonesia.
 
 ## Status & langkah berikutnya (per 23 Okt 2026)
-Sudah: kerangka, login + wizard setup awal + 2FA, paket `.deb`, tiga ronde review keamanan (`docs/security/2026-10-23-review.md`), repo publik `mehuli-id/sapo`, ISO live dev (`packaging/iso/`, workflow **ISO dev**: build + uji boot QEMU, artifact `sapo-iso-dev`), Storage Manager baca saja (`storage.disks`/`storage.smart` di `sapod`, program eksternal hanya lewat `runTool` di `internal/agent/tool.go`).
+Sudah: kerangka, login + wizard setup awal + 2FA, paket `.deb`, tiga ronde review keamanan (`docs/security/2026-10-23-review.md`), repo publik `mehuli-id/sapo`, ISO live dev (`packaging/iso/`, workflow **ISO dev**: build + uji boot QEMU, artifact `sapo-iso-dev`), Storage Manager baca saja (`storage.disks`/`storage.smart` di `sapod`, program eksternal hanya lewat `runTool` di `internal/agent/tool.go`), HTTPS wajib di LAN (ADR 0004: sertifikat self-signed, HTTP hanya halaman petunjuk, sidik jari di layar konsol lewat `sapod`).
 Berikutnya:
-1. HTTPS lokal, pemulihan akses 2FA, repo APT bertanda tangan.
+1. Pemulihan akses 2FA, repo APT bertanda tangan.
