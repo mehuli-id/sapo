@@ -59,10 +59,11 @@ const isMac = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform
         {{ t("shell.devBanner") }}
       </p>
 
-      <!-- Ikon desktop -->
+      <!-- Ikon desktop. Tinggi baris harus memuat label dua baris (misalnya
+           "Storage Manager"): padding 16 + ikon 48 + jarak 6 + teks 2×15 = 100px. -->
       <nav
         class="absolute inset-y-0 left-0 grid content-start gap-1 p-3"
-        style="grid-template-rows: repeat(auto-fill, 96px); grid-auto-flow: column"
+        style="grid-template-rows: repeat(auto-fill, 108px); grid-auto-flow: column"
         :aria-label="t('shell.allApps')"
       >
         <button
