@@ -16,9 +16,22 @@ import (
 	"github.com/mehuli-id/sapo/internal/proto"
 )
 
+// sockPath memberi path socket di direktori sementara yang pendek.
+// t.TempDir() memuat nama test sehingga di macOS (TMPDIR panjang) bisa
+// melewati batas sun_path 104 byte dan bind gagal dengan EINVAL.
+func sockPath(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "sapo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return filepath.Join(dir, "sapod.sock")
+}
+
 func startServer(t *testing.T, reg *Registry) *Client {
 	t.Helper()
-	sock := filepath.Join(t.TempDir(), "sapod.sock")
+	sock := sockPath(t)
 	ln, err := Listen(sock, "")
 	if err != nil {
 		t.Fatal(err)
@@ -189,7 +202,7 @@ func TestListenRejectsWritableDir(t *testing.T) {
 func TestConnectionFloodDoesNotStopServer(t *testing.T) {
 	reg := NewRegistry()
 	reg.Register("test.ping", func(context.Context, json.RawMessage) (any, error) { return "pong", nil })
-	sock := filepath.Join(t.TempDir(), "sapod.sock")
+	sock := sockPath(t)
 	ln, err := Listen(sock, "")
 	if err != nil {
 		t.Fatal(err)
