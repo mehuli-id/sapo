@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"log/slog"
@@ -31,6 +32,7 @@ func main() {
 	brandingFile := flag.String("branding", "", "timpa api.branding_file (untuk pengembangan)")
 	wizardsDir := flag.String("wizards", "", "timpa api.wizards_dir (untuk pengembangan)")
 	dataDir := flag.String("data", "", "timpa api.data_dir (untuk pengembangan)")
+	noTLS := flag.Bool("no-tls", false, "matikan HTTPS; semua lewat api.listen (hanya untuk pengembangan)")
 	flag.Parse()
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -64,43 +66,89 @@ func main() {
 	}
 	defer auditLog.Close()
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	var certs *certManager
+	var httpsInfo *api.HTTPSInfo
+	if cfg.API.TLS.Enabled && !*noTLS {
+		certs, err = newCertManager(cfg, log)
+		if err != nil {
+			log.Error("sertifikat HTTPS", "err", err)
+			os.Exit(1)
+		}
+		go certs.renewLoop(ctx)
+		httpsInfo = &api.HTTPSInfo{Port: certs.port, Fingerprint: certs.fingerprint}
+	}
+
 	handler, err := api.New(api.Options{
 		Config: cfg,
 		Agent:  &agent.Client{Socket: cfg.Agent.Socket, Timeout: 30 * time.Second},
 		Store:  store,
 		Audit:  auditLog,
 		Log:    log,
+		HTTPS:  httpsInfo,
 	})
 	if err != nil {
 		log.Error("menyiapkan API", "err", err)
 		os.Exit(1)
 	}
-	httpSrv := &http.Server{
-		Addr:              cfg.API.Listen,
-		Handler:           handler,
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       60 * time.Second,
-		WriteTimeout:      60 * time.Second,
-		IdleTimeout:       120 * time.Second,
-		MaxHeaderBytes:    64 << 10,
+	newServer := func(addr string) *http.Server {
+		return &http.Server{
+			Addr:              addr,
+			Handler:           handler,
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       60 * time.Second,
+			WriteTimeout:      60 * time.Second,
+			IdleTimeout:       120 * time.Second,
+			MaxHeaderBytes:    64 << 10,
+		}
 	}
+	servers := []*http.Server{newServer(cfg.API.Listen)}
+	if certs != nil {
+		srv := newServer(cfg.API.TLS.Listen)
+		srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: certs.get}
+		servers = append(servers, srv)
+	}
+	writeConsoleIssue(cfg, certs, log)
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		_ = httpSrv.Shutdown(shutdownCtx)
+		for _, srv := range servers {
+			_ = srv.Shutdown(shutdownCtx)
+		}
 	}()
 
 	if store.SetupRequired() {
 		log.Warn("setup awal belum dilakukan: buka panel dari jaringan lokal untuk membuat akun administrator")
 	}
-	log.Info("sapo-api siap", "versi", version, "alamat", cfg.API.Listen, "jaringan_diizinkan", cfg.API.AllowedNetworks)
-	if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Error("server berhenti", "err", err)
-		os.Exit(1)
+	if certs != nil {
+		log.Info("sapo-api siap", "versi", version, "https", cfg.API.TLS.Listen, "http_petunjuk", cfg.API.Listen,
+			"sidik_jari_sha256", certs.fingerprint(), "jaringan_diizinkan", cfg.API.AllowedNetworks)
+	} else {
+		log.Warn("HTTPS mati: panel dan password lewat HTTP tanpa enkripsi (hanya untuk pengembangan)")
+		log.Info("sapo-api siap", "versi", version, "alamat", cfg.API.Listen, "jaringan_diizinkan", cfg.API.AllowedNetworks)
+	}
+
+	errc := make(chan error, len(servers))
+	for _, srv := range servers {
+		go func(srv *http.Server) {
+			var err error
+			if srv.TLSConfig != nil {
+				err = srv.ListenAndServeTLS("", "")
+			} else {
+				err = srv.ListenAndServe()
+			}
+			errc <- err
+		}(srv)
+	}
+	for range servers {
+		if err := <-errc; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error("server berhenti", "err", err)
+			os.Exit(1)
+		}
 	}
 	log.Info("sapo-api berhenti")
 }

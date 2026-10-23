@@ -12,7 +12,7 @@ deploy/dev/create-vm.sh run      # jalankan VM (keluar: Ctrl+A lalu X)
 ssh -p 2222 sapo@localhost       # masuk ke VM
 ```
 
-Panel di dalam VM diteruskan ke `http://localhost:5000` di mesin Anda.
+Panel di dalam VM diteruskan ke `https://localhost:5001` di mesin Anda. `http://localhost:5000` menampilkan petunjuk HTTPS dan sidik jari sertifikat.
 
 Jumlah dan ukuran disk diatur lewat variabel lingkungan, misalnya `DATA_DISKS=4 DATA_DISK_SIZE=16G deploy/dev/create-vm.sh`. Semua variabel ada di bagian atas skrip.
 

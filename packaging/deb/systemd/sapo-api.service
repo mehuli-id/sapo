@@ -13,6 +13,10 @@ Restart=on-failure
 RestartSec=2s
 StateDirectory=sapo
 StateDirectoryMode=0750
+# Alamat panel dan sidik jari sertifikat untuk layar login konsol
+# (/etc/issue.d/sapo.issue menautkan ke /run/sapo-api/console.issue).
+RuntimeDirectory=sapo-api
+RuntimeDirectoryMode=0755
 # Koneksi ke socket sapod tidak butuh izin tulis pada sistem file, jadi
 # /run/sapo tidak perlu (dan tidak boleh wajib) ada saat layanan dimulai.
 #

@@ -178,6 +178,16 @@
     "submitting": "Checking…",
     "back": "Back"
   },
+  "https": {
+    "title": "The panel uses a secure connection",
+    "intro": "The Sapo panel only opens over HTTPS so your password and data cannot be intercepted on the network.",
+    "step1": "Click the button below. Your browser will show a certificate warning because this certificate was created by the NAS itself, not by a certificate authority.",
+    "step2": "Open the certificate details in that warning and make sure its SHA-256 fingerprint matches the one below (also shown on the NAS screen).",
+    "step3": "If it matches, proceed to the site. This warning appears only once for this browser.",
+    "fingerprint": "Certificate fingerprint (SHA-256)",
+    "open": "Open secure panel",
+    "why": "If the fingerprint is different, do not proceed: another device may be impersonating your NAS."
+  },
   "errors": {
     "bad_credentials": "Wrong username or password.",
     "totp_invalid": "Wrong or already used verification code.",
@@ -195,6 +205,7 @@
     "locked_need_code": "This account is protected after many failed attempts. Enter the code from your authenticator app to sign in.",
     "busy": "The server is busy. Try again shortly.",
     "unavailable": "A required system tool is not available.",
-    "not_found": "The requested item was not found."
+    "not_found": "The requested item was not found.",
+    "https_required": "Use the HTTPS address to open the panel."
   }
 }

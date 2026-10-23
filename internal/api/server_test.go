@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -605,5 +606,100 @@ func TestStorageEndpoints(t *testing.T) {
 		if rec.Code != status || errCode(rec) != code {
 			t.Errorf("%s: dapat %d %s, harus %d", code, rec.Code, errCode(rec), status)
 		}
+	}
+}
+
+func viaTLS() reqOpt { return func(r *http.Request) { r.TLS = &tls.ConnectionState{} } }
+
+func newHTTPSHarness(t *testing.T, agent AgentCaller) *harness {
+	h := newHarness(t, agent)
+	h.s.https = &HTTPSInfo{Port: "5001", Fingerprint: func() string { return "AB:CD" }}
+	return h
+}
+
+func TestHTTPSRequiredBlocksAPIOverHTTP(t *testing.T) {
+	h := newHTTPSHarness(t, &fakeAgent{results: map[string]any{proto.OpSystemInfo: proto.SystemInfo{}}})
+
+	// Lewat HTTP hanya panel dan data tanpa rahasia untuk halaman petunjuk.
+	if rec := h.do(http.MethodGet, "/", nil); rec.Code != http.StatusOK {
+		t.Fatalf("panel lewat HTTP: %d", rec.Code)
+	}
+	rec := h.do(http.MethodGet, "/api/v1/ui/config", nil)
+	var cfg struct {
+		HTTPS struct {
+			Port        string `json:"port"`
+			Fingerprint string `json:"fingerprint_sha256"`
+		} `json:"https"`
+	}
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &cfg) != nil || cfg.HTTPS.Port != "5001" || cfg.HTTPS.Fingerprint != "AB:CD" {
+		t.Fatalf("ui/config lewat HTTP: %d %s", rec.Code, rec.Body)
+	}
+	if rec := h.do(http.MethodGet, "/api/v1/health", nil); rec.Code != http.StatusOK {
+		t.Fatalf("health lewat HTTP: %d", rec.Code)
+	}
+
+	// Apa pun yang membawa password, sesi, atau data sistem ditolak.
+	for _, c := range []struct{ method, path string }{
+		{http.MethodGet, "/api/v1/auth/status"},
+		{http.MethodPost, "/api/v1/auth/login"},
+		{http.MethodPost, "/api/v1/setup/totp"},
+		{http.MethodPost, "/api/v1/setup"},
+		{http.MethodGet, "/api/v1/system/info"},
+		{http.MethodGet, "/api/v1/wizards/setup"},
+		{http.MethodGet, "/api/v1/tidak-ada"},
+	} {
+		rec := h.do(c.method, c.path, map[string]string{"username": "arthur", "password": "x"})
+		if rec.Code != http.StatusForbidden || errCode(rec) != "https_required" {
+			t.Errorf("%s %s lewat HTTP: %d %s, harus 403 https_required", c.method, c.path, rec.Code, errCode(rec))
+		}
+	}
+}
+
+func TestHTTPSServesEverythingWithoutHSTS(t *testing.T) {
+	h := newHTTPSHarness(t, &fakeAgent{results: map[string]any{proto.OpSystemInfo: proto.SystemInfo{Hostname: "sapo-lab"}}})
+	rec := h.do(http.MethodGet, "/api/v1/auth/status", nil, viaTLS())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("auth/status lewat HTTPS: %d", rec.Code)
+	}
+	// Sertifikat self-signed: HSTS akan mengunci admin bila sertifikat berganti.
+	if v := rec.Header().Get("Strict-Transport-Security"); v != "" {
+		t.Fatalf("HSTS tidak boleh dikirim dengan sertifikat self-signed: %q", v)
+	}
+
+	// Setup awal lewat HTTPS berjalan, dan cookie sesi bertanda Secure.
+	tr := h.do(http.MethodPost, "/api/v1/setup/totp", map[string]string{"username": "arthur"}, viaTLS())
+	var resp setupTOTPResponse
+	_ = json.Unmarshal(tr.Body.Bytes(), &resp)
+	code, _ := auth.TOTPCodeAt(resp.Secret, h.now)
+	rec = h.do(http.MethodPost, "/api/v1/setup", setupRequest{
+		Language: "id", Username: "arthur", Password: "lumbung padi di bukit", PasswordConfirm: "lumbung padi di bukit", TOTPCode: code, TOTPToken: resp.Token,
+	}, viaTLS())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("setup lewat HTTPS: %d %s", rec.Code, rec.Body)
+	}
+	var secure bool
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == SessionCookie {
+			secure = c.Secure
+		}
+	}
+	if !secure {
+		t.Fatal("cookie sesi lewat HTTPS harus Secure")
+	}
+	if rec := h.do(http.MethodGet, "/api/v1/system/info", nil, viaTLS()); rec.Code != http.StatusOK {
+		t.Fatalf("system/info lewat HTTPS: %d", rec.Code)
+	}
+}
+
+func TestHTTPOnlyModeUnchanged(t *testing.T) {
+	// HTTPS dimatikan (misalnya make dev): HTTP melayani semuanya seperti dulu.
+	h := newHarness(t, &fakeAgent{})
+	if rec := h.do(http.MethodGet, "/api/v1/auth/status", nil); rec.Code != http.StatusOK {
+		t.Fatalf("auth/status: %d", rec.Code)
+	}
+	var cfg map[string]any
+	_ = json.Unmarshal(h.do(http.MethodGet, "/api/v1/ui/config", nil).Body.Bytes(), &cfg)
+	if _, ok := cfg["https"]; ok {
+		t.Fatal("ui/config tidak boleh memuat info HTTPS bila HTTPS mati")
 	}
 }
