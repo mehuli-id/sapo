@@ -5,3 +5,4 @@
 *.out
 .DS_Store
 /deploy/dev/.vm/
+/.vscode/settings.json
