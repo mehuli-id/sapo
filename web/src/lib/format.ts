@@ -1,11 +1,13 @@
 // Format angka mengikuti bahasa aktif (Intl), tanpa teks yang ditulis di kode.
 
-export function formatBytes(bytes: number, locale: string): string {
+// base 1024 untuk memori dan file; 1000 untuk kapasitas disk, agar sama
+// dengan label pabrik (disk "4 TB" = 4.000.787.030.016 byte).
+export function formatBytes(bytes: number, locale: string, base: 1000 | 1024 = 1024): string {
   const units = ["byte", "kilobyte", "megabyte", "gigabyte", "terabyte", "petabyte"] as const
   let value = bytes
   let i = 0
-  while (value >= 1024 && i < units.length - 1) {
-    value /= 1024
+  while (value >= base && i < units.length - 1) {
+    value /= base
     i++
   }
   return new Intl.NumberFormat(locale, {

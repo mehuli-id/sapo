@@ -1,0 +1,13 @@
+{"blockdevices":[
+  {"name":"sdb","path":"/dev/sdb","type":"disk","size":4000787030016,"model":"WDC WD40EFRX-68N32N0","vendor":"ATA     ","serial":"WD-WCC7K1234567","wwn":"0x50014ee2b5a1c2d3","tran":"sata","rota":true,"rm":false,"fstype":null,"label":null,"mountpoints":[null],
+   "children":[{"name":"sdb1","path":"/dev/sdb1","type":"part","size":4000785104896,"model":null,"vendor":null,"serial":null,"wwn":"0x50014ee2b5a1c2d3","tran":null,"rota":true,"rm":false,"fstype":"linux_raid_member","label":"sapo:0","mountpoints":[null],
+     "children":[{"name":"md0","path":"/dev/md0","type":"raid1","size":4000650887168,"model":null,"vendor":null,"serial":null,"wwn":null,"tran":null,"rota":true,"rm":false,"fstype":"ext4","label":"data","mountpoints":["/srv/data"]}]}]},
+  {"name":"sda","path":"/dev/sda","type":"disk","size":256060514304,"model":"Samsung SSD 870 EVO 250GB","vendor":"ATA     ","serial":"S6PENL0T123456X","wwn":"0x5002538f4123abcd","tran":"sata","rota":false,"rm":false,"fstype":null,"label":null,"mountpoints":[null],
+   "children":[{"name":"sda1","path":"/dev/sda1","type":"part","size":536870912,"model":null,"vendor":null,"serial":null,"wwn":null,"tran":null,"rota":false,"rm":false,"fstype":"vfat","label":null,"mountpoints":["/boot/efi"]},
+               {"name":"sda2","path":"/dev/sda2","type":"part","size":255522586624,"model":null,"vendor":null,"serial":null,"wwn":null,"tran":null,"rota":false,"rm":false,"fstype":"ext4","label":null,"mountpoints":["/"]}]},
+  {"name":"nvme10n1","path":"/dev/nvme10n1","type":"disk","size":1000204886016,"model":"WD Blue SN580 1TB","vendor":null,"serial":"23310R801234","wwn":"eui.e8238fa6bf530001001b448b4c1a2b3c","tran":"nvme","rota":false,"rm":false,"fstype":null,"label":null,"mountpoints":[null]},
+  {"name":"nvme2n1","path":"/dev/nvme2n1","type":"disk","size":500107862016,"model":"KINGSTON SNV2S500G","vendor":null,"serial":"50026B7685ABCDEF","wwn":"eui.0026b7685abcdef5","tran":"nvme","rota":false,"rm":false,"fstype":null,"label":null,"mountpoints":[null]},
+  {"name":"zram0","path":"/dev/zram0","type":"disk","size":2147483648,"model":null,"vendor":null,"serial":null,"wwn":null,"tran":null,"rota":false,"rm":false,"fstype":"swap","label":null,"mountpoints":["[SWAP]"]},
+  {"name":"loop0","path":"/dev/loop0","type":"loop","size":67108864,"model":null,"vendor":null,"serial":null,"wwn":null,"tran":null,"rota":false,"rm":false,"fstype":"squashfs","label":null,"mountpoints":["/run/live/rootfs/filesystem.squashfs"]},
+  {"name":"sr0","path":"/dev/sr0","type":"rom","size":350224384,"model":"QEMU DVD-ROM","vendor":"QEMU    ","serial":"QM00003","wwn":null,"tran":"ata","rota":true,"rm":true,"fstype":"iso9660","label":"SAPO_DEV","mountpoints":["/run/live/medium"]}
+]}

@@ -147,6 +147,8 @@ func New(o Options) (*Server, error) {
 	// Butuh login.
 	s.mux.Handle("GET /api/v1/system/info", s.requireAuth(s.proxyRead(proto.OpSystemInfo)))
 	s.mux.Handle("GET /api/v1/features", s.requireAuth(s.proxyRead(proto.OpFeaturesList)))
+	s.mux.Handle("GET /api/v1/storage/disks", s.requireAuth(s.proxyRead(proto.OpStorageDisks)))
+	s.mux.Handle("GET /api/v1/storage/disks/{name}/smart", s.requireAuth(http.HandlerFunc(s.handleDiskSMART)))
 
 	s.mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "endpoint tidak ada")
@@ -351,12 +353,32 @@ func (s *Server) proxyRead(op string) http.HandlerFunc {
 	}
 }
 
+// handleDiskSMART membaca SMART satu disk. Nama disk diperiksa lagi oleh
+// sapod (harus ada di daftar disk); di sini hanya diteruskan sebagai data.
+func (s *Server) handleDiskSMART(w http.ResponseWriter, r *http.Request) {
+	params := proto.SMARTParams{Device: r.PathValue("name")}
+	var out json.RawMessage
+	if err := s.agent.Call(r.Context(), proto.OpStorageSMART, params, &out); err != nil {
+		s.agentError(w, proto.OpStorageSMART, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(out)
+}
+
 func (s *Server) agentError(w http.ResponseWriter, op string, err error) {
 	var pe *proto.Error
 	if errors.As(err, &pe) {
 		status := http.StatusInternalServerError
-		if pe.Code == proto.ErrInvalidParams {
+		switch pe.Code {
+		case proto.ErrInvalidParams:
 			status = http.StatusBadRequest
+		case proto.ErrNotFound:
+			status = http.StatusNotFound
+		case proto.ErrUnavailable:
+			status = http.StatusServiceUnavailable
 		}
 		writeError(w, status, pe.Code, pe.Message)
 		return

@@ -24,6 +24,51 @@ export interface Feature {
   removable: boolean
 }
 
+export interface Partition {
+  name: string
+  size_bytes: number
+  type: string
+  fstype: string
+  label: string
+  mountpoints: string[]
+}
+
+export interface Disk {
+  name: string
+  path: string
+  size_bytes: number
+  model: string
+  vendor: string
+  serial: string
+  wwn: string
+  transport: string
+  rotational: boolean
+  removable: boolean
+  partitions: Partition[]
+}
+
+export type SmartStatus = "passed" | "failed" | "standby" | "unsupported" | "unavailable"
+
+export interface SmartAttr {
+  id?: number
+  name: string
+  value?: number
+  worst?: number
+  threshold?: number
+  raw: string
+  failing: boolean
+}
+
+export interface Smart {
+  device: string
+  status: SmartStatus
+  message?: string
+  protocol?: string
+  temperature_c?: number
+  power_on_hours?: number
+  attributes: SmartAttr[]
+}
+
 export interface AuthPolicy {
   password_min_length: number
   username_pattern: string
@@ -142,6 +187,8 @@ const post = <T>(path: string, body: unknown = {}) => request<T>("POST", path, b
 export const api = {
   systemInfo: () => get<SystemInfo>("/api/v1/system/info"),
   features: () => get<Feature[]>("/api/v1/features"),
+  disks: () => get<Disk[]>("/api/v1/storage/disks"),
+  diskSmart: (name: string) => get<Smart>(`/api/v1/storage/disks/${encodeURIComponent(name)}/smart`),
   uiConfig: () => get<UIConfig>("/api/v1/ui/config"),
   authStatus: () => get<AuthStatus>("/api/v1/auth/status"),
   wizard: (id: string) => get<Wizard>(`/api/v1/wizards/${encodeURIComponent(id)}`),

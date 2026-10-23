@@ -86,3 +86,20 @@ func TestLayeredConfig(t *testing.T) {
 		t.Fatal("nilai yang tidak disebut harus tetap default")
 	}
 }
+
+func TestInvalidStorageToolsRejected(t *testing.T) {
+	for name, body := range map[string]string{
+		"path-relatif": "agent:\n  storage:\n    smartctl: smartctl\n",
+		"timeout-lama": "agent:\n  storage:\n    command_timeout_seconds: 60\n",
+		"timeout-nol":  "agent:\n  storage:\n    command_timeout_seconds: 0\n",
+		"pola-rusak":   "agent:\n  storage:\n    ignore_devices: [\"[\"]\n",
+	} {
+		p := filepath.Join(t.TempDir(), "sapo.yaml")
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(p); err == nil {
+			t.Errorf("%s: harus ditolak", name)
+		}
+	}
+}

@@ -1,7 +1,7 @@
 [
   { "id": "system-info", "icon": "gauge", "component": "SystemInfo", "status": "ready", "window": { "width": 600, "height": 520 }, "keywords": ["cpu", "ram", "memori", "memory", "uptime", "hostname"] },
   { "id": "features", "icon": "package", "component": "Features", "status": "ready", "window": { "width": 680, "height": 560 }, "keywords": ["paket", "package", "debian"] },
-  { "id": "storage", "icon": "hard-drive", "component": "Planned", "status": "planned", "phase": 1, "keywords": ["disk", "raid", "pool", "zfs"] },
+  { "id": "storage", "icon": "hard-drive", "component": "Storage", "status": "ready", "window": { "width": 720, "height": 620 }, "keywords": ["disk", "raid", "pool", "zfs", "smart", "hdd", "ssd", "nvme"] },
   { "id": "file-station", "icon": "folder-open", "component": "Planned", "status": "planned", "phase": 1, "keywords": ["file", "folder"] },
   { "id": "control-panel", "icon": "settings", "component": "Planned", "status": "planned", "phase": 1, "keywords": ["jaringan", "network", "user", "smb"] },
   { "id": "sapo-drive", "icon": "cloud", "component": "Planned", "status": "planned", "phase": 2, "keywords": ["drive", "sync", "share"] },

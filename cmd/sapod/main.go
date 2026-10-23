@@ -43,6 +43,14 @@ func main() {
 	reg := agent.NewRegistry()
 	reg.Register(proto.OpSystemInfo, agent.SystemInfoOp(agent.DefaultProcFS, version))
 	reg.Register(proto.OpFeaturesList, agent.FeaturesListOp(cfg.Agent.FeaturesDir))
+	storage := agent.StorageTools{
+		Lsblk:         cfg.Agent.Storage.Lsblk,
+		Smartctl:      cfg.Agent.Storage.Smartctl,
+		Timeout:       time.Duration(cfg.Agent.Storage.CommandTimeoutSeconds) * time.Second,
+		IgnoreDevices: cfg.Agent.Storage.IgnoreDevices,
+	}
+	reg.Register(proto.OpStorageDisks, agent.StorageDisksOp(storage))
+	reg.Register(proto.OpStorageSMART, agent.StorageSMARTOp(storage))
 
 	ln, err := agent.Listen(cfg.Agent.Socket, cfg.Agent.SocketGroup)
 	if err != nil {

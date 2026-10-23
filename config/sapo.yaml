@@ -9,6 +9,15 @@ agent:
   features_dir: /usr/share/sapo/features
   # Batas koneksi bersamaan ke socket sapod.
   max_connections: 32
+  # Storage Manager (baca saja): daftar disk dan SMART.
+  storage:
+    # Program yang dijalankan sapod, dengan path absolut (tidak lewat PATH).
+    lsblk: /usr/bin/lsblk
+    smartctl: /usr/sbin/smartctl
+    # Batas waktu satu pemanggilan program (detik, maks 25).
+    command_timeout_seconds: 20
+    # Perangkat yang bukan disk sungguhan dan tidak ditampilkan (pola glob).
+    ignore_devices: ["zram*", "ram*", "loop*"]
 
 api:
   # Port panel. Siapa yang boleh membuka panel diatur oleh allowed_networks.
