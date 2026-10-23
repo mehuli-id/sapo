@@ -47,6 +47,14 @@ type Storage struct {
 	CommandTimeoutSeconds int `yaml:"command_timeout_seconds"`
 	// Pola nama perangkat (glob) yang tidak ditampilkan sebagai disk.
 	IgnoreDevices []string `yaml:"ignore_devices"`
+	// Program yang boleh berjalan bersamaan; permintaan lain menunggu.
+	MaxConcurrentCommands int `yaml:"max_concurrent_commands"`
+	// Lama hasil SMART (dan daftar disk untuk validasi) dipakai ulang.
+	SMARTCacheSeconds int `yaml:"smart_cache_seconds"`
+	// Atribut ATA (ID) dan kolom log kesehatan NVMe yang memicu status
+	// peringatan bila nilai mentahnya bukan nol.
+	WarnATARawIDs  []int    `yaml:"warn_ata_raw_ids"`
+	WarnNVMeFields []string `yaml:"warn_nvme_fields"`
 }
 
 // API mengatur sapo-api.
@@ -116,6 +124,10 @@ func Default() Config {
 				Smartctl:              "/usr/sbin/smartctl",
 				CommandTimeoutSeconds: 20,
 				IgnoreDevices:         []string{"zram*", "ram*", "loop*"},
+				MaxConcurrentCommands: 2,
+				SMARTCacheSeconds:     60,
+				WarnATARawIDs:         []int{5, 187, 197, 198},
+				WarnNVMeFields:        []string{"media_errors", "critical_warning"},
 			},
 		},
 		API: API{
@@ -197,6 +209,10 @@ func (c Config) Validate() error {
 	case c.Agent.Storage.CommandTimeoutSeconds < 1 || c.Agent.Storage.CommandTimeoutSeconds > 25:
 		// sapo-api menunggu sapod paling lama 30 detik.
 		return errors.New("agent.storage.command_timeout_seconds harus 1 sampai 25")
+	case c.Agent.Storage.MaxConcurrentCommands < 1 || c.Agent.Storage.MaxConcurrentCommands > 16:
+		return errors.New("agent.storage.max_concurrent_commands harus 1 sampai 16")
+	case c.Agent.Storage.SMARTCacheSeconds < 0:
+		return errors.New("agent.storage.smart_cache_seconds tidak boleh negatif")
 	case c.API.Listen == "":
 		return errors.New("api.listen wajib diisi")
 	case c.UI.DefaultMode != "desktop" && c.UI.DefaultMode != "ringkas":

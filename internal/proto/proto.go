@@ -45,6 +45,8 @@ const (
 	// ErrUnavailable: alat sistem yang dibutuhkan tidak ada atau tidak bisa
 	// dijalankan (misalnya mode pengembangan di luar Linux).
 	ErrUnavailable = "unavailable"
+	// ErrBusy: sapod sedang mengerjakan terlalu banyak permintaan sejenis.
+	ErrBusy = "busy"
 )
 
 // Nama operasi yang dikenal sapod saat ini.
@@ -126,6 +128,7 @@ type SMARTParams struct {
 const (
 	SMARTPassed      = "passed"      // tes kesehatan keseluruhan lulus
 	SMARTFailed      = "failed"      // disk melaporkan akan rusak: segera ganti
+	SMARTWarning     = "warning"     // tanda awal kerusakan: cadangkan data, rencanakan penggantian
 	SMARTStandby     = "standby"     // disk sedang tidur; tidak dibangunkan untuk dibaca
 	SMARTUnsupported = "unsupported" // disk tidak mendukung SMART (misalnya disk virtual)
 	SMARTUnavailable = "unavailable" // SMART tidak bisa dibaca (izin, alat tidak ada, waktu habis)
@@ -150,5 +153,9 @@ type SMARTAttr struct {
 	Worst     *int   `json:"worst,omitempty"`
 	Threshold *int   `json:"threshold,omitempty"`
 	Raw       string `json:"raw"`
-	Failing   bool   `json:"failing"`
+	// Failing: nilai sudah (atau pernah) melewati ambang batas pabrik.
+	Failing bool `json:"failing"`
+	// Warning: nilai mentah bukan nol pada atribut yang dipantau
+	// (agent.storage.warn_*), misalnya sektor yang dipindahkan.
+	Warning bool `json:"warning"`
 }

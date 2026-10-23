@@ -120,11 +120,13 @@
     "smart": {
       "loading": "Reading SMART…",
       "passed": "Healthy",
+      "warning": "Needs attention",
       "failed": "Failing",
       "standby": "Sleeping",
       "unsupported": "SMART not supported",
       "unavailable": "SMART unreadable",
       "failedHelp": "This disk reports that it is about to fail. Back up the data on it now, then replace the disk.",
+      "warningHelp": "This disk shows early signs of failure, such as bad or reallocated sectors. Data is still readable: back it up now and plan to replace the disk.",
       "standbyHelp": "The disk is in power-saving mode. SMART is not read so the disk is not woken up; try again later.",
       "unsupportedHelp": "This disk does not provide health data (common for virtual disks and some USB adapters).",
       "showDetails": "Show SMART details",
@@ -134,7 +136,8 @@
       "worst": "Worst",
       "threshold": "Threshold",
       "raw": "Raw",
-      "failingNote": "Attributes marked red have crossed the manufacturer's threshold."
+      "failingNote": "Attributes marked red have crossed the manufacturer's threshold.",
+      "warningNote": "Attributes marked yellow have a non-zero value on a monitored damage counter."
     }
   },
   "about": {

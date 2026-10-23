@@ -43,14 +43,19 @@ func main() {
 	reg := agent.NewRegistry()
 	reg.Register(proto.OpSystemInfo, agent.SystemInfoOp(agent.DefaultProcFS, version))
 	reg.Register(proto.OpFeaturesList, agent.FeaturesListOp(cfg.Agent.FeaturesDir))
-	storage := agent.StorageTools{
-		Lsblk:         cfg.Agent.Storage.Lsblk,
-		Smartctl:      cfg.Agent.Storage.Smartctl,
-		Timeout:       time.Duration(cfg.Agent.Storage.CommandTimeoutSeconds) * time.Second,
-		IgnoreDevices: cfg.Agent.Storage.IgnoreDevices,
-	}
-	reg.Register(proto.OpStorageDisks, agent.StorageDisksOp(storage))
-	reg.Register(proto.OpStorageSMART, agent.StorageSMARTOp(storage))
+	sc := cfg.Agent.Storage
+	storage := agent.NewStorage(agent.StorageTools{
+		Lsblk:          sc.Lsblk,
+		Smartctl:       sc.Smartctl,
+		Timeout:        time.Duration(sc.CommandTimeoutSeconds) * time.Second,
+		IgnoreDevices:  sc.IgnoreDevices,
+		MaxConcurrent:  sc.MaxConcurrentCommands,
+		CacheFor:       time.Duration(sc.SMARTCacheSeconds) * time.Second,
+		WarnATARawIDs:  sc.WarnATARawIDs,
+		WarnNVMeFields: sc.WarnNVMeFields,
+	})
+	reg.Register(proto.OpStorageDisks, storage.DisksOp())
+	reg.Register(proto.OpStorageSMART, storage.SMARTOp())
 
 	ln, err := agent.Listen(cfg.Agent.Socket, cfg.Agent.SocketGroup)
 	if err != nil {

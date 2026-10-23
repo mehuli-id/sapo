@@ -52,12 +52,15 @@ func storageTools(t *testing.T, smartFixture string, smartExit int) (StorageTool
 	dir := t.TempDir()
 	lsblk := fakeTool(t, dir, "lsblk", "lsblk.json", 0)
 	smartctl := fakeTool(t, dir, "smartctl", smartFixture, smartExit)
-	return StorageTools{Lsblk: lsblk, Smartctl: smartctl, Timeout: 5 * time.Second, IgnoreDevices: []string{"zram*", "ram*", "loop*"}}, lsblk, smartctl
+	return StorageTools{
+		Lsblk: lsblk, Smartctl: smartctl, Timeout: 5 * time.Second, IgnoreDevices: []string{"zram*", "ram*", "loop*"},
+		MaxConcurrent: 2, WarnATARawIDs: []int{5, 187, 197, 198}, WarnNVMeFields: []string{"media_errors", "critical_warning"},
+	}, lsblk, smartctl
 }
 
 func TestStorageDisksListsOnlyRealDisks(t *testing.T) {
 	tools, lsblk, _ := storageTools(t, "", 0)
-	res, err := StorageDisksOp(tools)(context.Background(), nil)
+	res, err := NewStorage(tools).DisksOp()(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +117,7 @@ func TestParseLsblkSkipsUnsafeNames(t *testing.T) {
 
 func smartCall(t *testing.T, tools StorageTools, params string) (proto.SMART, error) {
 	t.Helper()
-	res, err := StorageSMARTOp(tools)(context.Background(), json.RawMessage(params))
+	res, err := NewStorage(tools).SMARTOp()(context.Background(), json.RawMessage(params))
 	if err != nil {
 		return proto.SMART{}, err
 	}
@@ -154,6 +157,11 @@ func TestStorageSMARTStatuses(t *testing.T) {
 		status  string
 	}{
 		{"smart-ata-failing.json", 24, "sdb", proto.SMARTFailed},
+		// Firmware masih PASSED, tetapi atribut prefail melewati ambang batas.
+		{"smart-ata-prefail.json", 16, "sdb", proto.SMARTWarning},
+		// PASSED tanpa bit apa pun, tetapi sektor dipindahkan (atribut 5) > 0.
+		{"smart-ata-reallocated.json", 0, "sdb", proto.SMARTWarning},
+		{"smart-nvme-media-errors.json", 0, "nvme2n1", proto.SMARTWarning},
 		{"smart-standby.json", 2, "sdb", proto.SMARTStandby},
 		{"smart-permission.json", 2, "sdb", proto.SMARTUnavailable},
 		{"smart-virtio.json", 1, "sda", proto.SMARTUnsupported},
@@ -168,7 +176,7 @@ func TestStorageSMARTStatuses(t *testing.T) {
 		if s.Status != c.status {
 			t.Errorf("%s: status = %q, harus %q (%s)", c.fixture, s.Status, c.status, s.Message)
 		}
-		if c.status != proto.SMARTPassed && s.Message == "" {
+		if c.status != proto.SMARTPassed && c.status != proto.SMARTWarning && s.Message == "" {
 			t.Errorf("%s: status %s harus disertai pesan", c.fixture, s.Status)
 		}
 	}
@@ -223,7 +231,7 @@ func TestStorageSMARTRejectsBadDevice(t *testing.T) {
 
 func TestStorageUnavailableWithoutLsblk(t *testing.T) {
 	tools := StorageTools{Lsblk: filepath.Join(t.TempDir(), "tidak-ada"), Smartctl: "/bin/false", Timeout: time.Second}
-	_, err := StorageDisksOp(tools)(context.Background(), nil)
+	_, err := NewStorage(tools).DisksOp()(context.Background(), nil)
 	var oe *OpError
 	if !errors.As(err, &oe) || oe.Code != proto.ErrUnavailable {
 		t.Fatalf("harus unavailable, dapat %v", err)
@@ -282,4 +290,56 @@ func contains(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+func TestStorageSMARTCacheAndConcurrency(t *testing.T) {
+	dir := t.TempDir()
+	lsblk := fakeTool(t, dir, "lsblk", "lsblk.json", 0)
+	// smartctl palsu yang lambat dan menghitung berapa kali dijalankan.
+	count := filepath.Join(dir, "count")
+	fixture, _ := filepath.Abs(filepath.Join("testdata", "storage", "smart-ata-passed.json"))
+	smartctl := filepath.Join(dir, "smartctl")
+	script := "#!/bin/sh\necho x >> '" + count + "'\nsleep 0.3\ncat '" + fixture + "'\n"
+	if err := os.WriteFile(smartctl, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	st := NewStorage(StorageTools{Lsblk: lsblk, Smartctl: smartctl, Timeout: 5 * time.Second, MaxConcurrent: 1, CacheFor: time.Minute})
+	op := st.SMARTOp()
+
+	// Sepuluh permintaan bersamaan untuk disk yang sama = satu smartctl.
+	errs := make(chan error, 10)
+	for i := 0; i < 10; i++ {
+		go func() {
+			res, err := op(context.Background(), json.RawMessage(`{"device":"sdb"}`))
+			if err == nil && res.(proto.SMART).Status != proto.SMARTPassed {
+				err = errors.New("status salah")
+			}
+			errs <- err
+		}()
+	}
+	for i := 0; i < 10; i++ {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if b, _ := os.ReadFile(count); strings.Count(string(b), "x") != 1 {
+		t.Fatalf("smartctl dijalankan %d kali, harus 1", strings.Count(string(b), "x"))
+	}
+
+	// Permintaan yang menunggu giliran terlalu lama dijawab sibuk, bukan menggantung.
+	st.sem <- struct{}{}
+	defer func() { <-st.sem }()
+	_, err := storageWithTimeout(st, 200*time.Millisecond).DisksOp()(context.Background(), nil)
+	var oe *OpError
+	if !errors.As(err, &oe) || oe.Code != proto.ErrBusy {
+		t.Fatalf("harus busy, dapat %v", err)
+	}
+}
+
+// storageWithTimeout membuat salinan st dengan batas waktu lain tetapi semaphore
+// yang sama.
+func storageWithTimeout(st *Storage, timeout time.Duration) *Storage {
+	t := st.t
+	t.Timeout = timeout
+	return &Storage{t: t, sem: st.sem, smart: map[string]*smartEntry{}}
 }
