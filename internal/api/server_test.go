@@ -598,6 +598,7 @@ func TestStorageEndpoints(t *testing.T) {
 		proto.ErrNotFound:      http.StatusNotFound,
 		proto.ErrInvalidParams: http.StatusBadRequest,
 		proto.ErrUnavailable:   http.StatusServiceUnavailable,
+		proto.ErrBusy:          http.StatusServiceUnavailable,
 	} {
 		agent.errs = map[string]error{proto.OpStorageSMART: &proto.Error{Code: code, Message: "x"}}
 		rec = h.do(http.MethodGet, "/api/v1/storage/disks/sdz/smart", nil)

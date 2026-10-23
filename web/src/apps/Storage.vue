@@ -17,31 +17,42 @@ const loading = ref(false)
 // disk yang lambat. Nilai null = sedang dibaca.
 const smart = reactive<Record<string, Smart | null>>({})
 const expanded = reactive<Record<string, boolean>>({})
+// Nomor muat: jawaban dari muat sebelumnya yang datang terlambat diabaikan.
+let generation = 0
 
 async function load() {
+  if (loading.value) return
   loading.value = true
+  const gen = ++generation
   try {
     const list = await api.disks()
+    if (gen !== generation) return
     disks.value = list
     error.value = null
-    for (const d of list) loadSmart(d.name)
+    for (const d of list) loadSmart(d.name, gen)
   } catch (e) {
     disks.value = null
     if (e instanceof ApiError && e.code === "agent_unavailable") error.value = t("shell.agentDown")
     else if (e instanceof ApiError && e.code === "unavailable") error.value = t("storage.unavailable")
+    else if (e instanceof ApiError && e.code === "busy") error.value = t("errors.busy")
     else error.value = t("common.error")
   } finally {
     loading.value = false
   }
 }
 
-async function loadSmart(name: string) {
+async function loadSmart(name: string, gen: number) {
   smart[name] = null
+  let result: Smart
   try {
-    smart[name] = await api.diskSmart(name)
+    result = await api.diskSmart(name)
   } catch (e) {
-    smart[name] = { device: name, status: "unavailable", message: e instanceof Error ? e.message : "", attributes: [] }
+    result = { device: name, status: "unavailable", message: e instanceof Error ? e.message : "", attributes: [] }
   }
+  if (gen !== generation) return
+  smart[name] = result
+  // Disk bermasalah: tabel atribut langsung terbuka.
+  if (result.status === "failed" || result.status === "warning") expanded[name] = true
 }
 
 onMounted(load)
@@ -53,6 +64,7 @@ function kind(d: Disk) {
 
 const badgeVariant: Record<SmartStatus, "default" | "secondary" | "destructive" | "outline"> = {
   passed: "secondary",
+  warning: "outline",
   failed: "destructive",
   standby: "outline",
   unsupported: "outline",
@@ -61,6 +73,7 @@ const badgeVariant: Record<SmartStatus, "default" | "secondary" | "destructive" 
 
 const statusHelp: Partial<Record<SmartStatus, string>> = {
   failed: "storage.smart.failedHelp",
+  warning: "storage.smart.warningHelp",
   standby: "storage.smart.standbyHelp",
   unsupported: "storage.smart.unsupportedHelp",
 }
@@ -104,8 +117,12 @@ const num = (n: number) => new Intl.NumberFormat(locale.value).format(n)
             </div>
           </div>
           <Skeleton v-if="smart[d.name] === null" class="h-5 w-20 rounded-full" :aria-label="t('storage.smart.loading')" />
-          <Badge v-else-if="smart[d.name]" :variant="badgeVariant[smart[d.name]!.status]">
-            <TriangleAlert v-if="smart[d.name]!.status === 'failed'" />
+          <Badge
+            v-else-if="smart[d.name]"
+            :variant="badgeVariant[smart[d.name]!.status]"
+            :class="smart[d.name]!.status === 'warning' && 'border-amber-500/60 text-amber-700 dark:text-amber-400'"
+          >
+            <TriangleAlert v-if="smart[d.name]!.status === 'failed' || smart[d.name]!.status === 'warning'" />
             {{ t(`storage.smart.${smart[d.name]!.status}`) }}
           </Badge>
         </div>
@@ -125,7 +142,11 @@ const num = (n: number) => new Intl.NumberFormat(locale.value).format(n)
           <p
             v-if="statusHelp[smart[d.name]!.status]"
             class="rounded-lg p-2.5 text-xs"
-            :class="smart[d.name]!.status === 'failed' ? 'border border-destructive/40 bg-destructive/5 font-medium' : 'bg-muted text-muted-foreground'"
+            :class="{
+              'border border-destructive/40 bg-destructive/5 font-medium': smart[d.name]!.status === 'failed',
+              'border border-amber-500/40 bg-amber-500/5 font-medium': smart[d.name]!.status === 'warning',
+              'bg-muted text-muted-foreground': smart[d.name]!.status !== 'failed' && smart[d.name]!.status !== 'warning',
+            }"
           >
             {{ t(statusHelp[smart[d.name]!.status]!) }}
           </p>
@@ -165,7 +186,11 @@ const num = (n: number) => new Intl.NumberFormat(locale.value).format(n)
                   </tr>
                 </thead>
                 <tbody class="divide-y">
-                  <tr v-for="a in smart[d.name]!.attributes" :key="`${a.id ?? ''}-${a.name}`" :class="a.failing && 'bg-destructive/10 font-medium text-destructive'">
+                  <tr
+                    v-for="a in smart[d.name]!.attributes"
+                    :key="`${a.id ?? ''}-${a.name}`"
+                    :class="a.failing ? 'bg-destructive/10 font-medium text-destructive' : a.warning && 'bg-amber-500/10 font-medium text-amber-700 dark:text-amber-400'"
+                  >
                     <td class="px-2.5 py-1.5"><span v-if="a.id" class="text-muted-foreground tabular-nums">{{ a.id }} </span>{{ a.name }}</td>
                     <td class="px-2.5 py-1.5 text-right tabular-nums">{{ a.value ?? "—" }}</td>
                     <td class="px-2.5 py-1.5 text-right tabular-nums">{{ a.worst ?? "—" }}</td>
@@ -176,6 +201,7 @@ const num = (n: number) => new Intl.NumberFormat(locale.value).format(n)
               </table>
             </div>
             <p v-if="smart[d.name]!.attributes.some((a) => a.failing)" class="text-xs text-destructive">{{ t("storage.smart.failingNote") }}</p>
+            <p v-if="smart[d.name]!.attributes.some((a) => a.warning)" class="text-xs text-amber-700 dark:text-amber-400">{{ t("storage.smart.warningNote") }}</p>
           </div>
         </div>
       </li>

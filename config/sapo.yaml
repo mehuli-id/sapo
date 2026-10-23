@@ -18,6 +18,16 @@ agent:
     command_timeout_seconds: 20
     # Perangkat yang bukan disk sungguhan dan tidak ditampilkan (pola glob).
     ignore_devices: ["zram*", "ram*", "loop*"]
+    # Program yang boleh berjalan bersamaan (melindungi sapod dan disk yang
+    # sedang bermasalah dari banyak permintaan sekaligus).
+    max_concurrent_commands: 2
+    # Hasil SMART dipakai ulang selama ini (detik); 0 = selalu baca ulang.
+    smart_cache_seconds: 60
+    # Nilai mentah bukan nol pada atribut ini = tanda awal kerusakan
+    # (status "peringatan"). ATA: 5 sektor dipindahkan, 187 error tak
+    # terkoreksi, 197 sektor menunggu, 198 sektor tak terbaca.
+    warn_ata_raw_ids: [5, 187, 197, 198]
+    warn_nvme_fields: [media_errors, critical_warning]
 
 api:
   # Port panel. Siapa yang boleh membuka panel diatur oleh allowed_networks.

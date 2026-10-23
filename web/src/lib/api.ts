@@ -47,7 +47,7 @@ export interface Disk {
   partitions: Partition[]
 }
 
-export type SmartStatus = "passed" | "failed" | "standby" | "unsupported" | "unavailable"
+export type SmartStatus = "passed" | "warning" | "failed" | "standby" | "unsupported" | "unavailable"
 
 export interface SmartAttr {
   id?: number
@@ -57,6 +57,7 @@ export interface SmartAttr {
   threshold?: number
   raw: string
   failing: boolean
+  warning: boolean
 }
 
 export interface Smart {

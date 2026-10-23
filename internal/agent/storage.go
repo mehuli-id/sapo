@@ -11,18 +11,51 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mehuli-id/sapo/internal/proto"
 )
 
-// StorageTools adalah program dan batas yang dipakai operasi storage.*
-// (dari agent.storage di sapo.yaml).
+// StorageTools adalah program dan kebijakan operasi storage.* (dari
+// agent.storage di sapo.yaml).
 type StorageTools struct {
-	Lsblk         string
-	Smartctl      string
-	Timeout       time.Duration
-	IgnoreDevices []string
+	Lsblk          string
+	Smartctl       string
+	Timeout        time.Duration // batas waktu satu operasi, termasuk menunggu
+	IgnoreDevices  []string
+	MaxConcurrent  int           // program yang boleh berjalan bersamaan
+	CacheFor       time.Duration // lama hasil SMART dan daftar disk dipakai ulang
+	WarnATARawIDs  []int
+	WarnNVMeFields []string
+}
+
+// Storage melayani operasi storage.*. Semua pemanggilan program berbagi satu
+// batas jumlah bersamaan, dan SMART per disk di-cache: banyak tab panel atau
+// tombol Perbarui yang ditekan berulang tidak menjalankan smartctl berkali-kali
+// pada disk yang sama (yang bisa memperparah disk yang sedang bermasalah).
+type Storage struct {
+	t   StorageTools
+	sem chan struct{}
+
+	mu      sync.Mutex
+	smart   map[string]*smartEntry
+	disks   []proto.Disk
+	disksAt time.Time
+}
+
+type smartEntry struct {
+	done chan struct{} // ditutup setelah res terisi
+	res  proto.SMART
+	at   time.Time
+}
+
+// NewStorage menyiapkan operasi storage.*.
+func NewStorage(t StorageTools) *Storage {
+	if t.MaxConcurrent < 1 {
+		t.MaxConcurrent = 1
+	}
+	return &Storage{t: t, sem: make(chan struct{}, t.MaxConcurrent), smart: map[string]*smartEntry{}}
 }
 
 // deviceNamePattern membatasi nama disk yang diterima dari panel. Nama juga
@@ -39,15 +72,17 @@ var lsblkFlags = []string{
 // atribut. "-n standby" membuat smartctl tidak membangunkan disk yang tidur.
 var smartctlFlags = []string{"--json=c", "--info", "--health", "--attributes", "--nocheck=standby"}
 
-// StorageDisksOp mengembalikan handler storage.disks. Operasi ini hanya membaca.
-func StorageDisksOp(t StorageTools) Handler {
+// DisksOp mengembalikan handler storage.disks. Operasi ini hanya membaca.
+func (st *Storage) DisksOp() Handler {
 	return func(ctx context.Context, _ json.RawMessage) (any, error) {
-		return listDisks(ctx, t)
+		ctx, cancel := context.WithTimeout(ctx, st.t.Timeout)
+		defer cancel()
+		return st.listDisks(ctx)
 	}
 }
 
-// StorageSMARTOp mengembalikan handler storage.smart. Operasi ini hanya membaca.
-func StorageSMARTOp(t StorageTools) Handler {
+// SMARTOp mengembalikan handler storage.smart. Operasi ini hanya membaca.
+func (st *Storage) SMARTOp() Handler {
 	return func(ctx context.Context, raw json.RawMessage) (any, error) {
 		var p proto.SMARTParams
 		if err := decodeParams(raw, &p); err != nil {
@@ -56,17 +91,86 @@ func StorageSMARTOp(t StorageTools) Handler {
 		if !deviceNamePattern.MatchString(p.Device) {
 			return nil, &OpError{Code: proto.ErrInvalidParams, Message: "nama disk tidak valid"}
 		}
+		// Satu batas waktu untuk seluruh operasi (validasi + smartctl), di
+		// bawah batas tunggu sapo-api.
+		ctx, cancel := context.WithTimeout(ctx, st.t.Timeout)
+		defer cancel()
 		// Hanya disk yang benar-benar ada di daftar yang boleh dibaca.
-		disks, err := listDisks(ctx, t)
+		disks, err := st.cachedDisks(ctx)
 		if err != nil {
 			return nil, err
 		}
 		for _, d := range disks {
 			if d.Name == p.Device {
-				return readSMART(ctx, t, d.Name), nil
+				return st.smartOf(ctx, d.Name)
 			}
 		}
 		return nil, &OpError{Code: proto.ErrNotFound, Message: "disk " + p.Device + " tidak ditemukan"}
+	}
+}
+
+// run menjalankan program setelah mendapat giliran (semaphore).
+func (st *Storage) run(ctx context.Context, prog string, flags []string, operands ...string) (toolResult, error) {
+	select {
+	case st.sem <- struct{}{}:
+		defer func() { <-st.sem }()
+	case <-ctx.Done():
+		return toolResult{}, &OpError{Code: proto.ErrBusy, Message: "terlalu banyak permintaan storage bersamaan"}
+	}
+	timeout := st.t.Timeout
+	if dl, ok := ctx.Deadline(); ok {
+		timeout = time.Until(dl)
+	}
+	return runTool(ctx, timeout, prog, flags, operands...)
+}
+
+// cachedDisks memakai daftar disk terakhir bila masih segar (untuk validasi
+// nama di storage.smart), selain itu membaca ulang.
+func (st *Storage) cachedDisks(ctx context.Context) ([]proto.Disk, error) {
+	st.mu.Lock()
+	if st.disks != nil && time.Since(st.disksAt) < st.t.CacheFor {
+		d := st.disks
+		st.mu.Unlock()
+		return d, nil
+	}
+	st.mu.Unlock()
+	return st.listDisks(ctx)
+}
+
+// smartOf mengembalikan SMART disk dari cache, menunggu pembacaan yang sedang
+// berjalan untuk disk yang sama, atau membaca baru.
+func (st *Storage) smartOf(ctx context.Context, name string) (proto.SMART, error) {
+	st.mu.Lock()
+	e := st.smart[name]
+	fresh := e != nil && (isOpen(e.done) || time.Since(e.at) < st.t.CacheFor)
+	if !fresh {
+		e = &smartEntry{done: make(chan struct{})}
+		st.smart[name] = e
+		st.mu.Unlock()
+		e.res = st.readSMART(ctx, name)
+		e.at = time.Now()
+		if e.res.Status == proto.SMARTUnavailable {
+			// Kegagalan sementara (sibuk, waktu habis) tidak di-cache.
+			e.at = time.Time{}
+		}
+		close(e.done)
+		return e.res, nil
+	}
+	st.mu.Unlock()
+	select {
+	case <-e.done:
+		return e.res, nil
+	case <-ctx.Done():
+		return proto.SMART{}, &OpError{Code: proto.ErrBusy, Message: "pembacaan SMART " + name + " belum selesai"}
+	}
+}
+
+func isOpen(c chan struct{}) bool {
+	select {
+	case <-c:
+		return false
+	default:
+		return true
 	}
 }
 
@@ -79,8 +183,8 @@ func decodeParams(raw json.RawMessage, out any) error {
 	return nil
 }
 
-func listDisks(ctx context.Context, t StorageTools) ([]proto.Disk, error) {
-	res, err := runTool(ctx, t.Timeout, t.Lsblk, lsblkFlags)
+func (st *Storage) listDisks(ctx context.Context) ([]proto.Disk, error) {
+	res, err := st.run(ctx, st.t.Lsblk, lsblkFlags)
 	if errors.Is(err, errToolMissing) {
 		return nil, &OpError{Code: proto.ErrUnavailable, Message: err.Error()}
 	}
@@ -90,7 +194,14 @@ func listDisks(ctx context.Context, t StorageTools) ([]proto.Disk, error) {
 	if res.ExitCode != 0 {
 		return nil, fmt.Errorf("lsblk keluar dengan kode %d: %s", res.ExitCode, firstLine(res.Stderr))
 	}
-	return parseLsblk(res.Stdout, t.IgnoreDevices)
+	disks, err := parseLsblk(res.Stdout, st.t.IgnoreDevices)
+	if err != nil {
+		return nil, err
+	}
+	st.mu.Lock()
+	st.disks, st.disksAt = disks, time.Now()
+	st.mu.Unlock()
+	return disks, nil
 }
 
 // lsblkDevice mengikuti keluaran lsblk --json. Versi util-linux lama menulis
@@ -182,7 +293,16 @@ func ignored(name string, patterns []string) bool {
 const (
 	smartExitParse      = 1 << 0 // opsi tidak bisa dibaca
 	smartExitOpen       = 1 << 1 // perangkat gagal dibuka, atau sedang standby (-n)
+	smartExitCmdFailed  = 1 << 2 // perintah SMART gagal atau checksum salah
 	smartExitDiskFailed = 1 << 3 // status kesehatan: DISK FAILING
+	smartExitPrefail    = 1 << 4 // atribut prefail <= ambang batas sekarang
+	smartExitPastFail   = 1 << 5 // atribut pernah <= ambang batas
+)
+
+// Batas ukuran hasil SMART agar jawaban selalu muat di satu pesan protokol.
+const (
+	maxSMARTAttrs  = 256
+	maxSMARTRawLen = 128
 )
 
 // smartctlOutput adalah bagian keluaran smartctl --json yang dipakai.
@@ -219,6 +339,7 @@ type smartctlOutput struct {
 			Thresh     *int   `json:"thresh"`
 			WhenFailed string `json:"when_failed"`
 			Raw        struct {
+				Value  uint64 `json:"value"`
 				String string `json:"string"`
 			} `json:"raw"`
 		} `json:"table"`
@@ -226,17 +347,17 @@ type smartctlOutput struct {
 	NVMeHealth map[string]json.RawMessage `json:"nvme_smart_health_information_log"`
 }
 
-func readSMART(ctx context.Context, t StorageTools, name string) proto.SMART {
+func (st *Storage) readSMART(ctx context.Context, name string) proto.SMART {
 	out := proto.SMART{Device: name, Attributes: []proto.SMARTAttr{}}
-	res, err := runTool(ctx, t.Timeout, t.Smartctl, smartctlFlags, "/dev/"+name)
+	res, err := st.run(ctx, st.t.Smartctl, smartctlFlags, "/dev/"+name)
 	if err != nil {
 		out.Status, out.Message = proto.SMARTUnavailable, err.Error()
 		return out
 	}
-	return parseSMART(out, res)
+	return parseSMART(out, res, st.t)
 }
 
-func parseSMART(out proto.SMART, res toolResult) proto.SMART {
+func parseSMART(out proto.SMART, res toolResult, t StorageTools) proto.SMART {
 	var s smartctlOutput
 	if err := json.Unmarshal(res.Stdout, &s); err != nil {
 		out.Status = proto.SMARTUnavailable
@@ -269,9 +390,53 @@ func parseSMART(out proto.SMART, res toolResult) proto.SMART {
 		return out
 	}
 
+	if s.Temperature != nil {
+		out.TemperatureC = s.Temperature.Current
+	}
+	if s.PowerOnTime != nil {
+		out.PowerOnHours = s.PowerOnTime.Hours
+	}
+	warnIDs := map[int]bool{}
+	for _, id := range t.WarnATARawIDs {
+		warnIDs[id] = true
+	}
+	warnNVMe := map[string]bool{}
+	for _, f := range t.WarnNVMeFields {
+		warnNVMe[f] = true
+	}
+	anyFailing, anyWarning := false, false
+	if s.ATAAttributes != nil {
+		for _, a := range s.ATAAttributes.Table {
+			attr := proto.SMARTAttr{
+				ID: a.ID, Name: a.Name, Value: a.Value, Worst: a.Worst, Threshold: a.Thresh,
+				Raw: clip(a.Raw.String), Failing: a.WhenFailed != "",
+				Warning: warnIDs[a.ID] && a.Raw.Value > 0,
+			}
+			anyFailing = anyFailing || attr.Failing
+			anyWarning = anyWarning || attr.Warning
+			addAttr(&out, attr)
+		}
+	}
+	keys := make([]string, 0, len(s.NVMeHealth))
+	for k := range s.NVMeHealth {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		raw := strings.TrimSpace(string(s.NVMeHealth[k]))
+		attr := proto.SMARTAttr{Name: k, Raw: clip(raw), Warning: warnNVMe[k] && raw != "0"}
+		anyWarning = anyWarning || attr.Warning
+		addAttr(&out, attr)
+	}
+
+	// Urutan penting (data dulu): rusak > peringatan > sehat. Firmware bisa
+	// tetap melapor PASSED walau atribut prefail sudah melewati ambang batas
+	// (bit 4/5), jadi PASSED saja tidak cukup untuk menyebut disk sehat.
 	switch {
 	case code&smartExitDiskFailed != 0 || (s.SmartStatus != nil && !s.SmartStatus.Passed):
 		out.Status = proto.SMARTFailed
+	case code&(smartExitPrefail|smartExitPastFail|smartExitCmdFailed) != 0 || anyFailing || anyWarning:
+		out.Status = proto.SMARTWarning
 	case s.SmartStatus != nil:
 		out.Status = proto.SMARTPassed
 	case s.SmartSupport != nil && !s.SmartSupport.Available:
@@ -282,35 +447,24 @@ func parseSMART(out proto.SMART, res toolResult) proto.SMART {
 	if out.Status != proto.SMARTPassed {
 		out.Message = msg
 	}
-	if s.Temperature != nil {
-		out.TemperatureC = s.Temperature.Current
-	}
-	if s.PowerOnTime != nil {
-		out.PowerOnHours = s.PowerOnTime.Hours
-	}
-	if s.ATAAttributes != nil {
-		for _, a := range s.ATAAttributes.Table {
-			out.Attributes = append(out.Attributes, proto.SMARTAttr{
-				ID: a.ID, Name: a.Name, Value: a.Value, Worst: a.Worst, Threshold: a.Thresh,
-				Raw: a.Raw.String, Failing: a.WhenFailed != "",
-			})
-		}
-	}
-	keys := make([]string, 0, len(s.NVMeHealth))
-	for k := range s.NVMeHealth {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		raw := strings.TrimSpace(string(s.NVMeHealth[k]))
-		out.Attributes = append(out.Attributes, proto.SMARTAttr{
-			Name: k, Raw: raw, Failing: k == "critical_warning" && raw != "0",
-		})
-	}
 	return out
 }
 
-// smartMessage menggabungkan pesan smartctl (tanpa pesan informasi biasa).
+func addAttr(out *proto.SMART, a proto.SMARTAttr) {
+	if len(out.Attributes) < maxSMARTAttrs {
+		out.Attributes = append(out.Attributes, a)
+	}
+}
+
+func clip(s string) string {
+	if len(s) > maxSMARTRawLen {
+		return s[:maxSMARTRawLen] + "…"
+	}
+	return s
+}
+
+// smartMessage menggabungkan semua pesan smartctl, termasuk tingkat
+// "information" (deteksi standby bergantung pada pesan itu).
 func smartMessage(s smartctlOutput) string {
 	var parts []string
 	for _, m := range s.Smartctl.Messages {

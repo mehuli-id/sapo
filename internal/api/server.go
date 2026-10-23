@@ -377,7 +377,7 @@ func (s *Server) agentError(w http.ResponseWriter, op string, err error) {
 			status = http.StatusBadRequest
 		case proto.ErrNotFound:
 			status = http.StatusNotFound
-		case proto.ErrUnavailable:
+		case proto.ErrUnavailable, proto.ErrBusy:
 			status = http.StatusServiceUnavailable
 		}
 		writeError(w, status, pe.Code, pe.Message)

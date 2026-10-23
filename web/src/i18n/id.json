@@ -120,11 +120,13 @@
     "smart": {
       "loading": "Membaca SMART…",
       "passed": "Sehat",
+      "warning": "Perlu perhatian",
       "failed": "Akan rusak",
       "standby": "Sedang tidur",
       "unsupported": "SMART tidak didukung",
       "unavailable": "SMART tidak terbaca",
       "failedHelp": "Disk ini melaporkan dirinya akan rusak. Segera cadangkan data di disk ini, lalu ganti disknya.",
+      "warningHelp": "Disk ini menunjukkan tanda awal kerusakan, misalnya sektor yang rusak atau dipindahkan. Data masih bisa dibaca: cadangkan sekarang dan rencanakan penggantian disk.",
       "standbyHelp": "Disk sedang hemat daya. SMART tidak dibaca agar disk tidak dibangunkan; coba lagi nanti.",
       "unsupportedHelp": "Disk ini tidak menyediakan data kesehatan (umum pada disk virtual dan beberapa adaptor USB).",
       "showDetails": "Lihat detail SMART",
@@ -134,7 +136,8 @@
       "worst": "Terburuk",
       "threshold": "Ambang",
       "raw": "Mentah",
-      "failingNote": "Atribut bertanda merah sudah melewati ambang batas pabrik."
+      "failingNote": "Atribut bertanda merah sudah melewati ambang batas pabrik.",
+      "warningNote": "Atribut bertanda kuning bernilai bukan nol pada penghitung kerusakan yang dipantau."
     }
   },
   "about": {
