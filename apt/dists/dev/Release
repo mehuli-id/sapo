@@ -1,27 +1,27 @@
 Architectures: amd64 arm64
 Codename: dev
 Components: main
-Date: Fri, 23 Oct 2026 19:38:04 +0000
+Date: Fri, 23 Oct 2026 19:47:54 +0000
 Label: Sapo
 Origin: Sapo by Mehuli
 Suite: dev
 MD5Sum:
- d41d8cd98f00b204e9800998ecf8427e                0 main/binary-amd64/Packages
- 4a4dd3598707603b3f76a2378a4504aa               20 main/binary-amd64/Packages.gz
- d41d8cd98f00b204e9800998ecf8427e                0 main/binary-arm64/Packages
- 4a4dd3598707603b3f76a2378a4504aa               20 main/binary-arm64/Packages.gz
+ 783474dcaac366ea39ed997680e1e2a8              825 main/binary-amd64/Packages
+ d1f8ea9a0e7e37a2f381ed3719a04126              557 main/binary-amd64/Packages.gz
+ 767f65aa54bace3e1003ae2a83d1563b              825 main/binary-arm64/Packages
+ 8fd4669fb9396de166355ba282ee570b              559 main/binary-arm64/Packages.gz
 SHA1:
- da39a3ee5e6b4b0d3255bfef95601890afd80709                0 main/binary-amd64/Packages
- a0fddd5458378c1bf3c10dd2f5c060d1347741ed               20 main/binary-amd64/Packages.gz
- da39a3ee5e6b4b0d3255bfef95601890afd80709                0 main/binary-arm64/Packages
- a0fddd5458378c1bf3c10dd2f5c060d1347741ed               20 main/binary-arm64/Packages.gz
+ 122b7fc0ea6b7af445e3a683529b3a454992a94e              825 main/binary-amd64/Packages
+ 49ae25da746fbbccd7d5279383a62caabb1246c3              557 main/binary-amd64/Packages.gz
+ 2e0806ffdac4ee6cf8e63ffa234a6d0bf711afd5              825 main/binary-arm64/Packages
+ 0839da5d659bdc15e7379e86925cdac2b4805f40              559 main/binary-arm64/Packages.gz
 SHA256:
- e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855                0 main/binary-amd64/Packages
- f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec               20 main/binary-amd64/Packages.gz
- e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855                0 main/binary-arm64/Packages
- f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec               20 main/binary-arm64/Packages.gz
+ 97ee894db51c895d112e73c837d9a476b14ef6ffa354ce63d4c9afb2e823ab12              825 main/binary-amd64/Packages
+ 7681ed34bbfb9985627e78d8181a821f805b27c39d40eed41cc3f754cf1d9524              557 main/binary-amd64/Packages.gz
+ 45faaf106e536ba6ef7c5bda6c61b11ed9373e1bb68d0a36e55feb487862c154              825 main/binary-arm64/Packages
+ cf0ff3d5390d9dfb8c2f110a5d7ae22116ecc6abc01bbc9ff8ea57c7a5958a20              559 main/binary-arm64/Packages.gz
 SHA512:
- cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e                0 main/binary-amd64/Packages
- 1b46b9b08d5b338be9d732a1724795b2eab63daffde377218727c90857b79fe6a47bceed495117fcde60f7339812ef75ef4c69f82dd79fb69b6cbf8006b521f2               20 main/binary-amd64/Packages.gz
- cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e                0 main/binary-arm64/Packages
- 1b46b9b08d5b338be9d732a1724795b2eab63daffde377218727c90857b79fe6a47bceed495117fcde60f7339812ef75ef4c69f82dd79fb69b6cbf8006b521f2               20 main/binary-arm64/Packages.gz
+ 0cb1838c7092022dc878d9b7614ab7de6f919cb5e54fbebdaa57521ae0525e7aa0a925aa04c9a0c89c5a81f9ae1ce930d5bceecfc40dae027855f5ecb674c5b1              825 main/binary-amd64/Packages
+ 8ad8de7603891f858907f0437b4e7b8f74bfb77c50fa1aafe53b7b1f65fc738c227db5e3a55a125209713d4a5b56f263168a8b2f2a2b1eabd4261182f55a6716              557 main/binary-amd64/Packages.gz
+ 3760af1937ecea5a5c60661f4525787e792e96ddb972873e992d1edab83178044915cdbd11b922aaf69dc3ff6eedd8fff9faef99567b707bdf6b4924b022c7be              825 main/binary-arm64/Packages
+ c470220d6839d776721afd4793adfe2e391abf5aeef2dc46e2384f6c34df95d6ee55d08d128d0fcacf383fec0812c03f278532a57aaef1b6d8ee8be26477c323              559 main/binary-arm64/Packages.gz

@@ -4,7 +4,7 @@ Hash: SHA512
 Architectures: amd64 arm64
 Codename: stable
 Components: main
-Date: Fri, 23 Oct 2026 19:38:04 +0000
+Date: Fri, 23 Oct 2026 19:47:54 +0000
 Label: Sapo
 Origin: Sapo by Mehuli
 Suite: stable
@@ -30,8 +30,8 @@ SHA512:
  1b46b9b08d5b338be9d732a1724795b2eab63daffde377218727c90857b79fe6a47bceed495117fcde60f7339812ef75ef4c69f82dd79fb69b6cbf8006b521f2               20 main/binary-arm64/Packages.gz
 -----BEGIN PGP SIGNATURE-----
 
-iHUEARYKAB0WIQQjeXYhbroac232xU1Au+tvwdyBtAUCatu3nAAKCRBAu+tvwdyB
-tF3MAP95JitWX+xndlpDUqgcqen9RrhPeyDSdlvqT4IzKPpl0QEAxqbWTBo8WJty
-RyAITxCnaEFqmGyiMddDh8rV0s38iAk=
-=hNr2
+iHUEARYKAB0WIQQjeXYhbroac232xU1Au+tvwdyBtAUCatu56gAKCRBAu+tvwdyB
+tP69AP9VsIa8/hL+AWz0IVo9hStOTbnwae9EU4vBnaLOhq791QD/dtu2r4SrCVM4
+I5Nudo5RgSR6v+wd2F4vUi9YEl9rfgQ=
+=f5Rq
 -----END PGP SIGNATURE-----
