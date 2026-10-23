@@ -9,6 +9,7 @@ Paket `sapo` untuk Debian stable (Fase 1: untuk penguji dan kontributor).
 | `/usr/lib/sapo/sapod`, `/usr/lib/sapo/sapo-api` | `bin/` (hasil `make go`) |
 | `/usr/share/sapo/web/` | `web/dist/` (hasil `make web`) |
 | `/usr/share/sapo/features/` | `features/` |
+| `/usr/share/sapo/wizards/` | `wizards/` |
 | `/usr/share/sapo/branding.yaml` | `branding.yaml` |
 | `/etc/sapo/sapo.yaml` (conffile) | `config/sapo.yaml` |
 | `/lib/systemd/system/sapod.service`, `sapo-api.service` | `packaging/deb/systemd/` |

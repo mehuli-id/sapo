@@ -24,9 +24,15 @@ export interface Feature {
   removable: boolean
 }
 
+export interface AuthPolicy {
+  password_min_length: number
+  username_pattern: string
+}
+
 export interface UIConfig {
   default_mode: "desktop" | "ringkas"
   default_language: string
+  auth_policy: AuthPolicy
   branding?: Branding
 }
 
@@ -45,35 +51,108 @@ export interface Branding {
   }
 }
 
+export interface AuthStatus {
+  setup_required: boolean
+  authenticated: boolean
+  user?: { username: string; role: string }
+}
+
+export type Localized = Record<string, string>
+
+export interface WizardField {
+  key: string
+  type: "text" | "username" | "password" | "password-confirm" | "language" | "totp-enroll"
+  label: Localized
+  help?: Localized
+  placeholder?: Localized
+  required?: boolean
+  default?: string
+  match?: string
+  autocomplete?: string
+  secret?: boolean
+}
+
+export interface WizardStep {
+  id: string
+  type?: "form" | "review"
+  title: Localized
+  description?: Localized
+  help?: Localized
+  fields?: WizardField[]
+}
+
+export interface Wizard {
+  id: string
+  title: Localized
+  action: string
+  steps: WizardStep[]
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
     public code: string,
     message: string,
+    public detail: Record<string, unknown> = {},
   ) {
     super(message)
   }
 }
 
-async function get<T>(path: string): Promise<T> {
-  const res = await fetch(path, { headers: { Accept: "application/json" }, credentials: "same-origin" })
+// Dipanggil saat sesi habis, agar panel kembali ke halaman login.
+let onUnauthenticated: (() => void) | null = null
+export function setUnauthenticatedHandler(fn: () => void) {
+  onUnauthenticated = fn
+}
+
+async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const headers: Record<string, string> = { Accept: "application/json" }
+  if (method !== "GET") {
+    // Header wajib untuk perlindungan CSRF (lihat internal/api).
+    headers["X-Sapo-Request"] = "1"
+    headers["Content-Type"] = "application/json"
+  }
+  const res = await fetch(path, {
+    method,
+    headers,
+    credentials: "same-origin",
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
   if (!res.ok) {
     let code = "http_error"
     let message = res.statusText
+    let detail: Record<string, unknown> = {}
     try {
-      const body = await res.json()
-      code = body?.error?.code ?? code
-      message = body?.error?.message ?? message
+      const data = await res.json()
+      code = data?.error?.code ?? code
+      message = data?.error?.message ?? message
+      detail = data?.error ?? {}
     } catch {
       // badan respons bukan JSON
     }
-    throw new ApiError(res.status, code, message)
+    if (res.status === 401 && code === "unauthenticated") onUnauthenticated?.()
+    throw new ApiError(res.status, code, message, detail)
   }
   return res.json() as Promise<T>
 }
+
+const get = <T>(path: string) => request<T>("GET", path)
+const post = <T>(path: string, body: unknown = {}) => request<T>("POST", path, body)
 
 export const api = {
   systemInfo: () => get<SystemInfo>("/api/v1/system/info"),
   features: () => get<Feature[]>("/api/v1/features"),
   uiConfig: () => get<UIConfig>("/api/v1/ui/config"),
+  authStatus: () => get<AuthStatus>("/api/v1/auth/status"),
+  wizard: (id: string) => get<Wizard>(`/api/v1/wizards/${encodeURIComponent(id)}`),
+  setupTOTP: (username: string) => post<{ token: string; secret: string; uri: string }>("/api/v1/setup/totp", { username }),
+  setup: (values: Record<string, string>) => post<{ ok: boolean }>("/api/v1/setup", values),
+  login: (username: string, password: string, totp_code?: string) =>
+    post<{ ok: boolean }>("/api/v1/auth/login", { username, password, totp_code: totp_code ?? "" }),
+  logout: () => post<{ ok: boolean }>("/api/v1/auth/logout"),
+}
+
+// Tindakan akhir wizard (nilai `action` di YAML) → pemanggilan API.
+export const wizardActions: Record<string, (values: Record<string, string>) => Promise<unknown>> = {
+  "setup.complete": (v) => api.setup(v),
 }

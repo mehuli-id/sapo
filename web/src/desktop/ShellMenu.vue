@@ -1,17 +1,19 @@
 <script setup lang="ts">
-// Menu pengguna: mode tampilan, tema, dan bahasa. Dipakai di kedua mode.
+// Menu pengguna: akun, mode tampilan, tema, dan bahasa. Dipakai di kedua mode.
 import { ref } from "vue"
 import { useI18n } from "vue-i18n"
-import { Languages, Monitor, Moon, PanelsTopLeft, Sun, UserRound } from "@lucide/vue"
+import { Languages, LogOut, Monitor, Moon, PanelsTopLeft, Sun, UserRound } from "@lucide/vue"
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { useSession } from "@/composables/useSession"
 import type { DisplayMode } from "@/composables/useShell"
 import { useShell } from "@/composables/useShell"
 import { languages, setLocale } from "@/i18n"
@@ -21,6 +23,7 @@ defineProps<{ triggerClass?: string }>()
 
 const { t, locale } = useI18n()
 const { mode, setMode, isSmall } = useShell()
+const { status, logout } = useSession()
 const scheme = useColorScheme()
 const theme = ref(scheme.read())
 
@@ -39,6 +42,10 @@ function onTheme(v: unknown) {
       <UserRound class="size-4" />
     </DropdownMenuTrigger>
     <DropdownMenuContent align="end" side="top" class="w-56">
+      <DropdownMenuLabel v-if="status?.user" class="truncate font-normal">
+        {{ t("shell.signedInAs", { name: status.user.username }) }}
+      </DropdownMenuLabel>
+      <DropdownMenuSeparator v-if="status?.user" />
       <template v-if="!isSmall">
         <DropdownMenuLabel class="flex items-center gap-2 text-xs text-muted-foreground">
           <PanelsTopLeft class="size-3.5" />{{ t("shell.mode") }}
@@ -64,6 +71,8 @@ function onTheme(v: unknown) {
       <DropdownMenuRadioGroup :model-value="locale" @update:model-value="(v) => setLocale(String(v))">
         <DropdownMenuRadioItem v-for="l in languages" :key="l.code" :value="l.code">{{ l.label }}</DropdownMenuRadioItem>
       </DropdownMenuRadioGroup>
+      <DropdownMenuSeparator />
+      <DropdownMenuItem @select="logout"><LogOut />{{ t("shell.logout") }}</DropdownMenuItem>
     </DropdownMenuContent>
   </DropdownMenu>
 </template>
