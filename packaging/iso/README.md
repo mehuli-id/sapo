@@ -23,6 +23,24 @@ Lalu buka `http://localhost:5000` dan ikuti wizard setup awal. Di VirtualBox, UT
 
 Untuk menguji fitur storage, tambahkan disk virtual kosong ke VM (lihat `deploy/dev/`).
 
+#### Lewat Docker (misalnya di macOS)
+
+ISO di-boot dengan QEMU di dalam container Debian. Di Mac Apple Silicon, x86 diemulasi (tanpa KVM), tetapi boot tetap sekitar 40 detik.
+
+```bash
+docker run -d --rm --name sapo-iso -p 127.0.0.1:5080:5080 -v "$PWD:/iso:ro" debian:trixie sh -c '
+  apt-get update -qq && apt-get install -y -qq --no-install-recommends qemu-system-x86 socat >/dev/null
+  socat TCP-LISTEN:5080,fork,reuseaddr TCP:127.0.0.1:5000 &
+  exec qemu-system-x86_64 -accel tcg -m 2048 -smp 4 -cdrom /iso/sapo-dev_<versi>_amd64.iso -boot d \
+    -nic user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:5000-:5000 -display none -serial stdio'
+docker logs -f sapo-iso      # layar konsol VM
+docker rm -f sapo-iso        # berhenti (semua isi hilang)
+```
+
+Jalankan dari folder berisi ISO, lalu buka `http://localhost:5080`. Port 5080 dipakai karena di macOS port 5000 biasanya sudah dipakai AirPlay Receiver.
+
+Relay `socat` diperlukan. Tanpa relay, koneksi lewat port Docker sampai ke VM dari jaringan Docker (`172.17.0.0/16`). Sapo sengaja menolak jaringan itu (`api.denied_networks`), sehingga panel menjawab **403 `network_not_allowed`**. Dengan relay, koneksi datang dari loopback container, dan VM melihatnya sebagai `10.0.2.2` (diizinkan). Jangan longgarkan `denied_networks` untuk mengakalinya.
+
 Login konsol untuk debugging: `user` / `live` (bawaan live-config, dengan sudo). SSH tidak dipasang, karena password ini bawaan dan diketahui umum.
 
 ### Membangun sendiri
