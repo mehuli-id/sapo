@@ -36,7 +36,6 @@ go test -race ./...
 - `git commit -s` (DCO). Pesan: kalimat perintah singkat, Bahasa Indonesia.
 
 ## Status & langkah berikutnya (per 23 Okt 2026)
-Sudah: kerangka, login + wizard setup awal + 2FA, paket `.deb`, tiga ronde review keamanan (`docs/security/2026-10-23-review.md`), repo publik `mehuli-id/sapo`, ISO live dev (`packaging/iso/`, workflow **ISO dev**: build + uji boot QEMU, artifact `sapo-iso-dev`), Storage Manager baca saja (`storage.disks`/`storage.smart` di `sapod`, program eksternal hanya lewat `runTool` di `internal/agent/tool.go`), HTTPS wajib di LAN (ADR 0004: sertifikat self-signed, HTTP hanya halaman petunjuk, sidik jari di layar konsol lewat `sapod`), pemulihan 2FA (kode cadangan + aplikasi Keamanan Akun).
+Sudah: kerangka, login + wizard setup awal + 2FA, paket `.deb`, tiga ronde review keamanan (`docs/security/2026-10-23-review.md`), repo publik `mehuli-id/sapo`, ISO live dev (`packaging/iso/`, workflow **ISO dev**: build + uji boot QEMU, artifact `sapo-iso-dev`), Storage Manager baca saja (`storage.disks`/`storage.smart` di `sapod`, program eksternal hanya lewat `runTool` di `internal/agent/tool.go`), HTTPS wajib di LAN (ADR 0004: sertifikat self-signed, HTTP hanya halaman petunjuk, sidik jari di layar konsol lewat `sapod`), pemulihan 2FA (kode cadangan + aplikasi Keamanan Akun), repo APT bertanda tangan di GitHub Pages (`packaging/apt/`, workflow **Rilis**: tag `v*` → stable, manual → dev).
 Berikutnya:
-1. Repo APT bertanda tangan.
-2. Menu darurat di konsol NAS (reset jaringan, reset password admin, restart) untuk pemulihan bila password dan kode cadangan hilang.
+1. Menu darurat di konsol NAS (reset jaringan, reset password admin, restart) untuk pemulihan bila password dan kode cadangan hilang.
