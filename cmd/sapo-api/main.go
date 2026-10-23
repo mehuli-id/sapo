@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -69,10 +70,20 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	agentClient := &agent.Client{Socket: cfg.Agent.Socket, Timeout: 30 * time.Second}
+	// Alamat panel di layar konsol NAS diperbarui lewat sapod (berjalan di
+	// latar belakang; sapod mungkin belum siap).
+	console := func(scheme, port, fingerprint string) {
+		if *noTLS {
+			return // mode pengembangan
+		}
+		go announceConsole(ctx, agentClient, log, scheme, port, fingerprint)
+	}
+
 	var certs *certManager
 	var httpsInfo *api.HTTPSInfo
 	if cfg.API.TLS.Enabled && !*noTLS {
-		certs, err = newCertManager(cfg, log)
+		certs, err = newCertManager(cfg, log, console)
 		if err != nil {
 			log.Error("sertifikat HTTPS", "err", err)
 			os.Exit(1)
@@ -83,7 +94,7 @@ func main() {
 
 	handler, err := api.New(api.Options{
 		Config: cfg,
-		Agent:  &agent.Client{Socket: cfg.Agent.Socket, Timeout: 30 * time.Second},
+		Agent:  agentClient,
 		Store:  store,
 		Audit:  auditLog,
 		Log:    log,
@@ -110,7 +121,11 @@ func main() {
 		srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: certs.get}
 		servers = append(servers, srv)
 	}
-	writeConsoleIssue(cfg, certs, log)
+	if certs != nil {
+		console("https", certs.port, certs.fingerprint())
+	} else if _, port, err := net.SplitHostPort(cfg.API.Listen); err == nil {
+		console("http", port, "")
+	}
 
 	go func() {
 		<-ctx.Done()

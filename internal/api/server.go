@@ -84,8 +84,22 @@ type Server struct {
 	healthRunning bool
 }
 
-// SessionCookie adalah nama cookie sesi panel.
+// SessionCookie adalah nama cookie sesi panel lewat HTTP (hanya bila HTTPS
+// dimatikan). Lewat HTTPS dipakai SecureSessionCookie.
 const SessionCookie = "sapo_session"
+
+// SecureSessionCookie: awalan __Host- membuat browser hanya menerima cookie
+// ini bila Secure, Path=/, dan tanpa Domain. Cookie tidak dipisah per port,
+// jadi tanpa awalan ini penyerang di HTTP (port 5000) bisa menanam cookie
+// sesi yang lalu ikut terkirim ke HTTPS.
+const SecureSessionCookie = "__Host-sapo_session"
+
+func sessionCookieName(r *http.Request) string {
+	if r.TLS != nil {
+		return SecureSessionCookie
+	}
+	return SessionCookie
+}
 
 // CSRFHeader wajib ada di setiap permintaan yang mengubah data. Browser tidak
 // bisa mengirim header khusus lintas situs tanpa izin CORS (yang tidak pernah

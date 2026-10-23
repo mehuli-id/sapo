@@ -49,7 +49,7 @@ func randomToken() (string, error) {
 
 func (s *Server) setCookie(w http.ResponseWriter, r *http.Request, value string, maxAge int) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     SessionCookie,
+		Name:     sessionCookieName(r),
 		Value:    value,
 		Path:     "/",
 		MaxAge:   maxAge,
@@ -60,7 +60,7 @@ func (s *Server) setCookie(w http.ResponseWriter, r *http.Request, value string,
 }
 
 func (s *Server) currentSession(r *http.Request) (auth.Session, string, bool) {
-	c, err := r.Cookie(SessionCookie)
+	c, err := r.Cookie(sessionCookieName(r))
 	if err != nil {
 		return auth.Session{}, "", false
 	}

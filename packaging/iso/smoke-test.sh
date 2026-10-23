@@ -46,9 +46,15 @@ curl -kfsS --max-time 5 "$HTTPS/" | grep -qi '<div id="app"' || fail "halaman pa
 
 # Lewat HTTP: panel (halaman petunjuk) dan ui/config ada, API lain ditolak.
 curl -fsS --max-time 5 "$HTTP/" | grep -qi '<div id="app"' || fail "halaman petunjuk tidak tersaji lewat HTTP."
-code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 "$HTTP/api/v1/auth/status")"
-[[ "$code" == 403 ]] || fail "auth/status lewat HTTP harus 403 (https_required), dapat $code."
-echo "HTTP: hanya halaman petunjuk, API ditolak (403)"
+# Termasuk permintaan yang membawa password (login, setup): ditolak sebelum
+# diproses, dengan kode https_required.
+for req in "GET /api/v1/auth/status" "POST /api/v1/auth/login" "POST /api/v1/setup/totp" "POST /api/v1/setup"; do
+  read -r method path <<<"$req"
+  body="$(curl -sS -X "$method" -H 'X-Sapo-Request: 1' -H 'Content-Type: application/json' \
+    -d '{"username":"uji","password":"uji-password-panjang"}' -w ' %{http_code}' --max-time 5 "$HTTP$path")"
+  [[ "$body" == *'"https_required"'*' 403' ]] || fail "$method $path lewat HTTP harus 403 https_required, dapat: $body"
+done
+echo "HTTP: hanya halaman petunjuk; API, login, dan setup ditolak (403 https_required)"
 
 announced="$(curl -fsS --max-time 5 "$HTTP/api/v1/ui/config" | sed -n 's/.*"fingerprint_sha256":"\([0-9A-F:]*\)".*/\1/p')"
 served="$(openssl s_client -connect "127.0.0.1:$TLS_PORT" -servername localhost </dev/null 2>/dev/null \
@@ -56,5 +62,13 @@ served="$(openssl s_client -connect "127.0.0.1:$TLS_PORT" -servername localhost 
 [[ -n "$announced" && "$announced" == "$served" ]] || fail "sidik jari diumumkan ($announced) beda dengan yang dipakai server ($served)."
 echo "sidik jari sertifikat cocok: $served"
 
-grep -q "Sidik jari sertifikat" "$LOG" || fail "layar konsol tidak menampilkan sidik jari sertifikat."
+# Layar konsol (ditulis sapod) memuat sidik jari yang sama, dalam dua baris.
+# Ditunggu sebentar: sapod menulisnya lalu meminta agetty menampilkan ulang.
+for _ in $(seq 1 12); do
+  grep -qF "${served:0:47}" "$LOG" && grep -qF "${served:48}" "$LOG" && break
+  sleep 5
+done
+grep -qF "${served:0:47}" "$LOG" && grep -qF "${served:48}" "$LOG" \
+  || fail "layar konsol tidak menampilkan sidik jari sertifikat yang dipakai server."
+echo "layar konsol: sidik jari sama dengan sertifikat server"
 echo "Uji asap lulus."

@@ -63,7 +63,7 @@ Hasilnya `dist/sapo-dev_<versi>_amd64.iso` beserta `.sha256`. Di macOS atau dist
 |---|---|
 | `iso.conf` | Nama ISO, arsitektur, versi Debian, mirror, parameter boot (nama host `sapo`, tanpa autologin, log ke serial) |
 | `packages.list` | Paket sistem live; paket sistem inti ikut lewat `Depends` paket `sapo` |
-| `includes.chroot/` | File yang disalin ke sistem live, misalnya keterangan "ISO dev" di layar login (`/etc/issue.d/sapo-iso.issue`). Alamat panel dan sidik jari ditulis `sapo-api` (`/etc/issue.d/sapo.issue` dari paket) |
+| `includes.chroot/` | File yang disalin ke sistem live, misalnya keterangan "ISO dev" di layar login (`/etc/issue.d/sapo-iso.issue`). Alamat panel dan sidik jari ditulis `sapod` (`/etc/issue.d/sapo.issue` dari paket) |
 | `build.sh` | Menjalankan `lb config` dan `lb build` dari data di atas |
 | `smoke-test.sh` | Boot ISO di QEMU tanpa disk. Cek panel dan API lewat HTTPS, HTTP hanya halaman petunjuk, sidik jari yang diumumkan sama dengan sertifikat server, dan sidik jari tampil di konsol |
 

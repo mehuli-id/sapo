@@ -180,13 +180,13 @@
   },
   "https": {
     "title": "Panel memakai koneksi aman",
-    "intro": "Panel Sapo hanya bisa dibuka lewat HTTPS agar password dan data Anda tidak bisa disadap di jaringan.",
+    "intro": "Panel Sapo hanya bisa dibuka lewat HTTPS agar password dan data Anda terenkripsi di jaringan.",
     "step1": "Klik tombol di bawah. Browser akan menampilkan peringatan sertifikat karena sertifikat ini dibuat sendiri oleh NAS, bukan oleh lembaga sertifikat.",
-    "step2": "Buka detail sertifikat di peringatan itu, lalu pastikan sidik jari SHA-256-nya sama dengan yang di bawah ini (juga tampil di layar NAS).",
+    "step2": "Buka detail sertifikat di peringatan itu, lalu pastikan sidik jari SHA-256-nya sama dengan yang tampil di layar NAS (layar login konsol).",
     "step3": "Bila sama, lanjutkan ke situs. Peringatan ini hanya muncul sekali untuk browser ini.",
-    "fingerprint": "Sidik jari sertifikat (SHA-256)",
+    "fingerprint": "Sidik jari sertifikat (SHA-256). Hanya untuk memudahkan: halaman ini belum terenkripsi, jadi yang bisa dipercaya adalah yang tampil di layar NAS.",
     "open": "Buka panel aman",
-    "why": "Bila sidik jarinya berbeda, jangan lanjutkan: ada perangkat lain yang menyamar sebagai NAS Anda."
+    "why": "Bila sidik jari di browser berbeda dengan di layar NAS, jangan lanjutkan: ada perangkat lain yang menyamar sebagai NAS Anda. Setelah ini, buka panel langsung dengan alamat https://."
   },
   "errors": {
     "bad_credentials": "Nama pengguna atau password salah.",

@@ -55,6 +55,9 @@ const (
 	OpFeaturesList = "features.list"
 	OpStorageDisks = "storage.disks"
 	OpStorageSMART = "storage.smart"
+	// OpConsolePanelAddress memperbarui alamat panel (dan sidik jari
+	// sertifikat) di layar login konsol NAS.
+	OpConsolePanelAddress = "console.panel_address"
 )
 
 // SystemInfo adalah hasil operasi system.info.
@@ -92,6 +95,15 @@ type Feature struct {
 	Requires   []string          `json:"requires" yaml:"requires"`
 	Activation string            `json:"activation" yaml:"activation"`
 	Removable  bool              `json:"removable" yaml:"removable"`
+}
+
+// ConsolePanelParams adalah parameter console.panel_address. Isi layar konsol
+// dibuat sapod dari templat tetap; hanya nilai-nilai ini yang berasal dari
+// sapo-api, dan semuanya divalidasi.
+type ConsolePanelParams struct {
+	Scheme      string `json:"scheme"`      // http atau https
+	Port        int    `json:"port"`        // 1-65535
+	Fingerprint string `json:"fingerprint"` // SHA-256 AB:CD:… (wajib untuk https)
 }
 
 // Disk adalah satu disk fisik (atau virtual) hasil operasi storage.disks.
