@@ -8,11 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/netip"
 	"os"
 	"path"
 	"path/filepath"
 	"regexp"
+	"strconv"
 
 	"gopkg.in/yaml.v3"
 )
@@ -36,6 +38,15 @@ type Agent struct {
 	// Batas koneksi bersamaan ke socket sapod.
 	MaxConnections int     `yaml:"max_connections"`
 	Storage        Storage `yaml:"storage"`
+	Console        Console `yaml:"console"`
+}
+
+// Console mengatur alamat panel di layar login konsol NAS. File ditulis sapod
+// (root) di direktori miliknya; /etc/issue.d/sapo.issue dari paket menautkan
+// ke sini. agetty dipakai untuk menampilkan ulang layar login.
+type Console struct {
+	IssueFile string `yaml:"issue_file"`
+	Agetty    string `yaml:"agetty"`
 }
 
 // Storage mengatur operasi baca disk di sapod.
@@ -89,9 +100,6 @@ type TLS struct {
 	// Masa berlaku sertifikat self-signed dan kapan diperbarui (hari).
 	ValidityDays    int `yaml:"validity_days"`
 	RenewBeforeDays int `yaml:"renew_before_days"`
-	// File berisi alamat panel dan sidik jari sertifikat untuk layar login
-	// konsol (/etc/issue.d menautkan ke sini). Kosong = tidak ditulis.
-	ConsoleIssueFile string `yaml:"console_issue_file"`
 }
 
 // Auth berisi kebijakan login. Semua angka di sini bisa diubah admin.
@@ -134,6 +142,7 @@ func Default() Config {
 			SocketGroup:    "sapo",
 			FeaturesDir:    "/usr/share/sapo/features",
 			MaxConnections: 32,
+			Console:        Console{IssueFile: "/run/sapo/console.issue", Agetty: "/usr/sbin/agetty"},
 			Storage: Storage{
 				Lsblk:                 "/usr/bin/lsblk",
 				Smartctl:              "/usr/sbin/smartctl",
@@ -160,11 +169,10 @@ func Default() Config {
 			DeniedNetworks: []string{"172.17.0.0/16"}, // bridge Docker bawaan
 			AuditMaxMB:     10,
 			TLS: TLS{
-				Enabled:          true,
-				Listen:           ":5001",
-				ValidityDays:     825,
-				RenewBeforeDays:  30,
-				ConsoleIssueFile: "/run/sapo-api/console.issue",
+				Enabled:         true,
+				Listen:          ":5001",
+				ValidityDays:    397,
+				RenewBeforeDays: 30,
 			},
 		},
 		Auth: Auth{
@@ -226,6 +234,8 @@ func (c Config) Validate() error {
 		return errors.New("agent.socket wajib diisi")
 	case c.Agent.MaxConnections < 1:
 		return errors.New("agent.max_connections minimal 1")
+	case !filepath.IsAbs(c.Agent.Console.IssueFile) || !filepath.IsAbs(c.Agent.Console.Agetty):
+		return errors.New("agent.console: issue_file dan agetty harus path absolut")
 	case !filepath.IsAbs(c.Agent.Storage.Lsblk) || !filepath.IsAbs(c.Agent.Storage.Smartctl):
 		return errors.New("agent.storage: lsblk dan smartctl harus path absolut")
 	case c.Agent.Storage.CommandTimeoutSeconds < 1 || c.Agent.Storage.CommandTimeoutSeconds > 25:
@@ -249,12 +259,11 @@ func (c Config) Validate() error {
 		return errors.New("auth: durasi sesi harus lebih dari 0")
 	case c.Auth.TOTPMaxFailures < 1 || c.Auth.TOTPWindowMinutes < 1:
 		return errors.New("auth: totp_max_failures dan totp_window_minutes harus lebih dari 0")
-	case c.API.TLS.Enabled && c.API.TLS.Listen == "":
-		return errors.New("api.tls.listen wajib diisi bila HTTPS aktif")
-	case c.API.TLS.Enabled && c.API.TLS.Listen == c.API.Listen:
-		return errors.New("api.tls.listen harus berbeda dari api.listen")
-	case c.API.TLS.ValidityDays < 30 || c.API.TLS.RenewBeforeDays < 1 || c.API.TLS.RenewBeforeDays >= c.API.TLS.ValidityDays:
-		return errors.New("api.tls: validity_days minimal 30 dan renew_before_days antara 1 dan validity_days")
+	case c.API.TLS.ValidityDays < 30 || c.API.TLS.ValidityDays > 825:
+		// Apple menolak sertifikat server TLS yang berlaku lebih dari 825 hari.
+		return errors.New("api.tls.validity_days harus 30 sampai 825")
+	case c.API.TLS.RenewBeforeDays < 1 || c.API.TLS.RenewBeforeDays >= c.API.TLS.ValidityDays:
+		return errors.New("api.tls.renew_before_days harus antara 1 dan validity_days")
 	case c.API.AuditMaxMB < 1:
 		return errors.New("api.audit_max_mb minimal 1")
 	case c.Auth.MaxConcurrentHashes < 1:
@@ -266,6 +275,23 @@ func (c Config) Validate() error {
 	}
 	if _, err := regexp.Compile(c.Auth.UsernamePattern); err != nil {
 		return fmt.Errorf("auth.username_pattern tidak valid: %w", err)
+	}
+	if _, err := ListenPort("api.listen", c.API.Listen); err != nil {
+		return err
+	}
+	if c.API.TLS.Enabled {
+		tlsPort, err := ListenPort("api.tls.listen", c.API.TLS.Listen)
+		if err != nil {
+			return err
+		}
+		if httpPort, _ := ListenPort("api.listen", c.API.Listen); httpPort == tlsPort {
+			return errors.New("api.tls.listen harus memakai port yang berbeda dari api.listen")
+		}
+	}
+	for _, h := range c.API.Hostnames {
+		if !hostnamePattern.MatchString(h) {
+			return fmt.Errorf("api.hostnames: %q bukan nama host yang valid (huruf kecil a-z, angka, titik, tanda hubung; tanpa port)", h)
+		}
 	}
 	for _, p := range c.Agent.Storage.IgnoreDevices {
 		if _, err := path.Match(p, ""); err != nil {
@@ -279,6 +305,23 @@ func (c Config) Validate() error {
 		return err
 	}
 	return nil
+}
+
+// hostnamePattern: nama DNS ASCII huruf kecil tanpa port atau wildcard, agar
+// selalu bisa dimasukkan ke sertifikat dan dicocokkan dengan header Host.
+var hostnamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$`)
+
+// ListenPort mengambil nomor port dari alamat listen ("host:port" atau ":port").
+func ListenPort(name, addr string) (int, error) {
+	_, p, err := net.SplitHostPort(addr)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %q bukan alamat host:port", name, addr)
+	}
+	n, err := strconv.Atoi(p)
+	if err != nil || n < 1 || n > 65535 {
+		return 0, fmt.Errorf("%s: port %q tidak valid", name, p)
+	}
+	return n, nil
 }
 
 // Networks mengurai api.allowed_networks.

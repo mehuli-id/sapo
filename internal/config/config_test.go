@@ -103,3 +103,31 @@ func TestInvalidStorageToolsRejected(t *testing.T) {
 		}
 	}
 }
+
+func TestInvalidTLSAndHostnamesRejected(t *testing.T) {
+	for name, body := range map[string]string{
+		"hostname-kosong":    "api:\n  hostnames: [\"\"]\n",
+		"hostname-non-ascii": "api:\n  hostnames: [\"nás.local\"]\n",
+		"hostname-port":      "api:\n  hostnames: [\"nas:5001\"]\n",
+		"hostname-wildcard":  "api:\n  hostnames: [\"*.lan\"]\n",
+		"hostname-besar":     "api:\n  hostnames: [\"NAS.lan\"]\n",
+		"port-sama":          "api:\n  listen: \":5001\"\n  tls:\n    listen: \"0.0.0.0:5001\"\n",
+		"port-bukan-angka":   "api:\n  tls:\n    listen: \":https\"\n",
+		"masa-berlaku-lama":  "api:\n  tls:\n    validity_days: 1000\n",
+	} {
+		p := filepath.Join(t.TempDir(), "sapo.yaml")
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(p); err == nil {
+			t.Errorf("%s: harus ditolak", name)
+		}
+	}
+	p := filepath.Join(t.TempDir(), "sapo.yaml")
+	if err := os.WriteFile(p, []byte("api:\n  hostnames: [nas.kantor.lan, gudang]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err != nil {
+		t.Fatalf("nama host valid ditolak: %v", err)
+	}
+}

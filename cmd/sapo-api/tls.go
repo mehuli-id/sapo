@@ -8,25 +8,29 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/mehuli-id/sapo/internal/api"
 	"github.com/mehuli-id/sapo/internal/config"
+	"github.com/mehuli-id/sapo/internal/proto"
 	"github.com/mehuli-id/sapo/internal/tlscert"
 )
 
 // certManager menyimpan sertifikat HTTPS yang sedang dipakai dan
 // memperbaruinya tanpa restart (ADR 0004).
 type certManager struct {
-	opts tlscert.Options
-	port string
-	cfg  config.Config
-	log  *slog.Logger
-	cur  atomic.Pointer[tlscert.Cert]
+	opts    tlscert.Options
+	port    string
+	cfg     config.Config
+	log     *slog.Logger
+	cur     atomic.Pointer[tlscert.Cert]
+	console func(scheme string, port string, fingerprint string)
 }
 
-func newCertManager(cfg config.Config, log *slog.Logger) (*certManager, error) {
+func newCertManager(cfg config.Config, log *slog.Logger, console func(scheme, port, fingerprint string)) (*certManager, error) {
 	_, port, err := net.SplitHostPort(cfg.API.TLS.Listen)
 	if err != nil {
 		return nil, fmt.Errorf("api.tls.listen: %w", err)
@@ -35,11 +39,11 @@ func newCertManager(cfg config.Config, log *slog.Logger) (*certManager, error) {
 	if err != nil || host == "" {
 		host = "sapo"
 	}
-	host = strings.ToLower(strings.TrimSuffix(host, ".local"))
+	host = strings.TrimSuffix(strings.ToLower(host), ".local")
 	names := append([]string{host, host + ".local", "localhost"}, cfg.API.Hostnames...)
 	ips := append([]net.IP{net.IPv4(127, 0, 0, 1), net.IPv6loopback}, tlscert.LocalIPs()...)
 	m := &certManager{
-		port: port, cfg: cfg, log: log,
+		port: port, cfg: cfg, log: log, console: console,
 		opts: tlscert.Options{
 			Dir:          filepath.Join(cfg.API.DataDir, "tls"),
 			Organization: "Sapo",
@@ -66,7 +70,7 @@ func (m *certManager) refresh() error {
 	if c.Created {
 		m.log.Warn("sertifikat HTTPS baru dibuat; browser akan menampilkan peringatan sekali",
 			"sidik_jari_sha256", c.Fingerprint, "berlaku_sampai", c.Leaf.NotAfter.Format(time.DateOnly), "nama", c.Leaf.DNSNames)
-		writeConsoleIssue(m.cfg, m, m.log)
+		m.console("https", m.port, c.Fingerprint)
 	}
 	return nil
 }
@@ -92,37 +96,29 @@ func (m *certManager) get(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 
 func (m *certManager) fingerprint() string { return m.cur.Load().Fingerprint }
 
-// writeConsoleIssue menulis alamat panel (dan sidik jari sertifikat) untuk
-// layar login konsol NAS. /etc/issue.d/ dari paket menautkan ke file ini;
-// agetty mengganti \4 dengan alamat IPv4 dan \n dengan nama host.
-func writeConsoleIssue(cfg config.Config, certs *certManager, log *slog.Logger) {
-	path := cfg.API.TLS.ConsoleIssueFile
-	if path == "" {
+// announceConsole meminta sapod memperbarui alamat panel (dan sidik jari) di
+// layar login konsol NAS (operasi console.panel_address). sapo-api hanya
+// mengirim skema, port, dan sidik jari; isi layar dibuat sapod dari templat
+// tetap. sapod mungkin belum siap saat sapo-api baru menyala, jadi dicoba
+// ulang beberapa kali.
+func announceConsole(ctx context.Context, caller api.AgentCaller, log *slog.Logger, scheme, port, fingerprint string) {
+	n, err := strconv.Atoi(port)
+	if err != nil {
 		return
 	}
-	if _, err := os.Stat(filepath.Dir(path)); err != nil {
-		return // misalnya mode pengembangan: tidak ada /run/sapo-api
-	}
-	var b strings.Builder
-	if certs != nil {
-		fmt.Fprintf(&b, "Panel Sapo: https://\\4:%s  atau  https://\\n.local:%s\n", certs.port, certs.port)
-		fp := certs.fingerprint()
-		half := len(fp) / 2
-		// Sidik jari 95 karakter dipecah dua baris di batas byte (titik dua).
-		for half < len(fp) && fp[half] != ':' {
-			half++
+	params := proto.ConsolePanelParams{Scheme: scheme, Port: n, Fingerprint: fingerprint}
+	for attempt := 0; attempt < 10; attempt++ {
+		callCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		err = caller.Call(callCtx, proto.OpConsolePanelAddress, params, nil)
+		cancel()
+		if err == nil {
+			return
 		}
-		fmt.Fprintf(&b, "Sidik jari sertifikat (SHA-256), cocokkan dengan peringatan browser:\n  %s\n  %s\n\n", fp[:half], strings.TrimPrefix(fp[half:], ":"))
-	} else {
-		_, port, _ := net.SplitHostPort(cfg.API.Listen)
-		fmt.Fprintf(&b, "Panel Sapo: http://\\4:%s  atau  http://\\n.local:%s\n\n", port, port)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(3 * time.Second):
+		}
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(b.String()), 0o644); err != nil {
-		log.Warn("menulis alamat panel untuk konsol", "err", err)
-		return
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		log.Warn("menulis alamat panel untuk konsol", "err", err)
-	}
+	log.Warn("alamat panel tidak bisa ditampilkan di layar konsol", "err", err)
 }

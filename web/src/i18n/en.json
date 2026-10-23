@@ -180,13 +180,13 @@
   },
   "https": {
     "title": "The panel uses a secure connection",
-    "intro": "The Sapo panel only opens over HTTPS so your password and data cannot be intercepted on the network.",
+    "intro": "The Sapo panel only opens over HTTPS so your password and data are encrypted on the network.",
     "step1": "Click the button below. Your browser will show a certificate warning because this certificate was created by the NAS itself, not by a certificate authority.",
-    "step2": "Open the certificate details in that warning and make sure its SHA-256 fingerprint matches the one below (also shown on the NAS screen).",
+    "step2": "Open the certificate details in that warning and make sure its SHA-256 fingerprint matches the one shown on the NAS screen (console login screen).",
     "step3": "If it matches, proceed to the site. This warning appears only once for this browser.",
-    "fingerprint": "Certificate fingerprint (SHA-256)",
+    "fingerprint": "Certificate fingerprint (SHA-256). For convenience only: this page is not encrypted yet, so the trusted value is the one shown on the NAS screen.",
     "open": "Open secure panel",
-    "why": "If the fingerprint is different, do not proceed: another device may be impersonating your NAS."
+    "why": "If the fingerprint in your browser differs from the one on the NAS screen, do not proceed: another device may be impersonating your NAS. From now on, open the panel directly with its https:// address."
   },
   "errors": {
     "bad_credentials": "Wrong username or password.",

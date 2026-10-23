@@ -66,7 +66,8 @@ install -D -m 0644 "$HERE/systemd/sapod.service" "$PKG$UNIT_DIR/sapod.service"
 install -D -m 0644 "$HERE/systemd/sapo-api.service" "$PKG$UNIT_DIR/sapo-api.service"
 install -D -m 0644 "$HERE/sysusers.conf" "$PKG$SYSUSERS_DIR/sapo.conf"
 # Layar login konsol menampilkan alamat panel dan sidik jari sertifikat
-# HTTPS, yang ditulis sapo-api saat berjalan (api.tls.console_issue_file).
+# HTTPS. File-nya ditulis sapod (root) dari templat tetap, atas permintaan
+# sapo-api (operasi console.panel_address, agent.console.issue_file).
 install -d -m 0755 "$PKG/etc/issue.d"
 ln -s "$CONSOLE_ISSUE" "$PKG/etc/issue.d/sapo.issue"
 

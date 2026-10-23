@@ -1,7 +1,9 @@
 [Unit]
 Description=Sapo API & panel (sapo-api)
 Documentation=https://github.com/mehuli-id/sapo
-After=sapod.service network-online.target
+# time-sync.target: sertifikat HTTPS dibuat dengan jam yang sudah benar
+# (papan tanpa RTC menyala dengan jam mundur sampai NTP sinkron).
+After=sapod.service network-online.target time-sync.target
 Wants=sapod.service network-online.target
 
 [Service]
@@ -13,10 +15,6 @@ Restart=on-failure
 RestartSec=2s
 StateDirectory=sapo
 StateDirectoryMode=0750
-# Alamat panel dan sidik jari sertifikat untuk layar login konsol
-# (/etc/issue.d/sapo.issue menautkan ke /run/sapo-api/console.issue).
-RuntimeDirectory=sapo-api
-RuntimeDirectoryMode=0755
 # Koneksi ke socket sapod tidak butuh izin tulis pada sistem file, jadi
 # /run/sapo tidak perlu (dan tidak boleh wajib) ada saat layanan dimulai.
 #

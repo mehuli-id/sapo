@@ -116,7 +116,7 @@ func (h *harness) do(method, path string, body any, opts ...reqOpt) *httptest.Re
 	rec := httptest.NewRecorder()
 	h.s.ServeHTTP(rec, r)
 	for _, c := range rec.Result().Cookies() {
-		if c.Name == SessionCookie {
+		if c.Name == SessionCookie || c.Name == SecureSessionCookie {
 			if c.MaxAge < 0 {
 				h.cookie = nil
 			} else {
@@ -679,12 +679,20 @@ func TestHTTPSServesEverythingWithoutHSTS(t *testing.T) {
 	}
 	var secure bool
 	for _, c := range rec.Result().Cookies() {
-		if c.Name == SessionCookie {
-			secure = c.Secure
+		if c.Name == SecureSessionCookie {
+			secure = c.Secure && c.Path == "/" && c.Domain == ""
 		}
 	}
 	if !secure {
-		t.Fatal("cookie sesi lewat HTTPS harus Secure")
+		t.Fatal("cookie sesi lewat HTTPS harus __Host- (Secure, Path=/, tanpa Domain)")
+	}
+	// Cookie sesi tanpa awalan (misalnya ditanam lewat HTTP) diabaikan di HTTPS.
+	planted := h.do(http.MethodGet, "/api/v1/auth/status", nil, viaTLS(), func(r *http.Request) {
+		r.Header.Del("Cookie")
+		r.AddCookie(&http.Cookie{Name: SessionCookie, Value: h.cookie.Value})
+	})
+	if strings.Contains(planted.Body.String(), `"authenticated":true`) {
+		t.Fatal("cookie tanpa awalan __Host- tidak boleh diterima lewat HTTPS")
 	}
 	if rec := h.do(http.MethodGet, "/api/v1/system/info", nil, viaTLS()); rec.Code != http.StatusOK {
 		t.Fatalf("system/info lewat HTTPS: %d", rec.Code)

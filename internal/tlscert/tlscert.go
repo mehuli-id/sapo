@@ -59,6 +59,11 @@ func Ensure(o Options) (Cert, error) {
 	if err := os.MkdirAll(o.Dir, 0o700); err != nil {
 		return Cert{}, fmt.Errorf("membuat direktori sertifikat: %w", err)
 	}
+	// Direktori yang sudah ada juga diperketat (MkdirAll tidak mengubahnya).
+	if err := os.Chmod(o.Dir, 0o700); err != nil {
+		return Cert{}, err
+	}
+	o.DNSNames = normalizeNames(o.DNSNames)
 	if c, err := load(o.Dir); err == nil && usable(c.Leaf, o, now()) {
 		return c, nil
 	}
@@ -79,16 +84,33 @@ func load(dir string) (Cert, error) {
 }
 
 // usable: belum (hampir) kedaluwarsa dan mencakup semua nama yang wajib.
+// Jam yang mundur (NotBefore di masa depan, misalnya papan tanpa RTC sebelum
+// NTP sinkron) sengaja tidak memicu sertifikat baru: sidik jari yang sudah
+// dicocokkan pengguna tetap berlaku setelah jam benar.
 func usable(leaf *x509.Certificate, o Options, now time.Time) bool {
-	if now.Before(leaf.NotBefore) || now.Add(o.RenewBefore).After(leaf.NotAfter) {
+	if now.Add(o.RenewBefore).After(leaf.NotAfter) {
 		return false
 	}
 	for _, n := range o.DNSNames {
-		if !slices.Contains(leaf.DNSNames, strings.ToLower(n)) {
+		if !slices.Contains(leaf.DNSNames, n) {
 			return false
 		}
 	}
 	return true
+}
+
+// normalizeNames: huruf kecil, tanpa titik di akhir, tanpa yang kosong atau
+// ganda. Dipakai untuk membuat dan memeriksa sertifikat agar keduanya selalu
+// sepakat (nama kosong tidak boleh membuat sertifikat dibuat ulang terus).
+func normalizeNames(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, n := range in {
+		n = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(n)), ".")
+		if n != "" && !slices.Contains(out, n) {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 func create(o Options, now time.Time) (Cert, error) {
@@ -100,20 +122,17 @@ func create(o Options, now time.Time) (Cert, error) {
 	if err != nil {
 		return Cert{}, err
 	}
-	names := make([]string, 0, len(o.DNSNames))
-	for _, n := range o.DNSNames {
-		if n = strings.ToLower(n); n != "" && !slices.Contains(names, n) {
-			names = append(names, n)
-		}
-	}
+	names := o.DNSNames
 	if len(names) == 0 {
 		return Cert{}, errors.New("sertifikat butuh minimal satu nama host")
 	}
 	tmpl := &x509.Certificate{
-		SerialNumber:          serial,
-		Subject:               pkix.Name{CommonName: names[0], Organization: []string{o.Organization}},
-		NotBefore:             now.Add(-time.Hour), // toleransi jam klien yang sedikit tertinggal
-		NotAfter:              now.Add(o.Validity),
+		SerialNumber: serial,
+		Subject:      pkix.Name{CommonName: names[0], Organization: []string{o.Organization}},
+		// Toleransi jam klien yang sedikit tertinggal. Masa berlaku dihitung
+		// dari NotBefore agar total tidak melewati batas (Apple: 825 hari).
+		NotBefore:             now.Add(-time.Hour),
+		NotAfter:              now.Add(-time.Hour).Add(o.Validity),
 		KeyUsage:              x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,

@@ -32,7 +32,7 @@ Lalu buka `http://<nama-host>.local:5000` atau `http://<IP-NAS>:5000` dari kompu
 | `/etc/sapo/sapo.yaml` (perubahan admin/panel, dibuat postinst) | — |
 | `/usr/lib/systemd/system/sapod.service`, `sapo-api.service` | `packaging/deb/systemd/` |
 | `/usr/lib/sysusers.d/sapo.conf` | `packaging/deb/sysusers.conf` |
-| `/etc/issue.d/sapo.issue` (tautan ke `/run/sapo-api/console.issue`: alamat panel dan sidik jari sertifikat di layar login konsol) | ditulis `sapo-api` saat berjalan |
+| `/etc/issue.d/sapo.issue` (tautan ke `/run/sapo/console.issue`: alamat panel dan sidik jari sertifikat di layar login konsol) | ditulis `sapod` dari templat tetap (operasi `console.panel_address`) |
 
 Baris `Depends` tidak ditulis tangan: diambil dari manifest fitur dengan `activation: always` (`go run ./tools/featuredeps`). Paket untuk fitur lain (Samba, ZFS, Docker, VPN) dipasang oleh `sapod` saat fitur diaktifkan dari panel.
 

@@ -131,3 +131,40 @@ func TestEnsureNeedsAName(t *testing.T) {
 		t.Fatal("tanpa nama host harus gagal")
 	}
 }
+
+func TestEnsureStableWithOddNamesAndClock(t *testing.T) {
+	dir := t.TempDir()
+	start := time.Now()
+	first, err := Ensure(opts(t, dir, start, "nas", "", "NAS.local.", " nas "))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Nama kosong, huruf besar, dan titik di akhir tidak boleh memicu
+	// pembuatan ulang di setiap start.
+	again, err := Ensure(opts(t, dir, start.Add(time.Minute), "nas", "", "NAS.local.", " nas "))
+	if err != nil || again.Created || again.Fingerprint != first.Fingerprint {
+		t.Fatalf("sertifikat harus dipakai ulang: created=%v err=%v", again.Created, err)
+	}
+	// Jam mundur sebelum NTP sinkron: sertifikat yang ada tetap dipakai.
+	past, err := Ensure(opts(t, dir, start.Add(-48*time.Hour), "nas"))
+	if err != nil || past.Created {
+		t.Fatalf("jam mundur tidak boleh membuat sertifikat baru: created=%v err=%v", past.Created, err)
+	}
+	// Masa berlaku total (NotBefore sampai NotAfter) tidak melebihi Validity.
+	if got := first.Leaf.NotAfter.Sub(first.Leaf.NotBefore); got > 825*24*time.Hour {
+		t.Fatalf("masa berlaku %v melebihi 825 hari", got)
+	}
+}
+
+func TestEnsureTightensExistingDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "tls")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Ensure(opts(t, dir, time.Now(), "nas")); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := os.Stat(dir); st.Mode().Perm() != 0o700 {
+		t.Fatalf("izin direktori %v, harus 0700", st.Mode().Perm())
+	}
+}

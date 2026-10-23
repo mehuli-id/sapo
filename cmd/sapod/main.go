@@ -56,6 +56,11 @@ func main() {
 	})
 	reg.Register(proto.OpStorageDisks, storage.DisksOp())
 	reg.Register(proto.OpStorageSMART, storage.SMARTOp())
+	reg.Register(proto.OpConsolePanelAddress, agent.ConsolePanelAddressOp(agent.ConsoleTools{
+		IssueFile: cfg.Agent.Console.IssueFile,
+		Agetty:    cfg.Agent.Console.Agetty,
+		Timeout:   10 * time.Second,
+	}))
 
 	ln, err := agent.Listen(cfg.Agent.Socket, cfg.Agent.SocketGroup)
 	if err != nil {
