@@ -862,3 +862,49 @@ func TestReenrollTOTP(t *testing.T) {
 		t.Fatalf("token bekas: %s", errCode(rec))
 	}
 }
+
+func TestRotationEndsOtherSessions(t *testing.T) {
+	h := newHarness(t, &fakeAgent{})
+	h.runSetup()
+	first := h.cookie // sesi dari setup (misalnya perangkat lain atau sesi curian)
+	h.now = h.now.Add(31 * time.Second)
+	if rec := h.login(h.recovery[0]); rec.Code != http.StatusOK {
+		t.Fatalf("login: %d", rec.Code)
+	}
+	rec := h.do(http.MethodPost, "/api/v1/account/recovery-codes", map[string]string{"password": testPassword})
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"other_sessions_ended":1`) {
+		t.Fatalf("buat ulang: %d %s", rec.Code, rec.Body)
+	}
+	// Sesi yang dipakai tetap berlaku, sesi lain berakhir.
+	if rec := h.do(http.MethodGet, "/api/v1/auth/status", nil); !strings.Contains(rec.Body.String(), `"authenticated":true`) {
+		t.Fatal("sesi yang sedang dipakai harus tetap berlaku")
+	}
+	h.cookie = first
+	if rec := h.do(http.MethodGet, "/api/v1/auth/status", nil); strings.Contains(rec.Body.String(), `"authenticated":true`) {
+		t.Fatal("sesi lain harus berakhir setelah kode cadangan dibuat ulang")
+	}
+}
+
+func TestReauthWorksWhileLoginLockedByOthers(t *testing.T) {
+	h := newHarness(t, &fakeAgent{})
+	h.runSetup()
+	owner := h.cookie
+	// Orang lain di jaringan sengaja mengunci login akun dengan password salah.
+	for i := 0; i < h.s.cfg.Auth.LoginMaxAttempts+1; i++ {
+		h.cookie = nil
+		h.do(http.MethodPost, "/api/v1/auth/login", loginRequest{Username: "arthur", Password: "tebakan salah"}, fromIP(fmt.Sprintf("192.168.1.%d", 100+i)))
+	}
+	// Pemilik yang sedang login tetap bisa memutar kode cadangan.
+	h.cookie = owner
+	if rec := h.do(http.MethodPost, "/api/v1/account/recovery-codes", map[string]string{"password": testPassword}); rec.Code != http.StatusOK {
+		t.Fatalf("pemilik harus tetap bisa memutar kode saat login dikunci: %d %s", rec.Code, rec.Body)
+	}
+	// Re-auth punya batasnya sendiri: tebakan password lewat sesi tetap dibatasi.
+	var last *httptest.ResponseRecorder
+	for i := 0; i < h.s.cfg.Auth.LoginMaxAttempts+1; i++ {
+		last = h.do(http.MethodPost, "/api/v1/account/recovery-codes", map[string]string{"password": "tebakan salah"})
+	}
+	if last.Code != http.StatusTooManyRequests {
+		t.Fatalf("tebakan password lewat re-auth harus dibatasi, dapat %d", last.Code)
+	}
+}

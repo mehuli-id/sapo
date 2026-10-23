@@ -188,15 +188,45 @@ func TestLimiterRefund(t *testing.T) {
 
 func TestTOTPStepCompareAndSet(t *testing.T) {
 	s, _ := OpenStore(t.TempDir())
-	_ = s.CompleteSetup(User{Username: "arthur", Role: RoleAdmin}, "id", time.Now())
-	if err := s.ConsumeTOTPStep("arthur", 100); err != nil {
+	_ = s.CompleteSetup(User{Username: "arthur", Role: RoleAdmin, TOTPSecret: "LAMA"}, "id", time.Now())
+	if err := s.ConsumeTOTPStep("arthur", "LAMA", 100); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ConsumeTOTPStep("arthur", 100); err != ErrTOTPReused {
+	if err := s.ConsumeTOTPStep("arthur", "LAMA", 100); err != ErrTOTPReused {
 		t.Fatalf("step sama harus ditolak, dapat %v", err)
 	}
-	if err := s.ConsumeTOTPStep("arthur", 99); err != ErrTOTPReused {
+	if err := s.ConsumeTOTPStep("arthur", "LAMA", 99); err != ErrTOTPReused {
 		t.Fatal("step mundur harus ditolak")
+	}
+	// Rahasia diganti di antara pemeriksaan kode dan penyimpanan step: kode
+	// dari rahasia lama tidak boleh diterima.
+	if err := s.SetTOTP("arthur", "BARU", 150); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ConsumeTOTPStep("arthur", "LAMA", 200); err != ErrTOTPReused {
+		t.Fatalf("kode dari rahasia lama harus ditolak, dapat %v", err)
+	}
+	if err := s.ConsumeTOTPStep("arthur", "BARU", 200); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDeleteUserSessionsExcept(t *testing.T) {
+	ss := NewSessions(time.Hour, time.Hour)
+	keep, _ := ss.Create("arthur", RoleAdmin)
+	other, _ := ss.Create("arthur", RoleAdmin)
+	someoneElse, _ := ss.Create("budi", RoleAdmin)
+	if n := ss.DeleteUserExcept("arthur", keep); n != 1 {
+		t.Fatalf("sesi yang diakhiri %d, harus 1", n)
+	}
+	if _, ok := ss.Get(keep); !ok {
+		t.Fatal("sesi yang sedang dipakai harus tetap berlaku")
+	}
+	if _, ok := ss.Get(other); ok {
+		t.Fatal("sesi lain milik user harus berakhir")
+	}
+	if _, ok := ss.Get(someoneElse); !ok {
+		t.Fatal("sesi user lain tidak boleh tersentuh")
 	}
 }
 

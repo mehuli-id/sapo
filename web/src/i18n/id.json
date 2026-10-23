@@ -229,7 +229,9 @@
     "continue": "Lanjut",
     "cancel": "Batal",
     "done": "Selesai",
-    "menuLow": "Kode cadangan hampir habis"
+    "menuLow": "Kode cadangan hampir habis",
+    "othersSignedOut": "Perangkat lain yang masih login dengan akun ini sudah dikeluarkan.",
+    "totpCodesStillValid": "Kode cadangan lama tetap berlaku; buat kode baru bila Anda curiga kodenya diketahui orang lain."
   },
   "errors": {
     "bad_credentials": "Nama pengguna atau password salah.",

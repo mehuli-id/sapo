@@ -229,7 +229,9 @@
     "continue": "Continue",
     "cancel": "Cancel",
     "done": "Done",
-    "menuLow": "Backup codes running low"
+    "menuLow": "Backup codes running low",
+    "othersSignedOut": "Other devices signed in with this account have been signed out.",
+    "totpCodesStillValid": "Your existing backup codes still work; create new ones if you suspect someone else knows them."
   },
   "errors": {
     "bad_credentials": "Wrong username or password.",

@@ -78,6 +78,23 @@ func (s *Sessions) Delete(tok string) {
 	delete(s.byID, hashToken(tok))
 }
 
+// DeleteUserExcept mengakhiri semua sesi milik username kecuali sesi dengan
+// token keep (sesi yang sedang dipakai). Dipakai setelah 2FA atau kode
+// cadangan diganti, agar sesi yang mungkin dicuri ikut berakhir.
+func (s *Sessions) DeleteUserExcept(username, keep string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	keepID := hashToken(keep)
+	n := 0
+	for id, sess := range s.byID {
+		if sess.Username == username && id != keepID {
+			delete(s.byID, id)
+			n++
+		}
+	}
+	return n
+}
+
 func (s *Sessions) gcLocked(now time.Time) {
 	for id, sess := range s.byID {
 		if now.Sub(sess.LastSeen) > s.Idle || now.Sub(sess.CreatedAt) > s.Max {
