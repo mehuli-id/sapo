@@ -435,6 +435,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 					badCode("bad_recovery_code")
 					return
 				}
+				s.totpLimiter.Refund(totpKey) // gagal menyimpan bukan tebakan salah
 				writeError(w, http.StatusInternalServerError, "internal", "gagal menyimpan status 2FA")
 				return
 			}
@@ -447,11 +448,12 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			}
 			// Compare-and-set: dua login bersamaan dengan kode yang sama, hanya
 			// satu yang berhasil.
-			if err := s.store.ConsumeTOTPStep(user.Username, step); err != nil {
+			if err := s.store.ConsumeTOTPStep(user.Username, user.TOTPSecret, step); err != nil {
 				if errors.Is(err, auth.ErrTOTPReused) {
 					badCode("totp_reused")
 					return
 				}
+				s.totpLimiter.Refund(totpKey)
 				writeError(w, http.StatusInternalServerError, "internal", "gagal menyimpan status 2FA")
 				return
 			}

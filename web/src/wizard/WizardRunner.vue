@@ -2,7 +2,7 @@
 // Renderer wizard generik. Langkah, isian, teks, dan petunjuk datang dari
 // data (wizards/<id>.yaml lewat API); komponen ini hanya tahu cara
 // menampilkan setiap jenis isian.
-import { computed, reactive, ref } from "vue"
+import { computed, reactive, ref, watch } from "vue"
 import { useI18n } from "vue-i18n"
 import { ArrowLeft, ArrowRight, Check, CircleHelp, Eye, EyeOff, LoaderCircle } from "@lucide/vue"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -33,6 +33,15 @@ const showHelp = ref(false)
 const reveal = reactive<Record<string, boolean>>({})
 const errors = reactive<Record<string, string>>({})
 const enrollment = reactive<Enrollment>({ token: "", secret: "", qr: "", username: "", recoveryCodes: [] })
+
+// Kode cadangan baru (pendaftaran 2FA diulang, misalnya setelah nama
+// pengguna diganti): konfirmasi "sudah disimpan" untuk kode lama tidak berlaku.
+watch(
+  () => enrollment.token,
+  () => {
+    for (const st of props.wizard.steps) for (const f of st.fields ?? []) if (f.type === "recovery-codes") values[f.key] = ""
+  },
+)
 
 const values = reactive<Record<string, string>>({})
 for (const st of props.wizard.steps) for (const f of st.fields ?? []) values[f.key] = f.default ?? ""

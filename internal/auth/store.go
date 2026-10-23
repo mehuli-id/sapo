@@ -119,10 +119,12 @@ func (s *Store) Get(username string) (User, bool) {
 var ErrTOTPReused = errors.New("kode 2FA sudah dipakai")
 
 // ConsumeTOTPStep mencatat step TOTP yang dipakai secara compare-and-set:
-// hanya berhasil bila step lebih baru dari yang tersimpan.
-func (s *Store) ConsumeTOTPStep(username string, step int64) error {
+// hanya berhasil bila step lebih baru dari yang tersimpan DAN rahasia 2FA
+// masih sama dengan yang dipakai memeriksa kode (rahasia bisa diganti dari
+// panel di antara pemeriksaan password dan kode).
+func (s *Store) ConsumeTOTPStep(username, secret string, step int64) error {
 	return s.updateUser(username, func(u *User) error {
-		if step <= u.TOTPLastStep {
+		if step <= u.TOTPLastStep || u.TOTPSecret != secret {
 			return ErrTOTPReused
 		}
 		u.TOTPLastStep = step

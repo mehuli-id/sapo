@@ -130,6 +130,7 @@ const grouped = (s: string) => s.replace(/(.{4})/g, "$1 ").trim()
       </template>
       <template v-else-if="mode === 'codes-shown'">
         <p class="text-sm font-medium">{{ t("account.codesShownOnce") }}</p>
+        <p class="text-xs text-muted-foreground">{{ t("account.othersSignedOut") }}</p>
         <RecoveryCodes :codes="newCodes" :username="status?.user?.username" />
         <Button size="sm" variant="ghost" @click="start('idle')">{{ t("account.done") }}</Button>
       </template>
@@ -179,6 +180,7 @@ const grouped = (s: string) => s.replace(/(.{4})/g, "$1 ").trim()
       </template>
       <template v-else-if="mode === 'totp-done'">
         <p class="text-sm font-medium text-primary">{{ t("account.totpDone") }}</p>
+        <p class="text-xs text-muted-foreground">{{ t("account.othersSignedOut") }} {{ t("account.totpCodesStillValid") }}</p>
         <Button size="sm" variant="ghost" @click="start('idle')">{{ t("account.done") }}</Button>
       </template>
       <Button v-else size="sm" variant="outline" @click="start('totp-password')">{{ t("account.totpStart") }}</Button>

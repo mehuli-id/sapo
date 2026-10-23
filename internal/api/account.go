@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/mehuli-id/sapo/internal/auth"
@@ -11,7 +12,9 @@ import (
 //
 // Mengganti 2FA atau kode cadangan sama dengan mengambil alih akun, jadi
 // selalu meminta password lagi (sesi yang dicuri saja tidak cukup). Password
-// salah dihitung di batas percobaan login akun yang sama.
+// salah dihitung di batas tersendiri (reauth:<user>), bukan batas login: orang
+// lain di jaringan yang sengaja mengunci login akun tidak boleh menghalangi
+// pemilik yang sedang login memutar 2FA atau kode cadangan saat insiden.
 
 // reauth memeriksa password user yang sedang login. Bila gagal, jawaban
 // sudah ditulis dan ok bernilai false.
@@ -26,7 +29,7 @@ func (s *Server) reauth(w http.ResponseWriter, r *http.Request, password string)
 		writeError(w, http.StatusUnauthorized, "unauthenticated", "silakan login")
 		return auth.User{}, false
 	}
-	userKey := "user:" + user.Username
+	userKey := "reauth:" + user.Username
 	if ok, rem := s.limiter.Begin(userKey); !ok {
 		s.writeLocked(w, rem)
 		return auth.User{}, false
@@ -71,8 +74,9 @@ func (s *Server) handleRecoveryCodes(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "gagal menyimpan kode cadangan")
 		return
 	}
-	s.record(r, user.Username, "account.recovery_codes", true, nil)
-	writeJSON(w, http.StatusOK, map[string]any{"recovery_codes": codes})
+	ended := s.endOtherSessions(r, user.Username)
+	s.record(r, user.Username, "account.recovery_codes", true, map[string]string{"other_sessions_ended": strconv.Itoa(ended)})
+	writeJSON(w, http.StatusOK, map[string]any{"recovery_codes": codes, "other_sessions_ended": ended})
 }
 
 // handleTOTPBegin memulai pendaftaran ulang aplikasi autentikator (misalnya
@@ -152,6 +156,14 @@ func (s *Server) handleTOTPConfirm(w http.ResponseWriter, r *http.Request) {
 	s.reenroll.mu.Lock()
 	delete(s.reenroll.entries, req.Token)
 	s.reenroll.mu.Unlock()
-	s.record(r, sess.Username, "account.totp", true, nil)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	ended := s.endOtherSessions(r, sess.Username)
+	s.record(r, sess.Username, "account.totp", true, map[string]string{"other_sessions_ended": strconv.Itoa(ended)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "other_sessions_ended": ended})
+}
+
+// endOtherSessions mengakhiri sesi lain milik user (perangkat lain atau sesi
+// yang mungkin dicuri); sesi yang sedang dipakai tetap berlaku.
+func (s *Server) endOtherSessions(r *http.Request, username string) int {
+	_, tok, _ := s.currentSession(r)
+	return s.sessions.DeleteUserExcept(username, tok)
 }

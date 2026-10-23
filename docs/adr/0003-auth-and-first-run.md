@@ -37,6 +37,8 @@ Panel tidak boleh terbuka ke jaringan sebelum ada login. Pengguna juga ingin sem
 - **Pemulihan akses 2FA** (sejak 2026-10-24):
   - **Kode cadangan.** Setup membuat `auth.recovery_code_count` kode cadangan sekali pakai (bawaan 10), dengan format `XXXXX-XXXXX` (Crockford base32, 50 bit). Kode ditampilkan sekali di langkah wizard yang wajib dikonfirmasi, dan hanya hash SHA-256-nya yang disimpan.
   - **Login dengan kode cadangan.** Kode dimasukkan di kolom kode 2FA dan dihitung di penghitung kode 2FA salah yang sama. Pemakaiannya dicatat di log audit beserta sisa kode.
-  - **Aplikasi Keamanan Akun.** Admin bisa membuat kode baru (semua kode lama tidak berlaku) dan memindahkan 2FA ke aplikasi autentikator baru. Rahasia lama tetap berlaku sampai kode dari aplikasi baru dikonfirmasi. Keduanya wajib memasukkan password lagi, dan password salah dihitung di batas percobaan login akun.
+  - **Aplikasi Keamanan Akun.** Admin bisa membuat kode baru (semua kode lama tidak berlaku) dan memindahkan 2FA ke aplikasi autentikator baru. Rahasia lama tetap berlaku sampai kode dari aplikasi baru dikonfirmasi. Memindahkan 2FA tidak mengganti kode cadangan, dan panel menyatakan hal itu.
+  - **Wajib password lagi** untuk kedua tindakan itu. Password salah dihitung di batas tersendiri (`reauth:<user>`), bukan batas login, supaya orang lain yang mengunci login akun tidak bisa menghalangi pemilik memutar 2FA saat insiden.
+  - **Sesi lain berakhir.** Setelah salah satu tindakan itu berhasil, semua sesi lain milik user diakhiri. Sesi yang sedang dipakai tetap berlaku.
   - **Peringatan.** Panel memberi peringatan bila sisa kode `<= auth.recovery_codes_low`.
   - **Belum ada:** pemulihan bila password **dan** kode cadangan sama-sama hilang. Rencananya lewat menu darurat di konsol NAS (dokumen rancangan).
