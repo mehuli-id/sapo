@@ -17,6 +17,9 @@ export interface Enrollment {
   secret: string
   qr: string
   username: string
+  // Kode cadangan yang dibuat bersama rahasia ini (ditampilkan di langkah
+  // berikutnya, disimpan server saat setup selesai).
+  recoveryCodes: string[]
 }
 
 const props = defineProps<{ username: string; inputId: string; invalid?: boolean; enrollment: Enrollment }>()
@@ -30,11 +33,13 @@ async function enroll() {
   failed.value = false
   props.enrollment.qr = ""
   props.enrollment.secret = ""
+  props.enrollment.recoveryCodes = []
   try {
     const res = await api.setupTOTP(props.username)
     props.enrollment.token = res.token
     props.enrollment.secret = res.secret
     props.enrollment.username = props.username
+    props.enrollment.recoveryCodes = res.recovery_codes
     props.enrollment.qr = await QRCode.toDataURL(res.uri, { margin: 1, width: 192, errorCorrectionLevel: "M" })
     code.value = ""
   } catch {

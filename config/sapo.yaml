@@ -96,6 +96,11 @@ auth:
   totp_max_failures: 10
   totp_window_minutes: 60
   setup_totp_expiry_minutes: 15
+  # Kode cadangan 2FA: kode sekali pakai untuk masuk bila HP autentikator
+  # hilang. Dibuat saat setup awal dan bisa dibuat ulang dari panel
+  # (Keamanan Akun). Panel memberi peringatan bila sisa kode <= batas ini.
+  recovery_code_count: 10
+  recovery_codes_low: 3
   # Argon2 memakai banyak RAM; batasi hash yang berjalan bersamaan.
   max_concurrent_hashes: 2
   argon2:

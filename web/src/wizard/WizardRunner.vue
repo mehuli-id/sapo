@@ -16,6 +16,7 @@ import { pick } from "@/lib/localized"
 import { cn } from "@/lib/utils"
 import type { Enrollment } from "./TotpEnroll.vue"
 import TotpEnroll from "./TotpEnroll.vue"
+import RecoveryCodes from "@/components/RecoveryCodes.vue"
 
 const props = defineProps<{
   wizard: Wizard
@@ -31,7 +32,7 @@ const formError = ref("")
 const showHelp = ref(false)
 const reveal = reactive<Record<string, boolean>>({})
 const errors = reactive<Record<string, string>>({})
-const enrollment = reactive<Enrollment>({ token: "", secret: "", qr: "", username: "" })
+const enrollment = reactive<Enrollment>({ token: "", secret: "", qr: "", username: "", recoveryCodes: [] })
 
 const values = reactive<Record<string, string>>({})
 for (const st of props.wizard.steps) for (const f of st.fields ?? []) values[f.key] = f.default ?? ""
@@ -43,6 +44,8 @@ const usernameRe = computed(() => new RegExp(props.policy.username_pattern))
 
 function validateField(f: WizardField): string {
   const v = values[f.key] ?? ""
+  // Kotak centang kode cadangan punya pesan sendiri (bukan "wajib diisi").
+  if (f.type === "recovery-codes") return v === "yes" ? "" : t("recovery.mustConfirm")
   if (f.required && !v.trim()) return t("wizard.required")
   switch (f.type) {
     case "username":
@@ -86,13 +89,22 @@ async function finish() {
   busy.value = true
   formError.value = ""
   try {
-    // Token pendaftaran 2FA menghubungkan kode dengan QR yang dipindai di browser ini.
-    await props.submit(enrollment.token ? { ...values, totp_token: enrollment.token } : { ...values })
+    // Token pendaftaran 2FA menghubungkan kode dengan QR yang dipindai di
+    // browser ini. Konfirmasi "kode cadangan sudah disimpan" hanya untuk
+    // wizard, tidak dikirim ke server.
+    const payload: Record<string, string> = {}
+    for (const st of props.wizard.steps)
+      for (const f of st.fields ?? []) if (f.type !== "recovery-codes") payload[f.key] = values[f.key] ?? ""
+    await props.submit(enrollment.token ? { ...payload, totp_token: enrollment.token } : payload)
     emit("done")
   } catch (e) {
     const code = e instanceof ApiError ? e.code : "generic"
     // Rahasia 2FA kedaluwarsa di server: daftar ulang saat langkah 2FA dibuka.
-    if (code === "totp_expired") enrollment.secret = ""
+    if (code === "totp_expired") {
+      // Pendaftaran baru = kode cadangan baru: konfirmasi lama tidak berlaku.
+      enrollment.secret = ""
+      for (const st of props.wizard.steps) for (const f of st.fields ?? []) if (f.type === "recovery-codes") values[f.key] = ""
+    }
     const msg = t(`errors.${code}`) !== `errors.${code}` ? t(`errors.${code}`) : t("errors.generic")
     // Lompat ke langkah yang berisi isian bermasalah.
     const field = e instanceof ApiError ? String(e.detail.field ?? "") : ""
@@ -125,6 +137,9 @@ const reviewRows = computed(() =>
           // Yang relevan di ringkasan adalah statusnya, bukan kodenya.
           label = pick(st.title, locale.value)
           value = t("wizard.twofaOn")
+        } else if (f.type === "recovery-codes") {
+          label = pick(st.title, locale.value)
+          value = t("recovery.saved", { n: enrollment.recoveryCodes.length })
         } else if (f.secret) value = t("wizard.hidden")
         return { key: f.key, label, value }
       }),
@@ -182,7 +197,8 @@ const reviewRows = computed(() =>
       </template>
 
       <div v-for="f in step.fields ?? []" :key="f.key" class="space-y-1.5">
-        <Label :for="`wz-${f.key}`">{{ pick(f.label, locale) }}</Label>
+        <!-- Label kode cadangan ada di samping kotak centangnya. -->
+        <Label v-if="f.type !== 'recovery-codes'" :for="`wz-${f.key}`">{{ pick(f.label, locale) }}</Label>
 
         <!-- Bahasa -->
         <div v-if="f.type === 'language'" :id="`wz-${f.key}`" role="radiogroup" class="grid gap-2 sm:grid-cols-2">
@@ -214,6 +230,23 @@ const reviewRows = computed(() =>
           :invalid="!!errors[f.key]"
           :enrollment="enrollment"
         />
+
+        <!-- Kode cadangan 2FA: wajib dikonfirmasi sudah disimpan -->
+        <div v-else-if="f.type === 'recovery-codes'" class="space-y-3">
+          <RecoveryCodes v-if="enrollment.recoveryCodes.length" :codes="enrollment.recoveryCodes" :username="values.username" />
+          <p v-else class="text-sm text-muted-foreground">{{ t("recovery.needTwofa") }}</p>
+          <label class="flex items-start gap-2 text-sm">
+            <input
+              :id="`wz-${f.key}`"
+              type="checkbox"
+              class="mt-0.5 size-4 accent-primary"
+              :checked="values[f.key] === 'yes'"
+              :disabled="!enrollment.recoveryCodes.length"
+              @change="values[f.key] = ($event.target as HTMLInputElement).checked ? 'yes' : ''"
+            />
+            <span>{{ pick(f.label, locale) }}</span>
+          </label>
+        </div>
 
         <!-- Password -->
         <div v-else-if="f.type === 'password' || f.type === 'password-confirm'" class="relative">

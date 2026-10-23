@@ -84,6 +84,36 @@ steps:
         autocomplete: one-time-code
         label: { id: Kode dari aplikasi, en: Code from the app }
 
+  - id: recovery
+    title: { id: Kode cadangan, en: Backup codes }
+    description:
+      id: >-
+        Bila HP berisi aplikasi autentikator hilang atau rusak, masuk dengan
+        salah satu kode ini sebagai pengganti kode 6 digit. Setiap kode hanya
+        bisa dipakai sekali.
+      en: >-
+        If the phone with your authenticator app is lost or broken, sign in
+        with one of these codes instead of the 6-digit code. Each code works
+        only once.
+    help:
+      id: >-
+        Unduh atau cetak kode ini dan simpan terpisah dari HP, misalnya di
+        pengelola password atau di kertas di tempat aman. Kode ini hanya
+        ditampilkan sekali; kode baru bisa dibuat kapan saja dari aplikasi
+        Keamanan Akun.
+      en: >-
+        Download or print these codes and keep them apart from your phone, for
+        example in a password manager or on paper somewhere safe. They are
+        shown only once; you can create new codes any time from the Account
+        Security app.
+    fields:
+      - key: recovery_saved
+        type: recovery-codes
+        required: true
+        label:
+          id: Saya sudah menyimpan kode cadangan ini di tempat yang aman
+          en: I have saved these backup codes somewhere safe
+
   - id: summary
     type: review
     title: { id: Ringkasan, en: Summary }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, ref } from "vue"
+import { computed, nextTick, ref } from "vue"
 import { useI18n } from "vue-i18n"
 import { ArrowLeft, LoaderCircle } from "@lucide/vue"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -58,8 +58,24 @@ async function submit() {
 
 function backToPassword() {
   needCode.value = false
+  useRecovery.value = false
   code.value = ""
   error.value = ""
+}
+
+// Kode cadangan (HP autentikator tidak tersedia): XXXXX-XXXXX, 10 karakter
+// huruf/angka. Dikirim di kolom yang sama dengan kode 2FA.
+const useRecovery = ref(false)
+const codeReady = computed(() =>
+  useRecovery.value ? code.value.replace(/[^0-9a-z]/gi, "").length === 10 : code.value.length === 6,
+)
+
+async function toggleRecovery() {
+  useRecovery.value = !useRecovery.value
+  code.value = ""
+  error.value = ""
+  await nextTick()
+  ;(codeInput.value?.$el as HTMLInputElement | undefined)?.focus()
 }
 </script>
 
@@ -68,7 +84,9 @@ function backToPassword() {
     <form class="space-y-5" novalidate @submit.prevent="submit">
       <div class="space-y-1">
         <h1 class="text-xl font-semibold">{{ t("login.title", { name: branding?.product.name ?? "Sapo" }) }}</h1>
-        <p class="text-sm text-muted-foreground">{{ needCode ? t("login.codeHint") : t("login.subtitle") }}</p>
+        <p class="text-sm text-muted-foreground">
+          {{ needCode ? (useRecovery ? t("login.recoveryHint") : t("login.codeHint")) : t("login.subtitle") }}
+        </p>
       </div>
 
       <template v-if="!needCode">
@@ -91,8 +109,22 @@ function backToPassword() {
       </template>
 
       <div v-else class="space-y-1.5">
-        <Label for="login-code">{{ t("login.code") }}</Label>
+        <Label for="login-code">{{ useRecovery ? t("login.recoveryCode") : t("login.code") }}</Label>
         <Input
+          v-if="useRecovery"
+          id="login-code"
+          ref="codeInput"
+          v-model="code"
+          autocomplete="off"
+          autocapitalize="characters"
+          spellcheck="false"
+          maxlength="11"
+          placeholder="XXXXX-XXXXX"
+          class="text-center font-mono text-lg tracking-widest uppercase"
+          @update:model-value="(v) => (code = String(v).toUpperCase())"
+        />
+        <Input
+          v-else
           id="login-code"
           ref="codeInput"
           v-model="code"
@@ -103,6 +135,9 @@ function backToPassword() {
           class="text-center font-mono text-lg tracking-[0.3em]"
           @update:model-value="(v) => (code = String(v).replace(/\D/g, '').slice(0, 6))"
         />
+        <button type="button" class="text-xs text-muted-foreground underline-offset-2 hover:underline" @click="toggleRecovery">
+          {{ useRecovery ? t("login.useApp") : t("login.useRecovery") }}
+        </button>
       </div>
 
       <Alert v-if="error" variant="destructive">
@@ -113,7 +148,7 @@ function backToPassword() {
         <Button v-if="needCode" type="button" variant="ghost" :disabled="busy" @click="backToPassword">
           <ArrowLeft />{{ t("login.back") }}
         </Button>
-        <Button type="submit" class="flex-1" :disabled="busy || (needCode && code.length !== 6)">
+        <Button type="submit" class="flex-1" :disabled="busy || (needCode && !codeReady)">
           <template v-if="busy"><LoaderCircle class="animate-spin" />{{ t("login.submitting") }}</template>
           <template v-else>{{ t("login.submit") }}</template>
         </Button>

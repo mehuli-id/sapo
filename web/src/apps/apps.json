@@ -7,5 +7,6 @@
   { "id": "sapo-drive", "icon": "cloud", "component": "Planned", "status": "planned", "phase": 2, "keywords": ["drive", "sync", "share"] },
   { "id": "app-center", "icon": "layout-grid", "component": "Planned", "status": "planned", "phase": 2, "keywords": ["docker", "aplikasi", "apps"] },
   { "id": "resource-monitor", "icon": "activity", "component": "Planned", "status": "planned", "phase": 2, "keywords": ["grafik", "chart", "monitor"] },
+  { "id": "account-security", "icon": "shield-check", "component": "AccountSecurity", "status": "ready", "window": { "width": 520, "height": 620 }, "keywords": ["2fa", "totp", "kode cadangan", "backup codes", "autentikator", "authenticator", "keamanan", "security"] },
   { "id": "about", "icon": "info", "component": "About", "status": "ready", "window": { "width": 460, "height": 420 }, "keywords": ["versi", "version", "lisensi", "license"] }
 ]

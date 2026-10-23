@@ -107,14 +107,20 @@ export interface Branding {
 export interface AuthStatus {
   setup_required: boolean
   authenticated: boolean
-  user?: { username: string; role: string }
+  user?: {
+    username: string
+    role: string
+    // Ada bila 2FA aktif: sisa kode cadangan dan apakah sudah perlu dibuat ulang.
+    recovery_codes_left?: number
+    recovery_codes_low?: boolean
+  }
 }
 
 export type Localized = Record<string, string>
 
 export interface WizardField {
   key: string
-  type: "text" | "username" | "password" | "password-confirm" | "language" | "totp-enroll"
+  type: "text" | "username" | "password" | "password-confirm" | "language" | "totp-enroll" | "recovery-codes"
   label: Localized
   help?: Localized
   placeholder?: Localized
@@ -139,6 +145,14 @@ export interface Wizard {
   title: Localized
   action: string
   steps: WizardStep[]
+}
+
+export interface TOTPEnrollment {
+  token: string
+  secret: string
+  uri: string
+  // Kode cadangan 2FA; hanya diberikan sekali, saat dibuat.
+  recovery_codes: string[]
 }
 
 export class ApiError extends Error {
@@ -200,11 +214,14 @@ export const api = {
   uiConfig: () => get<UIConfig>("/api/v1/ui/config"),
   authStatus: () => get<AuthStatus>("/api/v1/auth/status"),
   wizard: (id: string) => get<Wizard>(`/api/v1/wizards/${encodeURIComponent(id)}`),
-  setupTOTP: (username: string) => post<{ token: string; secret: string; uri: string }>("/api/v1/setup/totp", { username }),
+  setupTOTP: (username: string) => post<TOTPEnrollment>("/api/v1/setup/totp", { username }),
   setup: (values: Record<string, string>) => post<{ ok: boolean }>("/api/v1/setup", values),
   login: (username: string, password: string, totp_code?: string) =>
     post<{ ok: boolean }>("/api/v1/auth/login", { username, password, totp_code: totp_code ?? "" }),
   logout: () => post<{ ok: boolean }>("/api/v1/auth/logout"),
+  regenerateRecoveryCodes: (password: string) => post<{ recovery_codes: string[] }>("/api/v1/account/recovery-codes", { password }),
+  totpBegin: (password: string) => post<TOTPEnrollment>("/api/v1/account/totp/begin", { password }),
+  totpConfirm: (token: string, code: string) => post<{ ok: boolean }>("/api/v1/account/totp/confirm", { token, code }),
 }
 
 // Tindakan akhir wizard (nilai `action` di YAML) → pemanggilan API.

@@ -61,6 +61,10 @@
       "title": "Resource Monitor",
       "description": "CPU, memory, network, and disk charts"
     },
+    "account-security": {
+      "title": "Account Security",
+      "description": "Two-step verification and backup codes"
+    },
     "about": {
       "title": "About",
       "description": "Version, license, and trademarks"
@@ -176,7 +180,11 @@
     "codeHint": "Open your authenticator app and enter the 6-digit code.",
     "submit": "Sign in",
     "submitting": "Checking…",
-    "back": "Back"
+    "back": "Back",
+    "recoveryCode": "Backup code",
+    "recoveryHint": "Enter one of the backup codes you saved during setup. Each code works only once.",
+    "useRecovery": "No phone? Use a backup code",
+    "useApp": "Use a code from the authenticator app"
   },
   "https": {
     "title": "The panel uses a secure connection",
@@ -187,6 +195,41 @@
     "fingerprint": "Certificate fingerprint (SHA-256). For convenience only: this page is not encrypted yet, so the trusted value is the one shown on the NAS screen.",
     "open": "Open secure panel",
     "why": "If the fingerprint in your browser differs from the one on the NAS screen, do not proceed: another device may be impersonating your NAS. From now on, open the panel directly with its https:// address."
+  },
+  "recovery": {
+    "download": "Download",
+    "copy": "Copy",
+    "copied": "Copied",
+    "fileTitle": "{product} 2FA backup codes for {host}",
+    "fileHint": "Each code works only once. Keep them apart from your phone.",
+    "mustConfirm": "Save the backup codes first, then tick this box.",
+    "needTwofa": "Complete the two-step verification step first.",
+    "saved": "{n} codes saved"
+  },
+  "account": {
+    "twofaOn": "Two-step verification is on",
+    "codesLeft": "Backup codes left: {n}",
+    "codesLow": "Only {n} backup codes left. Create new ones so you can still sign in if you lose your phone.",
+    "codesNone": "No backup codes yet. Create them now so you can still sign in if you lose your phone.",
+    "codesTitle": "Backup codes",
+    "codesIntro": "One-time codes to sign in when your authenticator app is not available.",
+    "codesWarn": "All old codes stop working once new codes are created.",
+    "codesCreate": "Create new backup codes",
+    "codesShownOnce": "These codes are shown only once. Download or copy them now.",
+    "totpTitle": "Authenticator app",
+    "totpIntro": "Move 2FA to a new phone or app, for example after signing in with a backup code because your old phone was lost.",
+    "totpStart": "Move to a new app",
+    "totpScan": "Scan this QR code with the new authenticator app, then enter its 6-digit code.",
+    "totpQr": "QR code for the authenticator app",
+    "totpCode": "Code from the new app",
+    "totpOldStillWorks": "The old app keeps working until the code from the new app is confirmed.",
+    "totpConfirm": "Confirm",
+    "totpDone": "The new authenticator app is active. The old app no longer works.",
+    "password": "Your password",
+    "continue": "Continue",
+    "cancel": "Cancel",
+    "done": "Done",
+    "menuLow": "Backup codes running low"
   },
   "errors": {
     "bad_credentials": "Wrong username or password.",
@@ -206,6 +249,8 @@
     "busy": "The server is busy. Try again shortly.",
     "unavailable": "A required system tool is not available.",
     "not_found": "The requested item was not found.",
-    "https_required": "Use the HTTPS address to open the panel."
+    "https_required": "Use the HTTPS address to open the panel.",
+    "bad_password": "Wrong password.",
+    "totp_not_enabled": "Two-step verification is not enabled for this account."
   }
 }

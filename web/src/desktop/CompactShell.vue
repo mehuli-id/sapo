@@ -73,7 +73,7 @@ function select(id: string) {
           <Menu class="size-5" />
         </button>
         <h1 class="flex-1 truncate font-semibold">{{ active ? t(`apps.${active.id}.title`) : "" }}</h1>
-        <ShellMenu />
+        <ShellMenu @open="select" />
       </header>
       <main class="min-h-0 flex-1 overflow-y-auto">
         <div class="mx-auto max-w-4xl">
