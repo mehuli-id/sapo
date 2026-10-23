@@ -11,7 +11,9 @@ export default defineConfig({
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
   server: {
-    proxy: { "/api": process.env.SAPO_API ?? "http://127.0.0.1:5000" },
+    // Host asli (localhost:5173) dipertahankan: sapo-api memeriksa bahwa Origin
+    // sama dengan Host (CSRF), dan bentuk singkat proxy Vite menggantinya.
+    proxy: { "/api": { target: process.env.SAPO_API ?? "http://127.0.0.1:5000", changeOrigin: false } },
   },
   build: { outDir: "dist", emptyOutDir: true },
 })
