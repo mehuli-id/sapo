@@ -24,7 +24,9 @@
     "themeSystem": "Follow system",
     "language": "Language",
     "devBanner": "Pre-alpha · development mode · do not use with real data",
-    "agentDown": "System service (sapod) is unreachable"
+    "agentDown": "System service (sapod) is unreachable",
+    "logout": "Sign out",
+    "signedInAs": "Signed in as {name}"
   },
   "apps": {
     "system-info": {
@@ -103,5 +105,53 @@
     "license": "Code is licensed under GPL-3.0. The name and logo are trademarks of {vendor}.",
     "website": "Website",
     "source": "Source code"
+  },
+  "wizard": {
+    "next": "Next",
+    "back": "Back",
+    "finish": "Finish",
+    "finishing": "Saving…",
+    "step": "Step {n} of {total}",
+    "help": "Help",
+    "show": "Show",
+    "hide": "Hide",
+    "required": "Required",
+    "mismatch": "Doesn't match the previous field",
+    "tooShort": "At least {n} characters",
+    "patternMismatch": "Invalid format",
+    "scanQr": "Scan this QR code with your authenticator app.",
+    "secretKey": "Secret key (for manual entry)",
+    "copy": "Copy",
+    "copied": "Copied",
+    "codeHint": "Enter the 6-digit code shown in the app.",
+    "twofaOn": "On",
+    "hidden": "(hidden)",
+    "strength": "Password length: {n} characters"
+  },
+  "login": {
+    "title": "Sign in to {name}",
+    "subtitle": "Use the administrator account created during setup.",
+    "username": "Username",
+    "password": "Password",
+    "code": "Verification code",
+    "codeHint": "Open your authenticator app and enter the 6-digit code.",
+    "submit": "Sign in",
+    "submitting": "Checking…",
+    "back": "Back"
+  },
+  "errors": {
+    "bad_credentials": "Wrong username or password.",
+    "totp_invalid": "Wrong or already used verification code.",
+    "totp_expired": "2FA enrollment timed out. Go back to the two-step verification step for a new QR code.",
+    "locked": "Too many attempts. Try again in {minutes} minutes.",
+    "username_invalid": "The username doesn't follow the rules.",
+    "username_reserved": "This username is used by the system, choose another.",
+    "password_too_short": "The password is too short.",
+    "password_is_username": "The password can't be the same as the username.",
+    "password_mismatch": "The passwords don't match.",
+    "setup_done": "Setup is already done. Please sign in.",
+    "network_not_allowed": "The panel can't be opened from this network.",
+    "agent_unavailable": "The system service (sapod) is unreachable.",
+    "generic": "Something went wrong. Try again."
   }
 }

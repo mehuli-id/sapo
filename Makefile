@@ -39,7 +39,7 @@ dev: go
 	@trap 'kill 0' INT TERM; \
 	  $(BIN)/sapod -config config/sapo.yaml -socket $(DEV_SOCK) -features features & \
 	  sleep 1; \
-	  $(BIN)/sapo-api -config config/sapo.yaml -listen $(DEV_LISTEN) -socket $(DEV_SOCK) -web web/dist -branding branding.yaml & \
+	  $(BIN)/sapo-api -config config/sapo.yaml -listen $(DEV_LISTEN) -socket $(DEV_SOCK) -web web/dist -branding branding.yaml -wizards wizards -data $(DEV_DIR)/data & \
 	  cd web && npm run dev; \
 	  wait
 

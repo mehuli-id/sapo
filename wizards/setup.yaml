@@ -1,0 +1,92 @@
+# Wizard setup awal. Langkah, isian, teks, dan petunjuk adalah data:
+# mengubah atau menerjemahkan wizard tidak butuh perubahan kode.
+# Langkah berikutnya (zona waktu, jaringan, pool pertama) ditambahkan di sini
+# begitu operasi sapod-nya tersedia.
+id: setup
+action: setup.complete
+title:
+  id: Selamat datang di Sapo
+  en: Welcome to Sapo
+
+steps:
+  - id: welcome
+    title: { id: Bahasa, en: Language }
+    description:
+      id: Pilih bahasa panel. Bisa diganti kapan saja dari menu pengguna.
+      en: Choose the panel language. You can change it any time from the user menu.
+    fields:
+      - key: language
+        type: language
+        default: id
+        label: { id: Bahasa panel, en: Panel language }
+
+  - id: admin
+    title: { id: Akun administrator, en: Administrator account }
+    description:
+      id: Akun ini punya akses penuh ke NAS. Simpan password di tempat yang aman.
+      en: This account has full access to the NAS. Keep the password somewhere safe.
+    help:
+      id: >-
+        Gunakan password panjang yang tidak dipakai di tempat lain. Kalimat
+        beberapa kata (misalnya "lumbung padi di atas bukit") lebih kuat dan
+        lebih mudah diingat daripada kata pendek dengan simbol.
+      en: >-
+        Use a long password you don't use anywhere else. A few words together
+        ("rice barn on the hill") is stronger and easier to remember than a
+        short word with symbols.
+    fields:
+      - key: username
+        type: username
+        required: true
+        autocomplete: username
+        label: { id: Nama pengguna, en: Username }
+        placeholder: { id: "misalnya: arthur", en: "e.g. arthur" }
+        help:
+          id: Huruf kecil, angka, titik, garis bawah, atau tanda hubung; diawali huruf.
+          en: Lowercase letters, digits, dots, underscores, or hyphens; starts with a letter.
+      - key: password
+        type: password
+        required: true
+        secret: true
+        autocomplete: new-password
+        label: { id: Password, en: Password }
+      - key: password_confirm
+        type: password-confirm
+        required: true
+        secret: true
+        match: password
+        autocomplete: new-password
+        label: { id: Ulangi password, en: Repeat password }
+
+  - id: twofa
+    title: { id: Verifikasi dua langkah, en: Two-step verification }
+    description:
+      id: >-
+        Wajib untuk administrator. Selain password, login juga meminta kode
+        6 digit dari aplikasi autentikator di HP Anda.
+      en: >-
+        Required for administrators. Besides the password, signing in also asks
+        for a 6-digit code from an authenticator app on your phone.
+    help:
+      id: >-
+        Pasang aplikasi autentikator (misalnya Google Authenticator, Microsoft
+        Authenticator, atau Aegis), lalu pindai QR code. Simpan juga kunci
+        rahasia (teks di bawah QR) di tempat aman sebagai cadangan bila HP hilang.
+      en: >-
+        Install an authenticator app (such as Google Authenticator, Microsoft
+        Authenticator, or Aegis), then scan the QR code. Also keep the secret
+        key (the text under the QR code) somewhere safe as a backup in case you
+        lose your phone.
+    fields:
+      - key: totp_code
+        type: totp-enroll
+        required: true
+        autocomplete: one-time-code
+        label: { id: Kode dari aplikasi, en: Code from the app }
+
+  - id: summary
+    type: review
+    title: { id: Ringkasan, en: Summary }
+    description:
+      id: Periksa sekali lagi. Setelah selesai, Anda langsung masuk ke panel.
+      en: Check once more. When you finish, you'll go straight to the panel.

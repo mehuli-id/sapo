@@ -6,3 +6,4 @@ Setiap keputusan arsitektur penting dicatat di sini sebagai file bernomor (`NNNN
 |---|---|---|
 | [0001](0001-base-os-debian.md) | Debian stable minimal sebagai base OS | Diterima |
 | [0002](0002-agent-api-separation.md) | Pemisahan `sapod` (root) dan `sapo-api` lewat operasi bernama | Diterima |
+| [0003](0003-auth-and-first-run.md) | Autentikasi, setup awal lewat web, dan akses jaringan | Diterima |

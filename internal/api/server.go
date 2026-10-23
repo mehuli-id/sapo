@@ -8,20 +8,23 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/mehuli-id/sapo/internal/audit"
+	"github.com/mehuli-id/sapo/internal/auth"
 	"github.com/mehuli-id/sapo/internal/config"
 	"github.com/mehuli-id/sapo/internal/proto"
-	"gopkg.in/yaml.v3"
 )
 
 // AgentCaller adalah kemampuan memanggil operasi sapod (diimplementasikan
@@ -30,31 +33,111 @@ type AgentCaller interface {
 	Call(ctx context.Context, op string, params any, out any) error
 }
 
-// Server adalah handler HTTP sapo-api.
-type Server struct {
-	cfg   config.Config
-	agent AgentCaller
-	log   *slog.Logger
-	mux   *http.ServeMux
+// Options adalah dependensi server.
+type Options struct {
+	Config config.Config
+	Agent  AgentCaller
+	Store  *auth.Store
+	Audit  *audit.Log
+	Log    *slog.Logger
+	Now    func() time.Time
 }
 
+// Server adalah handler HTTP sapo-api.
+type Server struct {
+	cfg      config.Config
+	agent    AgentCaller
+	store    *auth.Store
+	audit    *audit.Log
+	log      *slog.Logger
+	now      func() time.Time
+	mux      *http.ServeMux
+	networks []netip.Prefix
+	denied   []netip.Prefix
+	hosts    map[string]bool
+	sessions *auth.Sessions
+	limiter  *auth.Limiter
+	userRe   *regexp.Regexp
+	argon    auth.Argon2Params
+	dummy    string
+	setup    pendingTOTP
+
+	hashSlots chan struct{}
+
+	healthMu sync.Mutex
+	healthAt time.Time
+	healthOK bool
+}
+
+// SessionCookie adalah nama cookie sesi panel.
+const SessionCookie = "sapo_session"
+
+// CSRFHeader wajib ada di setiap permintaan yang mengubah data. Browser tidak
+// bisa mengirim header khusus lintas situs tanpa izin CORS (yang tidak pernah
+// diberikan sapo-api), sehingga situs lain tidak bisa memalsukan permintaan.
+const CSRFHeader = "X-Sapo-Request"
+
 // New menyusun server beserta rutenya.
-func New(cfg config.Config, agent AgentCaller, log *slog.Logger) *Server {
-	s := &Server{cfg: cfg, agent: agent, log: log, mux: http.NewServeMux()}
+func New(o Options) (*Server, error) {
+	cfg := o.Config
+	nets, err := cfg.Networks()
+	if err != nil {
+		return nil, err
+	}
+	denied, err := cfg.Denied()
+	if err != nil {
+		return nil, err
+	}
+	if o.Now == nil {
+		o.Now = time.Now
+	}
+	argon := auth.Argon2Params{MemoryKiB: cfg.Auth.Argon2.MemoryKiB, Iterations: cfg.Auth.Argon2.Iterations, Parallelism: cfg.Auth.Argon2.Parallelism}
+	dummy, err := auth.HashPassword("sapo-dummy-password", argon)
+	if err != nil {
+		return nil, err
+	}
+	s := &Server{
+		cfg: cfg, agent: o.Agent, store: o.Store, audit: o.Audit, log: o.Log, now: o.Now,
+		mux:      http.NewServeMux(),
+		networks: nets,
+		denied:   denied,
+		hosts:    allowedHosts(cfg.API.Hostnames),
+		sessions: auth.NewSessions(time.Duration(cfg.Auth.SessionIdleMinutes)*time.Minute, time.Duration(cfg.Auth.SessionMaxHours)*time.Hour),
+		limiter: auth.NewLimiter(cfg.Auth.LoginMaxAttempts,
+			time.Duration(cfg.Auth.LoginWindowMinutes)*time.Minute, time.Duration(cfg.Auth.LockoutMinutes)*time.Minute),
+		userRe: regexp.MustCompile(cfg.Auth.UsernamePattern),
+		argon:  argon,
+		dummy:  dummy,
+		setup:  pendingTOTP{entries: map[string]pendingEntry{}},
+
+		hashSlots: make(chan struct{}, cfg.Auth.MaxConcurrentHashes),
+	}
+
+	// Publik: dibutuhkan sebelum login.
 	s.mux.HandleFunc("GET /api/v1/health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/v1/ui/config", s.handleUIConfig)
-	s.mux.HandleFunc("GET /api/v1/system/info", s.proxyRead(proto.OpSystemInfo))
-	s.mux.HandleFunc("GET /api/v1/features", s.proxyRead(proto.OpFeaturesList))
+	s.mux.HandleFunc("GET /api/v1/auth/status", s.handleAuthStatus)
+	s.mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
+	s.mux.HandleFunc("POST /api/v1/auth/logout", s.handleLogout)
+	s.mux.HandleFunc("GET /api/v1/wizards/{id}", s.handleWizard)
+	s.mux.HandleFunc("POST /api/v1/setup/totp", s.handleSetupTOTP)
+	s.mux.HandleFunc("POST /api/v1/setup", s.handleSetup)
+
+	// Butuh login.
+	s.mux.Handle("GET /api/v1/system/info", s.requireAuth(s.proxyRead(proto.OpSystemInfo)))
+	s.mux.Handle("GET /api/v1/features", s.requireAuth(s.proxyRead(proto.OpFeaturesList)))
+
 	s.mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "endpoint tidak ada")
 	})
 	s.mux.Handle("/", s.staticHandler())
-	return s
+	return s, nil
 }
 
-// ServeHTTP menerapkan header keamanan dan log ke setiap permintaan.
+// ServeHTTP menerapkan kebijakan jaringan, perlindungan CSRF, header
+// keamanan, dan log ke setiap permintaan.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	start := time.Now()
+	start := s.now()
 	h := w.Header()
 	h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 	h.Set("X-Content-Type-Options", "nosniff")
@@ -62,15 +145,119 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.Set("Referrer-Policy", "no-referrer")
 	h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 	h.Set("Cross-Origin-Opener-Policy", "same-origin")
+	h.Set("Cross-Origin-Resource-Policy", "same-origin")
+	if r.TLS != nil {
+		h.Set("Strict-Transport-Security", "max-age=31536000")
+	}
+
 	rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-	s.mux.ServeHTTP(rec, r)
+	switch {
+	case !s.allowedClient(r):
+		writeError(rec, http.StatusForbidden, "network_not_allowed", "akses dari jaringan ini tidak diizinkan")
+	case !s.allowedHost(r.Host):
+		// Melindungi dari DNS rebinding: situs lain yang mengarahkan domainnya
+		// ke IP NAS tetap ditolak karena header Host-nya bukan milik NAS.
+		writeError(rec, http.StatusMisdirectedRequest, "host_not_allowed", "nama host tidak dikenal")
+	case isMutating(r.Method) && !s.csrfOK(r):
+		writeError(rec, http.StatusForbidden, "csrf", "permintaan ditolak")
+	default:
+		s.mux.ServeHTTP(rec, r)
+	}
 	if s.log != nil && strings.HasPrefix(r.URL.Path, "/api/") {
-		s.log.Info("http", "method", r.Method, "path", r.URL.Path, "status", rec.status, "durasi", time.Since(start))
+		s.log.Info("http", "method", r.Method, "path", r.URL.Path, "status", rec.status, "ip", clientIP(r), "durasi", s.now().Sub(start))
 	}
 }
 
+func isMutating(m string) bool {
+	return m != http.MethodGet && m != http.MethodHead && m != http.MethodOptions
+}
+
+// csrfOK: header khusus wajib ada, dan bila browser mengirim Origin, host-nya
+// harus sama dengan host panel.
+func (s *Server) csrfOK(r *http.Request) bool {
+	if r.Header.Get(CSRFHeader) != "1" {
+		return false
+	}
+	if origin := r.Header.Get("Origin"); origin != "" {
+		u, err := url.Parse(origin)
+		if err != nil || u.Host != r.Host {
+			return false
+		}
+	}
+	return true
+}
+
+// clientIP memakai alamat koneksi langsung. Header X-Forwarded-For sengaja
+// tidak dipercaya sampai reverse proxy bawaan Sapo tersedia.
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+func (s *Server) allowedClient(r *http.Request) bool {
+	addr, err := netip.ParseAddr(clientIP(r))
+	if err != nil {
+		return false
+	}
+	addr = addr.Unmap().WithZone("")
+	for _, p := range s.denied {
+		if p.Contains(addr) {
+			return false
+		}
+	}
+	for _, p := range s.networks {
+		if p.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
+// allowedHosts menyusun nama host yang sah untuk panel: localhost, nama host
+// mesin, <nama host>.local, dan daftar tambahan dari konfigurasi.
+func allowedHosts(extra []string) map[string]bool {
+	out := map[string]bool{"localhost": true}
+	if h, err := os.Hostname(); err == nil && h != "" {
+		h = strings.ToLower(h)
+		out[h] = true
+		out[h+".local"] = true
+	}
+	for _, h := range extra {
+		out[strings.ToLower(strings.TrimSuffix(h, "."))] = true
+	}
+	return out
+}
+
+// allowedHost menerima alamat IP apa pun (akses langsung lewat IP tidak bisa
+// dipakai untuk DNS rebinding) dan nama host yang terdaftar.
+func (s *Server) allowedHost(hostport string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	host = strings.ToLower(strings.TrimSuffix(strings.Trim(host, "[]"), "."))
+	if host == "" {
+		return false
+	}
+	if _, err := netip.ParseAddr(host); err == nil {
+		return true
+	}
+	return s.hosts[host]
+}
+
+// handleHealth publik, jadi hasilnya di-cache beberapa detik agar tidak bisa
+// dipakai untuk membanjiri sapod.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	agentOK := s.agent.Call(r.Context(), proto.OpSystemInfo, nil, nil) == nil
+	s.healthMu.Lock()
+	if s.now().Sub(s.healthAt) > 5*time.Second {
+		s.healthOK = s.agent.Call(r.Context(), proto.OpSystemInfo, nil, nil) == nil
+		s.healthAt = s.now()
+	}
+	agentOK := s.healthOK
+	s.healthMu.Unlock()
 	status := http.StatusOK
 	if !agentOK {
 		status = http.StatusServiceUnavailable
@@ -78,12 +265,20 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, status, map[string]any{"status": map[bool]string{true: "ok", false: "degraded"}[agentOK], "agent": agentOK})
 }
 
-// handleUIConfig memberi panel nilai default dan branding dari konfigurasi
-// (bukan dari kode panel). Bagian "updates" di branding tidak dikirim.
+// handleUIConfig memberi panel nilai default, kebijakan isian, dan branding
+// dari konfigurasi (bukan dari kode panel).
 func (s *Server) handleUIConfig(w http.ResponseWriter, _ *http.Request) {
+	lang := s.cfg.API.DefaultLanguage
+	if l := s.store.Language(); l != "" {
+		lang = l
+	}
 	resp := map[string]any{
 		"default_mode":     s.cfg.UI.DefaultMode,
-		"default_language": s.cfg.API.DefaultLanguage,
+		"default_language": lang,
+		"auth_policy": map[string]any{
+			"password_min_length": s.cfg.Auth.PasswordMinLength,
+			"username_pattern":    s.cfg.Auth.UsernamePattern,
+		},
 	}
 	if b, err := loadBranding(s.cfg.API.BrandingFile); err == nil {
 		resp["branding"] = b
@@ -91,54 +286,6 @@ func (s *Server) handleUIConfig(w http.ResponseWriter, _ *http.Request) {
 		s.log.Warn("branding tidak terbaca", "file", s.cfg.API.BrandingFile, "err", err)
 	}
 	writeJSON(w, http.StatusOK, resp)
-}
-
-type branding struct {
-	Product struct {
-		Name     string            `yaml:"name" json:"name"`
-		FullName string            `yaml:"full_name" json:"full_name"`
-		Vendor   string            `yaml:"vendor" json:"vendor"`
-		Website  string            `yaml:"website" json:"website"`
-		Tagline  map[string]string `yaml:"tagline" json:"tagline"`
-	} `yaml:"product" json:"product"`
-	Theme struct {
-		Radius string            `yaml:"radius" json:"radius,omitempty"`
-		Light  map[string]string `yaml:"light" json:"light,omitempty"`
-		Dark   map[string]string `yaml:"dark" json:"dark,omitempty"`
-	} `yaml:"theme" json:"theme"`
-}
-
-var cssValue = regexp.MustCompile(`^[a-zA-Z0-9 .,%()/#-]{1,64}$`)
-var cssName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,40}$`)
-
-func loadBranding(path string) (*branding, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var b branding
-	if err := yaml.Unmarshal(data, &b); err != nil {
-		return nil, err
-	}
-	// Nilai tema disisipkan sebagai CSS di panel: hanya izinkan karakter aman.
-	check := func(m map[string]string) error {
-		for k, v := range m {
-			if !cssName.MatchString(k) || !cssValue.MatchString(v) {
-				return fmt.Errorf("nilai tema tidak valid: %s", k)
-			}
-		}
-		return nil
-	}
-	if err := check(b.Theme.Light); err != nil {
-		return nil, err
-	}
-	if err := check(b.Theme.Dark); err != nil {
-		return nil, err
-	}
-	if b.Theme.Radius != "" && !cssValue.MatchString(b.Theme.Radius) {
-		return nil, fmt.Errorf("radius tidak valid")
-	}
-	return &b, nil
 }
 
 // proxyRead meneruskan operasi baca-saja ke sapod tanpa parameter.
@@ -182,6 +329,11 @@ func (s *Server) staticHandler() http.Handler {
 			return
 		}
 		clean := path.Clean("/" + r.URL.Path)
+		// File tersembunyi (.env, .git, dll.) tidak pernah disajikan.
+		if strings.Contains(clean, "/.") {
+			http.NotFound(w, r)
+			return
+		}
 		full := filepath.Join(root, filepath.FromSlash(clean))
 		if st, err := os.Stat(full); err == nil && !st.IsDir() {
 			if strings.HasPrefix(clean, "/assets/") {
@@ -200,21 +352,16 @@ func (s *Server) staticHandler() http.Handler {
 	})
 }
 
-// EnsureLoopback menolak alamat listen selain localhost. Autentikasi belum
-// ada di tahap ini, jadi sapo-api tidak boleh terbuka ke jaringan.
-func EnsureLoopback(listen string) error {
-	host, _, err := net.SplitHostPort(listen)
-	if err != nil {
-		return fmt.Errorf("api.listen tidak valid: %w", err)
+// decodeJSON membaca badan permintaan JSON (maks. 64 KB, tanpa kolom asing).
+func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil || dec.More() {
+		writeError(w, http.StatusBadRequest, "bad_request", "isi permintaan tidak valid")
+		return false
 	}
-	if host == "localhost" {
-		return nil
-	}
-	ip := net.ParseIP(host)
-	if ip == nil || !ip.IsLoopback() {
-		return fmt.Errorf("api.listen %q ditolak: sebelum autentikasi tersedia, sapo-api hanya boleh mendengarkan localhost", listen)
-	}
-	return nil
+	return true
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -226,6 +373,14 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, code, msg string) {
 	writeJSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": msg}})
+}
+
+func writeErrorDetail(w http.ResponseWriter, status int, code, msg string, detail map[string]any) {
+	e := map[string]any{"code": code, "message": msg}
+	for k, v := range detail {
+		e[k] = v
+	}
+	writeJSON(w, status, map[string]any{"error": e})
 }
 
 type statusRecorder struct {

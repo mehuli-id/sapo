@@ -34,7 +34,7 @@ make build          # build sapod, sapo-api, dan panel
 make dev            # jalankan sapod + sapo-api + panel dalam mode pengembangan
 ```
 
-Lalu buka `http://localhost:5173`. Dalam mode pengembangan, `sapod` berjalan tanpa root dan hanya membaca info sistem.
+Lalu buka `http://localhost:5173`. Saat pertama dibuka, panel menampilkan wizard setup awal untuk membuat akun administrator (dengan verifikasi dua langkah). Dalam mode pengembangan, `sapod` berjalan tanpa root dan hanya membaca info sistem; data akun disimpan di `.dev/data`.
 
 Untuk menguji fitur storage, gunakan VM dev dengan disk virtual — lihat [deploy/dev/README.md](deploy/dev/README.md). **Jangan pernah menguji di mesin yang berisi data penting.**
 
@@ -43,10 +43,11 @@ Untuk menguji fitur storage, gunakan VM dev dengan disk virtual — lihat [deplo
 | Folder | Isi |
 |---|---|
 | `cmd/` | entry point `sapod` dan `sapo-api` |
-| `internal/` | kode Go: agent, api, config, proto (kontrak agent ↔ api) |
+| `internal/` | kode Go: agent, api, auth, audit, config, proto (kontrak agent ↔ api) |
 | `web/` | panel Vue 3 + TypeScript + shadcn-vue |
 | `config/` | konfigurasi default (`sapo.yaml`) |
 | `features/` | manifest fitur (paket Debian per fitur) sebagai data |
+| `wizards/` | definisi wizard (langkah, isian, petunjuk) sebagai data |
 | `packaging/` | paket `.deb` dan build ISO |
 | `deploy/dev/` | VM pengembangan dengan disk virtual |
 | `docs/` | arsitektur, ADR, panduan brand |

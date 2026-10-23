@@ -24,7 +24,9 @@
     "themeSystem": "Ikuti sistem",
     "language": "Bahasa",
     "devBanner": "Pra-alpha · mode pengembangan · jangan dipakai untuk data sungguhan",
-    "agentDown": "Layanan sistem (sapod) tidak bisa dihubungi"
+    "agentDown": "Layanan sistem (sapod) tidak bisa dihubungi",
+    "logout": "Keluar",
+    "signedInAs": "Masuk sebagai {name}"
   },
   "apps": {
     "system-info": {
@@ -103,5 +105,53 @@
     "license": "Kode dilisensikan di bawah GPL-3.0. Nama dan logo adalah merek {vendor}.",
     "website": "Situs web",
     "source": "Kode sumber"
+  },
+  "wizard": {
+    "next": "Lanjut",
+    "back": "Kembali",
+    "finish": "Selesai",
+    "finishing": "Menyimpan…",
+    "step": "Langkah {n} dari {total}",
+    "help": "Petunjuk",
+    "show": "Tampilkan",
+    "hide": "Sembunyikan",
+    "required": "Wajib diisi",
+    "mismatch": "Tidak sama dengan isian sebelumnya",
+    "tooShort": "Minimal {n} karakter",
+    "patternMismatch": "Format tidak sesuai",
+    "scanQr": "Pindai QR code ini dengan aplikasi autentikator.",
+    "secretKey": "Kunci rahasia (untuk dimasukkan manual)",
+    "copy": "Salin",
+    "copied": "Tersalin",
+    "codeHint": "Masukkan 6 digit kode yang tampil di aplikasi.",
+    "twofaOn": "Aktif",
+    "hidden": "(disembunyikan)",
+    "strength": "Panjang password: {n} karakter"
+  },
+  "login": {
+    "title": "Masuk ke {name}",
+    "subtitle": "Gunakan akun administrator yang dibuat saat setup awal.",
+    "username": "Nama pengguna",
+    "password": "Password",
+    "code": "Kode verifikasi",
+    "codeHint": "Buka aplikasi autentikator dan masukkan 6 digit kodenya.",
+    "submit": "Masuk",
+    "submitting": "Memeriksa…",
+    "back": "Kembali"
+  },
+  "errors": {
+    "bad_credentials": "Nama pengguna atau password salah.",
+    "totp_invalid": "Kode verifikasi salah atau sudah dipakai.",
+    "totp_expired": "Waktu pendaftaran 2FA habis. Kembali ke langkah verifikasi dua langkah untuk mendapat QR baru.",
+    "locked": "Terlalu banyak percobaan. Coba lagi dalam {minutes} menit.",
+    "username_invalid": "Nama pengguna tidak sesuai aturan.",
+    "username_reserved": "Nama pengguna ini dipakai sistem, pilih nama lain.",
+    "password_too_short": "Password terlalu pendek.",
+    "password_is_username": "Password tidak boleh sama dengan nama pengguna.",
+    "password_mismatch": "Konfirmasi password tidak sama.",
+    "setup_done": "Setup awal sudah dilakukan. Silakan masuk.",
+    "network_not_allowed": "Panel tidak bisa dibuka dari jaringan ini.",
+    "agent_unavailable": "Layanan sistem (sapod) tidak bisa dihubungi.",
+    "generic": "Terjadi kesalahan. Coba lagi."
   }
 }

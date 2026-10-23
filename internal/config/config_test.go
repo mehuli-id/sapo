@@ -48,3 +48,23 @@ func TestInvalidMode(t *testing.T) {
 		t.Fatal("mode tidak valid seharusnya ditolak")
 	}
 }
+
+func TestInvalidNetworkRejected(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "sapo.yaml")
+	if err := os.WriteFile(p, []byte("api:\n  allowed_networks: [\"192.168.1.0/33\"]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("CIDR tidak valid harus ditolak")
+	}
+}
+
+func TestWeakAuthPolicyRejected(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "sapo.yaml")
+	if err := os.WriteFile(p, []byte("auth:\n  password_min_length: 4\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("panjang password minimal di bawah 8 harus ditolak")
+	}
+}
