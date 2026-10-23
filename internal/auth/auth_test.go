@@ -152,10 +152,37 @@ func TestLimiterBoundedSize(t *testing.T) {
 	l := NewLimiter(5, time.Minute, time.Minute)
 	l.MaxEntries = 100
 	for i := 0; i < 1000; i++ {
-		l.Begin(fmt.Sprintf("user:%d", i))
+		l.Begin(fmt.Sprintf("ip:%d", i))
 	}
 	if len(l.entries) > 100 {
 		t.Fatalf("peta limiter tumbuh tanpa batas: %d", len(l.entries))
+	}
+}
+
+func TestLimiterFloodCannotEraseProtectedKey(t *testing.T) {
+	l := NewLimiter(5, 15*time.Minute, 15*time.Minute)
+	l.MaxEntries = 100
+	l.Protected = func(k string) bool { return k == "user:arthur" }
+	for i := 0; i < 4; i++ {
+		l.Begin("user:arthur")
+	}
+	for i := 0; i < 5000; i++ {
+		l.Begin(fmt.Sprintf("ip:%d", i))
+	}
+	l.Begin("user:arthur") // ke-5: masih boleh
+	if ok, _ := l.Begin("user:arthur"); ok {
+		t.Fatal("banjir entri tidak boleh menghapus penghitung akun")
+	}
+}
+
+func TestLimiterRefund(t *testing.T) {
+	l := NewLimiter(2, time.Minute, time.Minute)
+	for i := 0; i < 10; i++ {
+		l.Begin("ip:a")
+		l.Refund("ip:a") // percobaan dengan password benar tidak dihitung
+	}
+	if ok, _ := l.Begin("ip:a"); !ok {
+		t.Fatal("percobaan yang dikembalikan tidak boleh menghasilkan kunci")
 	}
 }
 

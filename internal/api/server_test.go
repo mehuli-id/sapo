@@ -66,7 +66,7 @@ func newHarness(t *testing.T, agent AgentCaller) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	al, err := audit.Open(h.data)
+	al, err := audit.Open(h.data, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -443,5 +443,112 @@ func TestTrailingJSONRejected(t *testing.T) {
 	h.s.ServeHTTP(rec, r)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("data tambahan setelah JSON harus ditolak, dapat %d", rec.Code)
+	}
+}
+
+func TestLockedAccountGivesNoPasswordOracle(t *testing.T) {
+	h := newHarness(t, &fakeAgent{})
+	secret := h.runSetup()
+	h.cookie = nil
+	// Kunci akun dari banyak jaringan berbeda.
+	for i := 0; i < h.s.cfg.Auth.LoginMaxAttempts+1; i++ {
+		h.do(http.MethodPost, "/api/v1/auth/login", loginRequest{Username: "arthur", Password: "salah"}, fromIP(fmt.Sprintf("10.8.0.%d", i+1)))
+	}
+	// Password benar maupun salah tanpa kode: jawaban sama.
+	right := h.do(http.MethodPost, "/api/v1/auth/login", loginRequest{Username: "arthur", Password: "lumbung padi di bukit"}, fromIP("10.8.1.1"))
+	wrong := h.do(http.MethodPost, "/api/v1/auth/login", loginRequest{Username: "arthur", Password: "tebakan"}, fromIP("10.8.1.2"))
+	if errCode(right) != errCode(wrong) || right.Code != wrong.Code {
+		t.Fatalf("jawaban berbeda saat terkunci: %d %s vs %d %s", right.Code, right.Body, wrong.Code, wrong.Body)
+	}
+	// Password benar + kode salah vs password salah + kode salah: jawaban sama.
+	a := h.do(http.MethodPost, "/api/v1/auth/login", loginRequest{Username: "arthur", Password: "lumbung padi di bukit", TOTPCode: "000000"}, fromIP("10.8.1.3"))
+	b := h.do(http.MethodPost, "/api/v1/auth/login", loginRequest{Username: "arthur", Password: "tebakan", TOTPCode: "000000"}, fromIP("10.8.1.4"))
+	if errCode(a) != errCode(b) || a.Code != b.Code {
+		t.Fatalf("oracle password saat terkunci: %d %s vs %d %s", a.Code, a.Body, b.Code, b.Body)
+	}
+	// Admin sungguhan tetap bisa masuk dengan password + kode dalam satu permintaan.
+	h.now = h.now.Add(time.Minute)
+	code, _ := auth.TOTPCodeAt(secret, h.now)
+	if rec := h.do(http.MethodPost, "/api/v1/auth/login", loginRequest{Username: "arthur", Password: "lumbung padi di bukit", TOTPCode: code}, fromIP("192.168.1.9")); rec.Code != http.StatusOK {
+		t.Fatalf("admin harus tetap bisa masuk: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestIPv6RotationWithinPrefixCountsTogether(t *testing.T) {
+	h := newHarness(t, &fakeAgent{})
+	h.runSetup()
+	h.cookie = nil
+	locked := false
+	for i := 1; i <= 20; i++ {
+		rec := h.do(http.MethodPost, "/api/v1/auth/login", loginRequest{Username: "tidakada", Password: "x"}, fromIP(fmt.Sprintf("fd00::%x", i)))
+		if rec.Code == http.StatusTooManyRequests {
+			locked = true
+			break
+		}
+	}
+	if !locked {
+		t.Fatal("alamat IPv6 berbeda dalam satu /64 harus dihitung bersama")
+	}
+}
+
+func TestTOTPTyposDoNotLockAdmin(t *testing.T) {
+	h := newHarness(t, &fakeAgent{})
+	secret := h.runSetup()
+	h.cookie = nil
+	for i := 0; i < 2; i++ { // dua login normal sebelumnya
+		h.now = h.now.Add(time.Minute)
+		code, _ := auth.TOTPCodeAt(secret, h.now)
+		h.do(http.MethodPost, "/api/v1/auth/login", loginRequest{Username: "arthur", Password: "lumbung padi di bukit"})
+		if rec := h.do(http.MethodPost, "/api/v1/auth/login", loginRequest{Username: "arthur", Password: "lumbung padi di bukit", TOTPCode: code}); rec.Code != http.StatusOK {
+			t.Fatalf("login normal gagal: %s", rec.Body)
+		}
+		h.do(http.MethodPost, "/api/v1/auth/logout", nil)
+	}
+	h.do(http.MethodPost, "/api/v1/auth/login", loginRequest{Username: "arthur", Password: "lumbung padi di bukit"})
+	for i := 0; i < 6; i++ { // salah ketik kode berkali-kali
+		h.do(http.MethodPost, "/api/v1/auth/login", loginRequest{Username: "arthur", Password: "lumbung padi di bukit", TOTPCode: "111111"})
+	}
+	h.now = h.now.Add(time.Minute)
+	code, _ := auth.TOTPCodeAt(secret, h.now)
+	if rec := h.do(http.MethodPost, "/api/v1/auth/login", loginRequest{Username: "arthur", Password: "lumbung padi di bukit", TOTPCode: code}); rec.Code != http.StatusOK {
+		t.Fatalf("salah ketik kode tidak boleh mengunci admin: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestTOTPGuessingCapped(t *testing.T) {
+	h := newHarness(t, &fakeAgent{})
+	secret := h.runSetup()
+	h.cookie = nil
+	for i := 0; i < h.s.cfg.Auth.TOTPMaxFailures; i++ {
+		h.do(http.MethodPost, "/api/v1/auth/login", loginRequest{Username: "arthur", Password: "lumbung padi di bukit", TOTPCode: fmt.Sprintf("%06d", i)}, fromIP(fmt.Sprintf("10.7.0.%d", i+1)))
+	}
+	h.now = h.now.Add(time.Minute)
+	code, _ := auth.TOTPCodeAt(secret, h.now)
+	if rec := h.do(http.MethodPost, "/api/v1/auth/login", loginRequest{Username: "arthur", Password: "lumbung padi di bukit", TOTPCode: code}); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("setelah batas kode salah, akun harus ditahan: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestSetupSlotsPerClient(t *testing.T) {
+	h := newHarness(t, &fakeAgent{})
+	for i := 0; i < 50; i++ {
+		h.do(http.MethodPost, "/api/v1/setup/totp", map[string]string{}, fromIP("192.168.1.66"))
+	}
+	if rec := h.do(http.MethodPost, "/api/v1/setup/totp", map[string]string{}, fromIP("192.168.1.10")); rec.Code != http.StatusOK {
+		t.Fatalf("satu klien tidak boleh memenuhi semua slot setup: %d", rec.Code)
+	}
+}
+
+func TestTrailingBracesRejected(t *testing.T) {
+	h := newHarness(t, &fakeAgent{})
+	for _, body := range []string{`{"username":"a","password":"b"}}`, `{"username":"a","password":"b"}]`} {
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(body))
+		r.RemoteAddr = "192.168.1.20:1"
+		r.Header.Set(CSRFHeader, "1")
+		rec := httptest.NewRecorder()
+		h.s.ServeHTTP(rec, r)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s harus ditolak, dapat %d", body, rec.Code)
+		}
 	}
 }

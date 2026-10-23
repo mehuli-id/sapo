@@ -31,6 +31,8 @@ type Agent struct {
 	Socket      string `yaml:"socket"`
 	SocketGroup string `yaml:"socket_group"`
 	FeaturesDir string `yaml:"features_dir"`
+	// Batas koneksi bersamaan ke socket sapod.
+	MaxConnections int `yaml:"max_connections"`
 }
 
 // API mengatur sapo-api.
@@ -51,20 +53,25 @@ type API struct {
 	// Nama host tambahan yang boleh dipakai membuka panel (selain alamat IP,
 	// localhost, nama host mesin, dan <nama host>.local). Mencegah DNS rebinding.
 	Hostnames []string `yaml:"hostnames"`
+	// Batas ukuran log audit sebelum dirotasi (MB).
+	AuditMaxMB int `yaml:"audit_max_mb"`
 }
 
 // Auth berisi kebijakan login. Semua angka di sini bisa diubah admin.
 type Auth struct {
-	PasswordMinLength      int      `yaml:"password_min_length"`
-	UsernamePattern        string   `yaml:"username_pattern"`
-	ReservedUsernames      []string `yaml:"reserved_usernames"`
-	RequireTOTPForAdmin    bool     `yaml:"require_totp_for_admin"`
-	SessionIdleMinutes     int      `yaml:"session_idle_minutes"`
-	SessionMaxHours        int      `yaml:"session_max_hours"`
-	LoginMaxAttempts       int      `yaml:"login_max_attempts"`
-	LoginWindowMinutes     int      `yaml:"login_window_minutes"`
-	LockoutMinutes         int      `yaml:"lockout_minutes"`
-	SetupTOTPExpiryMinutes int      `yaml:"setup_totp_expiry_minutes"`
+	PasswordMinLength   int      `yaml:"password_min_length"`
+	UsernamePattern     string   `yaml:"username_pattern"`
+	ReservedUsernames   []string `yaml:"reserved_usernames"`
+	RequireTOTPForAdmin bool     `yaml:"require_totp_for_admin"`
+	SessionIdleMinutes  int      `yaml:"session_idle_minutes"`
+	SessionMaxHours     int      `yaml:"session_max_hours"`
+	LoginMaxAttempts    int      `yaml:"login_max_attempts"`
+	LoginWindowMinutes  int      `yaml:"login_window_minutes"`
+	LockoutMinutes      int      `yaml:"lockout_minutes"`
+	// Batas kode 2FA salah per akun (terpisah dari batas password).
+	TOTPMaxFailures        int `yaml:"totp_max_failures"`
+	TOTPWindowMinutes      int `yaml:"totp_window_minutes"`
+	SetupTOTPExpiryMinutes int `yaml:"setup_totp_expiry_minutes"`
 	// Batas hash password yang berjalan bersamaan (Argon2 memakai banyak RAM).
 	MaxConcurrentHashes int    `yaml:"max_concurrent_hashes"`
 	Argon2              Argon2 `yaml:"argon2"`
@@ -86,9 +93,10 @@ type UI struct {
 func Default() Config {
 	return Config{
 		Agent: Agent{
-			Socket:      "/run/sapo/sapod.sock",
-			SocketGroup: "sapo",
-			FeaturesDir: "/usr/share/sapo/features",
+			Socket:         "/run/sapo/sapod.sock",
+			SocketGroup:    "sapo",
+			FeaturesDir:    "/usr/share/sapo/features",
+			MaxConnections: 32,
 		},
 		API: API{
 			Listen:          "127.0.0.1:5000",
@@ -103,6 +111,7 @@ func Default() Config {
 				"fc00::/7", "fe80::/10", // LAN IPv6
 			},
 			DeniedNetworks: []string{"172.17.0.0/16"}, // bridge Docker bawaan
+			AuditMaxMB:     10,
 		},
 		Auth: Auth{
 			PasswordMinLength:      10,
@@ -114,6 +123,8 @@ func Default() Config {
 			LoginMaxAttempts:       5,
 			LoginWindowMinutes:     15,
 			LockoutMinutes:         15,
+			TOTPMaxFailures:        10,
+			TOTPWindowMinutes:      60,
 			SetupTOTPExpiryMinutes: 15,
 			MaxConcurrentHashes:    2,
 			Argon2:                 Argon2{MemoryKiB: 64 * 1024, Iterations: 3, Parallelism: 2},
@@ -122,18 +133,34 @@ func Default() Config {
 	}
 }
 
-// Load membaca file konfigurasi di path. Bila file tidak ada, default dipakai.
+// DefaultsPath adalah lokasi nilai bawaan yang dipasang paket.
+const DefaultsPath = "/usr/share/sapo/sapo.yaml"
+
+// Load membaca satu file konfigurasi di atas nilai bawaan program.
 func Load(path string) (Config, error) {
+	return LoadLayered("", path)
+}
+
+// LoadLayered membaca konfigurasi berlapis: nilai bawaan program, lalu file
+// bawaan paket (defaults, ikut diperbarui saat upgrade), lalu file admin
+// (path, hanya berisi nilai yang diubah admin atau panel). File yang tidak
+// ada dilewati.
+func LoadLayered(defaults, path string) (Config, error) {
 	cfg := Default()
-	data, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return cfg, nil
-	}
-	if err != nil {
-		return cfg, fmt.Errorf("membaca %s: %w", path, err)
-	}
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return cfg, fmt.Errorf("format %s tidak valid: %w", path, err)
+	for _, p := range []string{defaults, path} {
+		if p == "" {
+			continue
+		}
+		data, err := os.ReadFile(p)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return cfg, fmt.Errorf("membaca %s: %w", p, err)
+		}
+		if err := yaml.Unmarshal(data, &cfg); err != nil {
+			return cfg, fmt.Errorf("format %s tidak valid: %w", p, err)
+		}
 	}
 	return cfg, cfg.Validate()
 }
@@ -143,6 +170,8 @@ func (c Config) Validate() error {
 	switch {
 	case c.Agent.Socket == "":
 		return errors.New("agent.socket wajib diisi")
+	case c.Agent.MaxConnections < 1:
+		return errors.New("agent.max_connections minimal 1")
 	case c.API.Listen == "":
 		return errors.New("api.listen wajib diisi")
 	case c.UI.DefaultMode != "desktop" && c.UI.DefaultMode != "ringkas":
@@ -155,6 +184,10 @@ func (c Config) Validate() error {
 		return errors.New("auth: batas percobaan login, jendela, dan lockout harus lebih dari 0")
 	case c.Auth.SessionIdleMinutes < 1 || c.Auth.SessionMaxHours < 1:
 		return errors.New("auth: durasi sesi harus lebih dari 0")
+	case c.Auth.TOTPMaxFailures < 1 || c.Auth.TOTPWindowMinutes < 1:
+		return errors.New("auth: totp_max_failures dan totp_window_minutes harus lebih dari 0")
+	case c.API.AuditMaxMB < 1:
+		return errors.New("api.audit_max_mb minimal 1")
 	case c.Auth.MaxConcurrentHashes < 1:
 		return errors.New("auth.max_concurrent_hashes minimal 1")
 	case c.Auth.SetupTOTPExpiryMinutes < 1:

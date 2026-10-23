@@ -21,13 +21,14 @@ import (
 var version = "0.0.0-dev"
 
 func main() {
-	cfgPath := flag.String("config", config.DefaultPath, "lokasi sapo.yaml")
+	cfgPath := flag.String("config", config.DefaultPath, "lokasi sapo.yaml milik admin")
+	defaultsPath := flag.String("defaults", "", "lokasi nilai bawaan paket (misalnya "+config.DefaultsPath+")")
 	socket := flag.String("socket", "", "timpa agent.socket (untuk pengembangan)")
 	featuresDir := flag.String("features", "", "timpa agent.features_dir (untuk pengembangan)")
 	flag.Parse()
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	cfg, err := config.Load(*cfgPath)
+	cfg, err := config.LoadLayered(*defaultsPath, *cfgPath)
 	if err != nil {
 		log.Error("konfigurasi", "err", err)
 		os.Exit(1)
@@ -57,7 +58,7 @@ func main() {
 	}
 	log.Info("sapod siap", "versi", version, "socket", cfg.Agent.Socket, "operasi", reg.Ops())
 
-	srv := &agent.Server{Registry: reg, Log: log, OpTimeout: 5 * time.Minute, IdleTimeout: 2 * time.Minute}
+	srv := &agent.Server{Registry: reg, Log: log, OpTimeout: 5 * time.Minute, IdleTimeout: 2 * time.Minute, WriteTimeout: 30 * time.Second, MaxConns: cfg.Agent.MaxConnections}
 	if err := srv.Serve(ctx, ln); err != nil {
 		log.Error("server berhenti", "err", err)
 		os.Exit(1)

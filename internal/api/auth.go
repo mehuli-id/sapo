@@ -35,6 +35,7 @@ type pendingTOTP struct {
 
 type pendingEntry struct {
 	secret  string
+	client  string
 	expires time.Time
 }
 
@@ -158,9 +159,12 @@ func (s *Server) handleSetupTOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := s.now()
+	client := clientNet(r)
 	s.setup.mu.Lock()
 	for k, e := range s.setup.entries {
-		if now.After(e.expires) {
+		// Satu pendaftaran per klien: yang lama dari klien yang sama diganti,
+		// sehingga satu perangkat tidak bisa memenuhi semua slot.
+		if now.After(e.expires) || e.client == client {
 			delete(s.setup.entries, k)
 		}
 	}
@@ -169,7 +173,7 @@ func (s *Server) handleSetupTOTP(w http.ResponseWriter, r *http.Request) {
 		writeBusy(w)
 		return
 	}
-	s.setup.entries[token] = pendingEntry{secret: secret, expires: now.Add(time.Duration(s.cfg.Auth.SetupTOTPExpiryMinutes) * time.Minute)}
+	s.setup.entries[token] = pendingEntry{secret: secret, client: client, expires: now.Add(time.Duration(s.cfg.Auth.SetupTOTPExpiryMinutes) * time.Minute)}
 	s.setup.mu.Unlock()
 
 	account := strings.ToLower(strings.TrimSpace(req.Username))
@@ -306,43 +310,71 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Username = strings.TrimSpace(strings.ToLower(req.Username))
+	code := strings.TrimSpace(req.TOTPCode)
 	valid := s.validUsername(req.Username)
 	actor := req.Username
 	if !valid {
 		actor = "(nama tidak valid)"
 	}
-	ipKey := "ip:" + clientIP(r)
-	userKey := "user:" + req.Username
-
-	// Percobaan dipesan lebih dulu (atomik), sehingga permintaan paralel
-	// tidak bisa melewati batas. Kunci per IP selalu berlaku.
-	if ok, rem := s.limiter.Begin(ipKey); !ok {
-		if s.log != nil {
-			s.log.Warn("login ditolak: IP terkunci", "ip", clientIP(r))
-		}
-		s.writeLocked(w, rem)
-		return
-	}
-	// Kunci per nama pengguna mencegah tebakan dari banyak IP. Agar orang
-	// lain tidak bisa mengunci admin selamanya, admin yang memakai 2FA tetap
-	// boleh masuk bila password DAN kode 2FA-nya benar.
-	userLocked, userRem := false, time.Duration(0)
-	if valid {
-		ok, rem := s.limiter.Begin(userKey)
-		userLocked, userRem = !ok, rem
-	}
-
 	var user auth.User
 	exists := false
 	if valid {
 		user, exists = s.store.Get(req.Username)
 	}
+	hasTOTP := exists && user.TOTPSecret != ""
+
+	// 1. Batas per jaringan klien (IPv4 per alamat, IPv6 per /64, karena satu
+	//    perangkat bisa memakai banyak alamat IPv6). Dipesan atomik.
+	ipKey := "ip:" + clientNet(r)
+	if ok, rem := s.limiter.Begin(ipKey); !ok {
+		if s.log != nil {
+			s.log.Warn("login ditolak: jaringan klien terkunci", "ip", clientIP(r))
+		}
+		s.writeLocked(w, rem)
+		return
+	}
+	// 2. Batas per akun, hanya untuk akun yang benar-benar ada (nama acak
+	//    tidak membuat entri, sehingga tidak bisa membanjiri tabel).
+	userKey := "user:" + req.Username
+	userLocked := false
+	if exists {
+		ok, _ := s.limiter.Begin(userKey)
+		userLocked = !ok
+	}
+	totpKey := "totp:" + req.Username
+
+	// Saat akun terkunci, hanya satu permintaan berisi password DAN kode 2FA
+	// yang diterima, dan semua kegagalan dijawab sama. Penyerang tidak bisa
+	// mengetahui apakah password-nya benar. Akun tanpa 2FA cukup ditolak.
+	if userLocked {
+		if !hasTOTP {
+			s.record(r, user.Username, "auth.login", false, map[string]string{"reason": "locked"})
+			s.writeLocked(w, s.limiter.Locked(userKey))
+			return
+		}
+		if code == "" {
+			writeError(w, http.StatusTooManyRequests, "locked_need_code", "akun sedang dilindungi; masukkan password dan kode 2FA sekaligus")
+			return
+		}
+	}
+	// Batas kode 2FA salah per akun diperiksa sebelum password, agar
+	// jawabannya tidak bergantung pada benar/salahnya password.
+	if hasTOTP {
+		if rem := s.totpLimiter.Locked(totpKey); rem > 0 {
+			s.writeLocked(w, rem)
+			return
+		}
+	}
+
 	hash := s.dummy
 	if exists {
 		hash = user.PasswordHash
 	}
 	var passOK bool
 	if !s.withHashSlot(r.Context(), func() { passOK, _ = auth.VerifyPassword(req.Password, hash) }) {
+		// Server sibuk bukan kesalahan pengguna: percobaan dikembalikan.
+		s.limiter.Refund(ipKey)
+		s.limiter.Refund(userKey)
 		writeBusy(w)
 		return
 	}
@@ -351,29 +383,40 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "bad_credentials", "nama pengguna atau password salah")
 		return
 	}
-	if userLocked && user.TOTPSecret == "" {
-		s.record(r, user.Username, "auth.login", false, map[string]string{"reason": "locked"})
-		s.writeLocked(w, userRem)
-		return
-	}
+	// Password benar tidak pernah dihitung sebagai percobaan gagal.
+	s.limiter.Refund(ipKey)
+	s.limiter.Refund(userKey)
 
-	if user.TOTPSecret != "" {
-		if strings.TrimSpace(req.TOTPCode) == "" {
+	if hasTOTP {
+		if code == "" {
 			writeError(w, http.StatusUnauthorized, "totp_required", "masukkan kode dari aplikasi autentikator")
 			return
 		}
-		step, valid := auth.VerifyTOTP(user.TOTPSecret, req.TOTPCode, s.now(), user.TOTPLastStep)
-		if !valid {
-			s.record(r, user.Username, "auth.login", false, map[string]string{"reason": "bad_totp"})
+		// Kode salah dihitung di penghitung 2FA milik akun (bukan per IP),
+		// sehingga salah ketik tidak mengunci jaringan admin.
+		badCode := func(reason string) {
+			s.record(r, user.Username, "auth.login", false, map[string]string{"reason": reason})
+			if userLocked {
+				writeError(w, http.StatusUnauthorized, "bad_credentials", "nama pengguna atau password salah")
+				return
+			}
 			writeError(w, http.StatusUnauthorized, "totp_invalid", "kode 2FA salah")
+		}
+		if ok, rem := s.totpLimiter.Begin(totpKey); !ok {
+			s.record(r, user.Username, "auth.login", false, map[string]string{"reason": "totp_locked"})
+			s.writeLocked(w, rem)
+			return
+		}
+		step, valid := auth.VerifyTOTP(user.TOTPSecret, code, s.now(), user.TOTPLastStep)
+		if !valid {
+			badCode("bad_totp")
 			return
 		}
 		// Compare-and-set: dua login bersamaan dengan kode yang sama, hanya
 		// satu yang berhasil.
 		if err := s.store.ConsumeTOTPStep(user.Username, step); err != nil {
 			if errors.Is(err, auth.ErrTOTPReused) {
-				s.record(r, user.Username, "auth.login", false, map[string]string{"reason": "totp_reused"})
-				writeError(w, http.StatusUnauthorized, "totp_invalid", "kode 2FA salah")
+				badCode("totp_reused")
 				return
 			}
 			writeError(w, http.StatusInternalServerError, "internal", "gagal menyimpan status 2FA")
@@ -383,6 +426,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	s.limiter.Reset(ipKey)
 	s.limiter.Reset(userKey)
+	s.totpLimiter.Reset(totpKey)
 
 	// Hash ulang bila parameter Argon2 di konfigurasi sudah dinaikkan.
 	if auth.NeedsRehash(user.PasswordHash, s.argon) {

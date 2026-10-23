@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"sort"
 	"sync"
 	"time"
 )
@@ -15,6 +16,8 @@ type Limiter struct {
 	Window      time.Duration
 	Lockout     time.Duration
 	MaxEntries  int
+	// Protected menandai kunci yang tidak boleh dibuang saat peta penuh.
+	Protected func(key string) bool
 
 	mu      sync.Mutex
 	entries map[string]*limitEntry
@@ -82,31 +85,53 @@ func (l *Limiter) Reset(key string) {
 	delete(l.entries, key)
 }
 
-// evictLocked menjaga ukuran peta tetap terbatas: hapus entri kedaluwarsa,
-// lalu bila masih penuh, hapus entri tidak terkunci yang paling lama.
+// Refund mengembalikan satu percobaan yang sudah dipesan, misalnya bila
+// password ternyata benar atau server sedang sibuk. Tidak membuka kunci.
+func (l *Limiter) Refund(key string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if e, ok := l.entries[key]; ok && e.attempts > 0 && !l.now().Before(e.lockedUntil) {
+		e.attempts--
+	}
+}
+
+// evictLocked menjaga ukuran peta tetap terbatas. Entri yang Protected
+// (misalnya penghitung akun yang benar-benar ada) tidak pernah dibuang,
+// sehingga banjir entri baru tidak bisa menghapus penghitung sebuah akun.
+// Pembuangan dilakukan per batch (10%) agar biayanya tidak O(n) per entri.
 func (l *Limiter) evictLocked(now time.Time) {
 	if len(l.entries) < l.MaxEntries {
 		return
 	}
+	type cand struct {
+		key   string
+		first time.Time
+	}
+	var cands []cand
 	for k, e := range l.entries {
+		if l.Protected != nil && l.Protected(k) {
+			continue
+		}
 		if now.Sub(e.first) > l.Window && now.After(e.lockedUntil) {
 			delete(l.entries, k)
+			continue
 		}
+		if now.Before(e.lockedUntil) && len(l.entries) < 2*l.MaxEntries {
+			// Entri terkunci disimpan sampai kuncinya habis, kecuali peta
+			// sudah dua kali batas (batas keras memori).
+			continue
+		}
+		cands = append(cands, cand{k, e.first})
 	}
-	for len(l.entries) >= l.MaxEntries {
-		var oldestKey string
-		var oldest time.Time
-		for k, e := range l.entries {
-			if now.Before(e.lockedUntil) {
-				continue
-			}
-			if oldestKey == "" || e.first.Before(oldest) {
-				oldestKey, oldest = k, e.first
-			}
+	target := l.MaxEntries - l.MaxEntries/10
+	if len(l.entries) <= target {
+		return
+	}
+	sort.Slice(cands, func(i, j int) bool { return cands[i].first.Before(cands[j].first) })
+	for _, c := range cands {
+		if len(l.entries) <= target {
+			break
 		}
-		if oldestKey == "" {
-			return // semua terkunci; biarkan, jumlahnya dibatasi oleh lockout
-		}
-		delete(l.entries, oldestKey)
+		delete(l.entries, c.key)
 	}
 }

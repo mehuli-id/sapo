@@ -14,11 +14,15 @@ Panel tidak boleh terbuka ke jaringan sebelum ada login. Pengguna juga ingin sem
 - **2FA (TOTP, RFC 6238) wajib untuk administrator** (`auth.require_totp_for_admin`). Kode yang sudah dipakai tidak bisa dipakai ulang.
 - **Sesi** disimpan di memori sebagai hash SHA-256 dari token acak 256 bit; cookie `HttpOnly`, `SameSite=Strict`, `Secure` bila HTTPS. Batas idle dan batas maksimal diatur di konfigurasi.
 - **CSRF:** setiap permintaan yang mengubah data wajib membawa header `X-Sapo-Request: 1`; bila ada header `Origin`, host-nya harus sama dengan host panel.
-- **Batas percobaan login** per IP dan per nama pengguna, dipesan secara atomik sebelum password diperiksa (permintaan paralel tidak bisa melewati batas). Admin dengan 2FA tetap bisa masuk dengan password + kode yang benar walau akunnya sedang "dikunci" oleh percobaan orang lain; kunci per IP tetap berlaku. Semua angka di konfigurasi.
+- **Batas percobaan login** tiga lapis, semua angka di konfigurasi:
+  - per jaringan klien (IPv4 per alamat, IPv6 per /64), dipesan atomik sebelum password diperiksa;
+  - per akun, hanya untuk akun yang ada, dan tidak bisa terhapus oleh banjir entri lain;
+  - kode 2FA salah per akun (`auth.totp_max_failures` per `auth.totp_window_minutes`).
+  Password yang benar tidak dihitung sebagai percobaan gagal, sehingga salah ketik kode 2FA tidak mengunci admin. Saat akun terkunci, hanya permintaan berisi password **dan** kode yang diterima, dan semua kegagalan dijawab sama (tidak ada petunjuk apakah password benar).
 - **Hash Argon2 dibatasi** jumlah yang berjalan bersamaan (`auth.max_concurrent_hashes`) agar login massal tidak menghabiskan RAM.
 - **Header `Host` divalidasi** (alamat IP, `localhost`, nama host mesin, `<nama host>.local`, dan `api.hostnames`) untuk mencegah DNS rebinding, yaitu situs lain yang mengarahkan domainnya ke IP NAS lalu memakai browser korban.
 - **Akses jaringan:** permintaan hanya diterima dari `api.allowed_networks` (default: localhost dan LAN privat), dikurangi `api.denied_networks` (default: jaringan Docker bawaan). Akses dari internet tidak dilakukan dengan memperluas daftar ini, tetapi lewat fitur "Akses dari internet" (VPN/tunnel) di fase berikutnya.
-- **Log audit** (`<data_dir>/audit.log`, 0600) mencatat setup, login berhasil/gagal, dan logout.
+- **Log audit** (`<data_dir>/audit.log`, 0600) mencatat setup, login berhasil/gagal, dan logout; dirotasi saat mencapai `api.audit_max_mb`.
 - **Penyimpanan user sementara** berupa satu file JSON (0600) dengan penulisan atomik. Antarmukanya sempit agar bisa diganti SQLite tanpa mengubah pemanggil.
 
 ## Konsekuensi dan batasan yang diketahui
@@ -29,4 +33,5 @@ Panel tidak boleh terbuka ke jaringan sebelum ada login. Pengguna juga ingin sem
 - Rentang Tailscale/CGNAT (100.64.0.0/10) tidak dibuka secara default; integrasi Tailscale nanti menambahkannya.
 - Daftar jaringan bukan pengganti login: port forward atau hairpin NAT di router bisa membuat klien internet terlihat seperti alamat LAN.
 - Token setup sekali pakai (ditampilkan di layar NAS) dipertimbangkan sebagai lapisan tambahan untuk setup awal, tetapi belum dipakai karena bertentangan dengan prinsip "semua lewat web"; validasi Host sudah menutup serangan DNS rebinding.
+- Akun yang sedang terkunci bisa dibedakan dari nama yang tidak ada (jawaban "masukkan kode"). Ini dianggap risiko kecil dibanding membuat entri limiter untuk setiap nama acak.
 - Pemulihan akses bila HP 2FA hilang belum ada; untuk sementara kunci rahasia ditampilkan saat setup agar bisa disimpan sebagai cadangan.

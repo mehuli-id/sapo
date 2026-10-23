@@ -1,21 +1,22 @@
 [Unit]
 Description=Sapo API & panel (sapo-api)
 Documentation=https://github.com/mehuli-id/sapo
-After=sapod.service
-Wants=sapod.service
+After=sapod.service network-online.target
+Wants=sapod.service network-online.target
 
 [Service]
 Type=simple
 User=sapo
 Group=sapo
-ExecStart=/usr/lib/sapo/sapo-api -config /etc/sapo/sapo.yaml
+ExecStart=/usr/lib/sapo/sapo-api -config /etc/sapo/sapo.yaml -defaults /usr/share/sapo/sapo.yaml
 Restart=on-failure
 RestartSec=2s
 StateDirectory=sapo
 StateDirectoryMode=0750
-# Satu-satunya lokasi di luar StateDirectory yang boleh disentuh: socket sapod.
-ReadWritePaths=/run/sapo
-# sapo-api tidak pernah butuh hak root atau akses ke disk sistem.
+# Koneksi ke socket sapod tidak butuh izin tulis pada sistem file, jadi
+# /run/sapo tidak perlu (dan tidak boleh wajib) ada saat layanan dimulai.
+#
+# sapo-api tidak pernah butuh hak root, akses disk sistem, atau proses lain.
 NoNewPrivileges=yes
 CapabilityBoundingSet=
 AmbientCapabilities=
@@ -23,6 +24,10 @@ ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes
+PrivateIPC=yes
+RemoveIPC=yes
+ProtectProc=invisible
+ProcSubset=pid
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes
@@ -38,6 +43,8 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallFilter=~@privileged @resources
+# Syscall yang terlewat gagal dengan EPERM, bukan mematikan proses.
+SystemCallErrorNumber=EPERM
 UMask=0077
 
 [Install]

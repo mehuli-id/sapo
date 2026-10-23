@@ -23,7 +23,8 @@ import (
 var version = "0.0.0-dev"
 
 func main() {
-	cfgPath := flag.String("config", config.DefaultPath, "lokasi sapo.yaml")
+	cfgPath := flag.String("config", config.DefaultPath, "lokasi sapo.yaml milik admin")
+	defaultsPath := flag.String("defaults", "", "lokasi nilai bawaan paket (misalnya "+config.DefaultsPath+")")
 	listen := flag.String("listen", "", "timpa api.listen (untuk pengembangan)")
 	socket := flag.String("socket", "", "timpa agent.socket (untuk pengembangan)")
 	webDir := flag.String("web", "", "timpa api.web_dir (untuk pengembangan)")
@@ -33,7 +34,7 @@ func main() {
 	flag.Parse()
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	cfg, err := config.Load(*cfgPath)
+	cfg, err := config.LoadLayered(*defaultsPath, *cfgPath)
 	if err != nil {
 		log.Error("konfigurasi", "err", err)
 		os.Exit(1)
@@ -56,7 +57,7 @@ func main() {
 		log.Error("penyimpanan user", "err", err)
 		os.Exit(1)
 	}
-	auditLog, err := audit.Open(cfg.API.DataDir)
+	auditLog, err := audit.Open(cfg.API.DataDir, int64(cfg.API.AuditMaxMB)<<20)
 	if err != nil {
 		log.Error("log audit", "err", err)
 		os.Exit(1)

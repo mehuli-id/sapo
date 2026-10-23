@@ -8,22 +8,39 @@ on:
 permissions:
   contents: read
 
+# Action pihak ketiga dikunci ke commit SHA (komentar = tag saat dikunci).
+# Pembaruan diusulkan otomatis oleh Dependabot (.github/dependabot.yml).
+env:
+  # Paket rilis dibangun dengan rilis Go stabil terbaru (masih didukung dan
+  # mendapat perbaikan keamanan); go.mod hanya menyatakan versi minimal.
+  GO_VERSION: stable
+  GOVULNCHECK_VERSION: v1.9.0
+
 jobs:
   go:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version-file: go.mod
+          go-version: ${{ env.GO_VERSION }}
       - name: gofmt
-        run: test -z "$(gofmt -l cmd internal)"
+        run: test -z "$(gofmt -l cmd internal tools)"
       - name: vet
         run: go vet ./...
       - name: test
         run: go test -race ./...
-      - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      - name: vendor sama dengan modul upstream (checksum database Go)
+        run: |
+          # go.sum dibuat dari checksum database resmi, lalu vendor/ dibuat
+          # ulang dari modul yang sudah diverifikasi dan dibandingkan dengan
+          # isi repo. Perbedaan apa pun = vendor/ tidak asli.
+          GOFLAGS=-mod=mod go mod tidy
+          go mod verify
+          go mod vendor
+          git diff --exit-code -- vendor go.mod
+      - name: govulncheck (termasuk standard library)
+        run: go run golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }} ./...
       - name: build
         run: make go
 
@@ -33,8 +50,8 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
@@ -50,13 +67,13 @@ jobs:
       matrix:
         arch: [amd64, arm64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0 # versi paket diambil dari tag git
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version-file: go.mod
-      - uses: actions/setup-node@v4
+          go-version: ${{ env.GO_VERSION }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
@@ -65,7 +82,7 @@ jobs:
         run: make deb ARCH=${{ matrix.arch }}
       - name: cek isi paket
         run: dpkg-deb -I dist/*.deb && dpkg-deb -c dist/*.deb
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: sapo-deb-${{ matrix.arch }}
           path: dist/*.deb

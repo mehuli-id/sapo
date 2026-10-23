@@ -3,7 +3,9 @@
 set -e
 
 DATA_DIR=/var/lib/sapo
+CONF=/etc/sapo/sapo.yaml
 PORT_HINT=5000
+UNITS="sapod.service sapo-api.service"
 
 case "$1" in
   configure)
@@ -19,14 +21,47 @@ case "$1" in
     # 2. Direktori data panel (akun & log audit). Bukan tempat file pengguna.
     install -d -o sapo -g sapo -m 0750 "$DATA_DIR"
 
-    # 3. Layanan. Hanya diaktifkan otomatis pada instalasi pertama, agar
-    #    keputusan admin untuk mematikan layanan tetap dihormati saat upgrade.
+    # 3. Konfigurasi admin. Nilai bawaan ada di /usr/share/sapo/sapo.yaml
+    #    (ikut diperbarui paket); file ini hanya berisi nilai yang diubah admin
+    #    atau panel, jadi upgrade tidak pernah menimpanya atau bertanya.
+    if [ ! -e "$CONF" ]; then
+      install -d -m 0755 /etc/sapo
+      cat > "$CONF" <<'EOF'
+# Konfigurasi Sapo yang diubah admin atau panel.
+# Nilai bawaan dan penjelasannya ada di /usr/share/sapo/sapo.yaml.
+# Tulis di sini hanya nilai yang ingin diganti, misalnya:
+#
+# api:
+#   hostnames: [nas.kantor.lan]
+EOF
+      chmod 0644 "$CONF"
+    fi
+
+    # 4. Layanan. Diaktifkan pada instalasi pertama dan saat dipasang ulang
+    #    setelah "remove" (status disimpan oleh deb-systemd-helper), tetapi
+    #    keputusan admin untuk menonaktifkan layanan tetap dihormati.
+    if command -v deb-systemd-helper >/dev/null 2>&1; then
+      for u in $UNITS; do
+        # Hanya melepas mask yang dibuat saat paket di-remove.
+        deb-systemd-helper unmask "$u" >/dev/null 2>&1 || true
+        # was-enabled bernilai benar untuk instalasi baru.
+        if deb-systemd-helper --quiet was-enabled "$u"; then
+          deb-systemd-helper enable "$u" >/dev/null || true
+        else
+          deb-systemd-helper update-state "$u" >/dev/null || true
+        fi
+      done
+    elif [ -z "$2" ]; then
+      # Tanpa deb-systemd-helper (jarang): aktifkan saat pasang pertama.
+      # Juga berjalan di chroot (misalnya saat membangun ISO).
+      systemctl enable $UNITS >/dev/null 2>&1 || true
+    fi
     if [ -d /run/systemd/system ]; then
-      systemctl daemon-reload
+      systemctl daemon-reload || true
       if [ -z "$2" ]; then
-        systemctl enable --now sapod.service sapo-api.service
+        systemctl start $UNITS || echo "Peringatan: layanan Sapo gagal dinyalakan; cek 'journalctl -u sapo-api'." >&2
       else
-        systemctl try-restart sapod.service sapo-api.service
+        systemctl try-restart $UNITS || true
       fi
     fi
 

@@ -152,6 +152,8 @@
     "setup_done": "Setup awal sudah dilakukan. Silakan masuk.",
     "network_not_allowed": "Panel tidak bisa dibuka dari jaringan ini.",
     "agent_unavailable": "Layanan sistem (sapod) tidak bisa dihubungi.",
-    "generic": "Terjadi kesalahan. Coba lagi."
+    "generic": "Terjadi kesalahan. Coba lagi.",
+    "locked_need_code": "Akun sedang dilindungi karena banyak percobaan gagal. Masukkan kode dari aplikasi autentikator untuk masuk.",
+    "busy": "Server sedang sibuk. Coba lagi sebentar."
   }
 }

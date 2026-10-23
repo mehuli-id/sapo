@@ -68,3 +68,21 @@ func TestWeakAuthPolicyRejected(t *testing.T) {
 		t.Fatal("panjang password minimal di bawah 8 harus ditolak")
 	}
 }
+
+func TestLayeredConfig(t *testing.T) {
+	dir := t.TempDir()
+	def := filepath.Join(dir, "defaults.yaml")
+	adm := filepath.Join(dir, "admin.yaml")
+	_ = os.WriteFile(def, []byte("api:\n  listen: \":5000\"\nauth:\n  lockout_minutes: 20\n"), 0o644)
+	_ = os.WriteFile(adm, []byte("api:\n  hostnames: [nas.kantor.lan]\n"), 0o644)
+	cfg, err := LoadLayered(def, adm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.API.Listen != ":5000" || cfg.Auth.LockoutMinutes != 20 || len(cfg.API.Hostnames) != 1 {
+		t.Fatalf("lapisan tidak tergabung: %+v %+v", cfg.API, cfg.Auth)
+	}
+	if cfg.Auth.LoginMaxAttempts != Default().Auth.LoginMaxAttempts {
+		t.Fatal("nilai yang tidak disebut harus tetap default")
+	}
+}

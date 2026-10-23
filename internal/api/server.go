@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -57,16 +58,19 @@ type Server struct {
 	hosts    map[string]bool
 	sessions *auth.Sessions
 	limiter  *auth.Limiter
-	userRe   *regexp.Regexp
-	argon    auth.Argon2Params
-	dummy    string
-	setup    pendingTOTP
+	// totpLimiter menghitung kode 2FA salah per akun.
+	totpLimiter *auth.Limiter
+	userRe      *regexp.Regexp
+	argon       auth.Argon2Params
+	dummy       string
+	setup       pendingTOTP
 
 	hashSlots chan struct{}
 
-	healthMu sync.Mutex
-	healthAt time.Time
-	healthOK bool
+	healthMu      sync.Mutex
+	healthAt      time.Time
+	healthOK      bool
+	healthRunning bool
 }
 
 // SessionCookie adalah nama cookie sesi panel.
@@ -105,6 +109,8 @@ func New(o Options) (*Server, error) {
 		sessions: auth.NewSessions(time.Duration(cfg.Auth.SessionIdleMinutes)*time.Minute, time.Duration(cfg.Auth.SessionMaxHours)*time.Hour),
 		limiter: auth.NewLimiter(cfg.Auth.LoginMaxAttempts,
 			time.Duration(cfg.Auth.LoginWindowMinutes)*time.Minute, time.Duration(cfg.Auth.LockoutMinutes)*time.Minute),
+		totpLimiter: auth.NewLimiter(cfg.Auth.TOTPMaxFailures,
+			time.Duration(cfg.Auth.TOTPWindowMinutes)*time.Minute, time.Duration(cfg.Auth.TOTPWindowMinutes)*time.Minute),
 		userRe: regexp.MustCompile(cfg.Auth.UsernamePattern),
 		argon:  argon,
 		dummy:  dummy,
@@ -112,6 +118,21 @@ func New(o Options) (*Server, error) {
 
 		hashSlots: make(chan struct{}, cfg.Auth.MaxConcurrentHashes),
 	}
+
+	// Penghitung akun yang ada tidak boleh terhapus oleh banjir entri lain.
+	protect := func(key string) bool {
+		name, ok := strings.CutPrefix(key, "user:")
+		if !ok {
+			name, ok = strings.CutPrefix(key, "totp:")
+		}
+		if !ok {
+			return false
+		}
+		_, exists := s.store.Get(name)
+		return exists
+	}
+	s.limiter.Protected = protect
+	s.totpLimiter.Protected = protect
 
 	// Publik: dibutuhkan sebelum login.
 	s.mux.HandleFunc("GET /api/v1/health", s.handleHealth)
@@ -197,6 +218,22 @@ func clientIP(r *http.Request) string {
 	return host
 }
 
+// clientNet adalah kunci batas percobaan: alamat IPv4 penuh, atau prefix /64
+// untuk IPv6 (satu perangkat bisa memakai banyak alamat dalam satu /64).
+func clientNet(r *http.Request) string {
+	addr, err := netip.ParseAddr(clientIP(r))
+	if err != nil {
+		return clientIP(r)
+	}
+	addr = addr.Unmap().WithZone("")
+	if addr.Is6() {
+		if p, err := addr.Prefix(64); err == nil {
+			return p.String()
+		}
+	}
+	return addr.String()
+}
+
 func (s *Server) allowedClient(r *http.Request) bool {
 	addr, err := netip.ParseAddr(clientIP(r))
 	if err != nil {
@@ -252,12 +289,23 @@ func (s *Server) allowedHost(hostport string) bool {
 // dipakai untuk membanjiri sapod.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	s.healthMu.Lock()
-	if s.now().Sub(s.healthAt) > 5*time.Second {
-		s.healthOK = s.agent.Call(r.Context(), proto.OpSystemInfo, nil, nil) == nil
-		s.healthAt = s.now()
+	refresh := s.now().Sub(s.healthAt) > 5*time.Second && !s.healthRunning
+	if refresh {
+		s.healthRunning = true
 	}
 	agentOK := s.healthOK
 	s.healthMu.Unlock()
+	// Hanya satu pemeriksaan berjalan pada satu waktu, dengan batas waktu
+	// pendek; permintaan lain memakai hasil terakhir.
+	if refresh {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		ok := s.agent.Call(ctx, proto.OpSystemInfo, nil, nil) == nil
+		cancel()
+		s.healthMu.Lock()
+		s.healthOK, s.healthAt, s.healthRunning = ok, s.now(), false
+		s.healthMu.Unlock()
+		agentOK = ok
+	}
 	status := http.StatusOK
 	if !agentOK {
 		status = http.StatusServiceUnavailable
@@ -357,7 +405,12 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(v); err != nil || dec.More() {
+	if err := dec.Decode(v); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "isi permintaan tidak valid")
+		return false
+	}
+	// Tidak boleh ada apa pun setelah satu nilai JSON.
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		writeError(w, http.StatusBadRequest, "bad_request", "isi permintaan tidak valid")
 		return false
 	}

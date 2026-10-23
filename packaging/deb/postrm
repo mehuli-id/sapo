@@ -2,17 +2,31 @@
 # postrm untuk paket sapo.
 # Catatan: data pengguna (pool, shared folder, Sapo Drive) TIDAK PERNAH
 # disentuh oleh paket ini. Yang dihapus saat purge hanya data panel
-# (akun & log audit) di /var/lib/sapo.
+# (akun & log audit) di /var/lib/sapo dan konfigurasi di /etc/sapo.
 set -e
+
+UNITS="sapod.service sapo-api.service"
 
 case "$1" in
   remove)
     if [ -d /run/systemd/system ]; then
       systemctl daemon-reload || true
     fi
+    # Status "enabled" disimpan, sehingga dipasang ulang = aktif kembali.
+    if command -v deb-systemd-helper >/dev/null 2>&1; then
+      for u in $UNITS; do deb-systemd-helper mask "$u" >/dev/null 2>&1 || true; done
+    fi
     ;;
   purge)
     rm -rf /var/lib/sapo /run/sapo
+    rm -f /etc/sapo/sapo.yaml
+    rmdir /etc/sapo 2>/dev/null || true
+    if command -v deb-systemd-helper >/dev/null 2>&1; then
+      for u in $UNITS; do
+        deb-systemd-helper purge "$u" >/dev/null 2>&1 || true
+        deb-systemd-helper unmask "$u" >/dev/null 2>&1 || true
+      done
+    fi
     # User sistem "sapo" sengaja tidak dihapus (sesuai Debian Policy), agar
     # file yang mungkin masih dimilikinya tidak berpindah ke user baru.
     if [ -d /run/systemd/system ]; then

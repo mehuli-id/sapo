@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/mehuli-id/sapo/internal/proto"
@@ -71,52 +72,122 @@ type Server struct {
 	Log         *slog.Logger
 	OpTimeout   time.Duration
 	IdleTimeout time.Duration
+	// WriteTimeout membatasi waktu menulis jawaban; klien yang tidak
+	// membaca tidak bisa menahan goroutine selamanya.
+	WriteTimeout time.Duration
+	// MaxConns membatasi koneksi bersamaan (0 = default).
+	MaxConns int
 }
 
-// Listen membuka unix socket di path dengan izin 0660 dan grup group
-// (bila grup ada). Socket lama di path yang sama dihapus dulu.
+const defaultMaxConns = 32
+
+// maxEchoedOp membatasi nama operasi yang dikembalikan di pesan error.
+const maxEchoedOp = 64
+
+// Listen membuka unix socket di path dengan izin 0660 dan grup group.
+//
+// Direktori socket harus milik user yang menjalankan sapod dan tidak bisa
+// ditulis grup/lainnya; bila tidak, sapod menolak berjalan (mencegah trik
+// symlink yang membuat root mengubah izin file lain). Bila sapod berjalan
+// sebagai root, grup wajib ada.
 func Listen(path, group string) (net.Listener, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("membuat direktori socket: %w", err)
+	}
+	if err := checkSocketDir(dir); err != nil {
+		return nil, err
+	}
+	gid := -1
+	if group != "" {
+		g, err := user.LookupGroup(group)
+		switch {
+		case err == nil:
+			gid, _ = strconv.Atoi(g.Gid)
+		case os.Geteuid() == 0:
+			return nil, fmt.Errorf("grup socket %q tidak ada; sapo-api tidak akan bisa terhubung", group)
+		}
 	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("menghapus socket lama: %w", err)
 	}
+	// Socket langsung dibuat dengan izin 0660 (tanpa jeda izin longgar).
+	old := syscall.Umask(0o117)
 	ln, err := net.Listen("unix", path)
+	syscall.Umask(old)
 	if err != nil {
 		return nil, err
 	}
-	if err := os.Chmod(path, 0o660); err != nil {
-		ln.Close()
-		return nil, fmt.Errorf("mengatur izin socket: %w", err)
-	}
-	if group != "" {
-		if g, err := user.LookupGroup(group); err == nil {
-			gid, _ := strconv.Atoi(g.Gid)
-			if err := os.Chown(path, -1, gid); err != nil {
-				ln.Close()
-				return nil, fmt.Errorf("mengatur grup socket: %w", err)
-			}
+	if gid >= 0 {
+		if err := os.Lchown(path, -1, gid); err != nil {
+			ln.Close()
+			return nil, fmt.Errorf("mengatur grup socket: %w", err)
 		}
 	}
 	return ln, nil
 }
 
-// Serve menerima koneksi sampai ctx selesai.
+func checkSocketDir(dir string) error {
+	st, err := os.Lstat(dir)
+	if err != nil {
+		return err
+	}
+	if !st.IsDir() {
+		return fmt.Errorf("direktori socket %s bukan direktori (symlink tidak diizinkan)", dir)
+	}
+	if st.Mode().Perm()&0o022 != 0 {
+		return fmt.Errorf("direktori socket %s bisa ditulis grup/lainnya (izin %v)", dir, st.Mode().Perm())
+	}
+	if sys, ok := st.Sys().(*syscall.Stat_t); ok && int(sys.Uid) != os.Geteuid() {
+		return fmt.Errorf("direktori socket %s bukan milik user sapod", dir)
+	}
+	return nil
+}
+
+// Serve menerima koneksi sampai ctx selesai. Error sementara (misalnya
+// kehabisan file descriptor) tidak menghentikan sapod.
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	go func() {
 		<-ctx.Done()
 		ln.Close()
 	}()
+	max := s.MaxConns
+	if max <= 0 {
+		max = defaultMaxConns
+	}
+	slots := make(chan struct{}, max)
+	backoff := 5 * time.Millisecond
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
-			return err
+			if errors.Is(err, net.ErrClosed) {
+				return err
+			}
+			if s.Log != nil {
+				s.Log.Warn("accept gagal, mencoba lagi", "err", err, "tunggu", backoff)
+			}
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return nil
+			}
+			backoff = min(backoff*2, time.Second)
+			continue
 		}
-		go s.handleConn(ctx, conn)
+		backoff = 5 * time.Millisecond
+		select {
+		case slots <- struct{}{}:
+			go func() {
+				defer func() { <-slots }()
+				s.handleConn(ctx, conn)
+			}()
+		default:
+			// Terlalu banyak koneksi: tolak yang baru, jangan menumpuk.
+			conn.Close()
+		}
 	}
 }
 
@@ -125,6 +196,10 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	sc := bufio.NewScanner(conn)
 	sc.Buffer(make([]byte, 64*1024), proto.MaxMessageBytes)
 	enc := json.NewEncoder(conn)
+	writeTimeout := s.WriteTimeout
+	if writeTimeout <= 0 {
+		writeTimeout = 30 * time.Second
+	}
 	for {
 		if s.IdleTimeout > 0 {
 			_ = conn.SetReadDeadline(time.Now().Add(s.IdleTimeout))
@@ -133,6 +208,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 			return
 		}
 		resp := s.dispatch(ctx, sc.Bytes())
+		_ = conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 		if err := enc.Encode(resp); err != nil {
 			return
 		}
@@ -146,7 +222,11 @@ func (s *Server) dispatch(ctx context.Context, line []byte) proto.Response {
 	}
 	h, ok := s.Registry.lookup(req.Op)
 	if !ok {
-		return fail(req.ID, proto.ErrUnknownOp, "operasi tidak dikenal: "+req.Op)
+		op := req.Op
+		if len(op) > maxEchoedOp {
+			op = op[:maxEchoedOp] + "…"
+		}
+		return fail(req.ID, proto.ErrUnknownOp, "operasi tidak dikenal: "+op)
 	}
 	opCtx := ctx
 	if s.OpTimeout > 0 {
@@ -156,15 +236,22 @@ func (s *Server) dispatch(ctx context.Context, line []byte) proto.Response {
 	}
 	start := time.Now()
 	result, err := h(opCtx, req.Params)
-	if s.Log != nil {
-		s.Log.Info("operasi", "op", req.Op, "durasi", time.Since(start), "ok", err == nil)
-	}
 	if err != nil {
 		var oe *OpError
 		if errors.As(err, &oe) {
+			if s.Log != nil {
+				s.Log.Info("operasi", "op", req.Op, "durasi", time.Since(start), "ok", false, "kode", oe.Code)
+			}
 			return fail(req.ID, oe.Code, oe.Message)
 		}
-		return fail(req.ID, proto.ErrInternal, err.Error())
+		// Detail error internal hanya ke log sapod, tidak ke klien.
+		if s.Log != nil {
+			s.Log.Error("operasi gagal", "op", req.Op, "durasi", time.Since(start), "err", err)
+		}
+		return fail(req.ID, proto.ErrInternal, "kesalahan internal")
+	}
+	if s.Log != nil {
+		s.Log.Info("operasi", "op", req.Op, "durasi", time.Since(start), "ok", true)
 	}
 	raw, err := json.Marshal(result)
 	if err != nil {

@@ -152,6 +152,8 @@
     "setup_done": "Setup is already done. Please sign in.",
     "network_not_allowed": "The panel can't be opened from this network.",
     "agent_unavailable": "The system service (sapod) is unreachable.",
-    "generic": "Something went wrong. Try again."
+    "generic": "Something went wrong. Try again.",
+    "locked_need_code": "This account is protected after many failed attempts. Enter the code from your authenticator app to sign in.",
+    "busy": "The server is busy. Try again shortly."
   }
 }

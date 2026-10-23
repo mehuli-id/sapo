@@ -5,20 +5,24 @@ After=local-fs.target network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/lib/sapo/sapod -config /etc/sapo/sapo.yaml
+ExecStart=/usr/lib/sapo/sapod -config /etc/sapo/sapo.yaml -defaults /usr/share/sapo/sapo.yaml
 Restart=on-failure
 RestartSec=2s
-# sapod butuh root untuk mengelola disk, share, dan layanan, tetapi tidak
-# butuh akses jaringan: ia hanya mendengarkan unix socket lokal.
+# /run/sapo (tempat socket) tidak dihapus saat sapod restart, agar sapo-api
+# tidak kehilangan direktori yang dipakainya.
 RuntimeDirectory=sapo
 RuntimeDirectoryMode=0755
-RestrictAddressFamilies=AF_UNIX AF_NETLINK
-IPAddressDeny=any
-NoNewPrivileges=yes
+RuntimeDirectoryPreserve=yes
+# sapod adalah pengelola sistem: ia akan memasang paket (apt), mengatur
+# layanan, jam, dan nama host. Pembatasan jaringan, NoNewPrivileges,
+# ProtectClock, dan ProtectHostname SENGAJA tidak dipasang di sini karena
+# diwarisi oleh proses anak (apt, skrip paket) dan akan merusaknya.
+# Batas keamanannya ada di protokol: sapod hanya mendengarkan unix socket
+# lokal dan hanya menjalankan operasi bernama yang terdaftar (ADR 0002).
 LockPersonality=yes
 RestrictRealtime=yes
-ProtectHostname=yes
-ProtectClock=yes
+# Cadangan file descriptor; sapod juga membatasi koneksi bersamaan sendiri.
+LimitNOFILE=8192
 SystemCallArchitectures=native
 
 [Install]
