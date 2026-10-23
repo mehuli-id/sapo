@@ -16,8 +16,9 @@ agent:
     smartctl: /usr/sbin/smartctl
     # Batas waktu satu pemanggilan program (detik, maks 25).
     command_timeout_seconds: 20
-    # Perangkat yang bukan disk sungguhan dan tidak ditampilkan (pola glob).
-    ignore_devices: ["zram*", "ram*", "loop*"]
+    # Perangkat yang bukan disk sungguhan dan tidak ditampilkan (pola glob):
+    # swap di RAM, loop, dan floppy (misalnya bawaan QEMU).
+    ignore_devices: ["zram*", "ram*", "loop*", "fd*"]
     # Program yang boleh berjalan bersamaan (melindungi sapod dan disk yang
     # sedang bermasalah dari banyak permintaan sekaligus).
     max_concurrent_commands: 2
