@@ -1,0 +1,44 @@
+#!/bin/sh
+# postinst untuk paket sapo.
+set -e
+
+DATA_DIR=/var/lib/sapo
+PORT_HINT=5000
+
+case "$1" in
+  configure)
+    # 1. User & grup sistem "sapo".
+    if command -v systemd-sysusers >/dev/null 2>&1; then
+      systemd-sysusers sapo.conf
+    else
+      getent group sapo >/dev/null || groupadd --system sapo
+      getent passwd sapo >/dev/null || useradd --system --gid sapo --home-dir "$DATA_DIR" \
+        --no-create-home --shell /usr/sbin/nologin --comment "Sapo API" sapo
+    fi
+
+    # 2. Direktori data panel (akun & log audit). Bukan tempat file pengguna.
+    install -d -o sapo -g sapo -m 0750 "$DATA_DIR"
+
+    # 3. Layanan. Hanya diaktifkan otomatis pada instalasi pertama, agar
+    #    keputusan admin untuk mematikan layanan tetap dihormati saat upgrade.
+    if [ -d /run/systemd/system ]; then
+      systemctl daemon-reload
+      if [ -z "$2" ]; then
+        systemctl enable --now sapod.service sapo-api.service
+      else
+        systemctl try-restart sapod.service sapo-api.service
+      fi
+    fi
+
+    if [ -z "$2" ]; then
+      host=$(hostname 2>/dev/null || echo sapo)
+      echo ""
+      echo "Sapo terpasang. Buka panel dari komputer di jaringan yang sama:"
+      echo "  http://$host.local:$PORT_HINT  atau  http://<alamat-IP-NAS>:$PORT_HINT"
+      echo "lalu ikuti wizard setup awal."
+      echo ""
+    fi
+    ;;
+esac
+
+exit 0

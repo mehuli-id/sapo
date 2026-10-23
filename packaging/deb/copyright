@@ -1,0 +1,23 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: sapo
+Upstream-Contact: PT. Mehuli Data Media <https://mehuli.id>
+Source: https://github.com/mehuli-id/sapo
+
+Files: *
+Copyright: 2026 PT. Mehuli Data Media dan kontributor Sapo
+License: GPL-3.0-only
+ Teks lengkap ada di /usr/share/common-licenses/GPL-3.
+ Nama dan logo "Sapo by Mehuli" adalah merek PT. Mehuli Data Media;
+ lihat TRADEMARKS.md di kode sumber.
+
+Files: web/*
+Copyright: shadcn-vue contributors (komponen UI di web/src/components/ui)
+License: MIT
+
+Files: vendor/gopkg.in/yaml.v3/*
+Copyright: 2006-2011 Kirill Simonov; 2011-2019 Canonical Ltd
+License: MIT and Apache-2.0
+
+Files: vendor/golang.org/x/*
+Copyright: 2009 The Go Authors
+License: BSD-3-Clause
