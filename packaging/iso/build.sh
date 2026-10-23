@@ -57,6 +57,16 @@ lb config \
   --iso-application "$ISO_APPLICATION" \
   --iso-publisher "$ISO_PUBLISHER"
 
+# Menu boot dengan jeda tunggu (bawaan live-build: menunggu tanpa batas).
+# Konfigurasi bawaan disalin lalu diubah; gagal keras bila formatnya berubah.
+LB_BOOTLOADERS=/usr/share/live/build/bootloaders
+mkdir -p config/bootloaders
+cp -a "$LB_BOOTLOADERS/isolinux" "$LB_BOOTLOADERS/grub-pc" config/bootloaders/
+sed -i "s/^timeout .*/timeout $((BOOT_TIMEOUT_S * 10))/" config/bootloaders/isolinux/isolinux.cfg
+grep -qx "timeout $((BOOT_TIMEOUT_S * 10))" config/bootloaders/isolinux/isolinux.cfg \
+  || { echo "Gagal mengatur jeda menu isolinux." >&2; exit 1; }
+printf '\nset timeout=%s\n' "$BOOT_TIMEOUT_S" >> config/bootloaders/grub-pc/config.cfg
+
 # Daftar paket dan file tambahan (data di packaging/iso/).
 grep -v '^\s*#' "$HERE/packages.list" | sed '/^\s*$/d' > config/package-lists/sapo.list.chroot
 cp -r "$HERE/includes.chroot/." config/includes.chroot/
