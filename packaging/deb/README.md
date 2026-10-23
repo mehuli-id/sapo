@@ -28,11 +28,16 @@ Lalu buka `http://<nama-host>.local:5000` atau `http://<IP-NAS>:5000` dari kompu
 | `/usr/share/sapo/features/` | `features/` |
 | `/usr/share/sapo/wizards/` | `wizards/` |
 | `/usr/share/sapo/branding.yaml` | `branding.yaml` |
-| `/etc/sapo/sapo.yaml` (conffile) | `config/sapo.yaml` |
+| `/usr/share/sapo/sapo.yaml` (nilai bawaan, ikut diperbarui) | `config/sapo.yaml` |
+| `/etc/sapo/sapo.yaml` (perubahan admin/panel, dibuat postinst) | — |
 | `/usr/lib/systemd/system/sapod.service`, `sapo-api.service` | `packaging/deb/systemd/` |
 | `/usr/lib/sysusers.d/sapo.conf` | `packaging/deb/sysusers.conf` |
 
 Baris `Depends` tidak ditulis tangan: diambil dari manifest fitur dengan `activation: always` (`go run ./tools/featuredeps`). Paket untuk fitur lain (Samba, ZFS, Docker, VPN) dipasang oleh `sapod` saat fitur diaktifkan dari panel.
+
+Konfigurasi berlapis: nilai bawaan program → `/usr/share/sapo/sapo.yaml` → `/etc/sapo/sapo.yaml`. File di `/etc` hanya berisi nilai yang diubah admin atau panel, jadi upgrade tidak pernah menimpanya dan tidak pernah memunculkan pertanyaan dpkg (aman untuk upgrade otomatis).
+
+Paket bisa dibangun ulang dengan hasil identik (reproducible build): waktu file diambil dari commit (`SOURCE_DATE_EPOCH`).
 
 Nilai yang bisa berubah (alamat maintainer, lokasi pemasangan) ada di `package.conf`. **Ganti `MAINTAINER_EMAIL` dengan alamat resmi sebelum rilis publik.**
 
@@ -40,9 +45,9 @@ Nilai yang bisa berubah (alamat maintainer, lokasi pemasangan) ada di `package.c
 
 | Kejadian | Yang dilakukan |
 |---|---|
-| Pasang pertama | Membuat user sistem `sapo` (tanpa login), `/var/lib/sapo` (0750), lalu mengaktifkan dan menyalakan layanan |
-| Upgrade | Mempertahankan `/etc/sapo/sapo.yaml` yang sudah diubah admin, data akun, dan status layanan; layanan di-restart |
-| `apt remove` | Menghentikan dan menonaktifkan layanan; konfigurasi dan data akun tetap ada |
+| Pasang pertama | Membuat user sistem `sapo` (tanpa login), `/var/lib/sapo` (0750), `/etc/sapo/sapo.yaml` kosong, lalu mengaktifkan dan menyalakan layanan (juga berjalan di chroot, misalnya saat membangun ISO) |
+| Upgrade | Mempertahankan `/etc/sapo/sapo.yaml`, data akun, dan status layanan (layanan yang dinonaktifkan admin tetap nonaktif); layanan di-restart. Gagal start tidak menggagalkan dpkg |
+| `apt remove` | Menghentikan layanan; konfigurasi dan data akun tetap ada. Bila dipasang ulang, layanan aktif kembali |
 | `apt purge` | Menghapus konfigurasi dan data panel (`/var/lib/sapo`: akun & log audit). User sistem `sapo` dibiarkan sesuai Debian Policy |
 
 **Data pengguna (pool, shared folder, Sapo Drive) tidak pernah disentuh oleh paket ini**, termasuk saat purge.

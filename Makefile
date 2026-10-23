@@ -31,7 +31,7 @@ test:
 	go test ./...
 
 lint:
-	@test -z "$$(gofmt -l cmd internal)" || (echo "Jalankan gofmt:"; gofmt -l cmd internal; exit 1)
+	@test -z "$$(gofmt -l cmd internal tools)" || (echo "Jalankan gofmt:"; gofmt -l cmd internal tools; exit 1)
 	go vet ./...
 	cd web && npm run typecheck
 

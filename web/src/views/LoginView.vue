@@ -33,7 +33,13 @@ async function submit() {
     code.value = ""
     await refresh()
   } catch (e) {
-    if (e instanceof ApiError && e.code === "totp_required") {
+    if (e instanceof ApiError && e.code === "locked_need_code") {
+      // Akun sedang dilindungi: password dan kode dikirim sekaligus.
+      needCode.value = true
+      error.value = t("errors.locked_need_code")
+      await nextTick()
+      ;(codeInput.value?.$el as HTMLInputElement | undefined)?.focus()
+    } else if (e instanceof ApiError && e.code === "totp_required") {
       needCode.value = true
       await nextTick()
       ;(codeInput.value?.$el as HTMLInputElement | undefined)?.focus()

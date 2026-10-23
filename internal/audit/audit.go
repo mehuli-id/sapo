@@ -20,22 +20,51 @@ type Event struct {
 	Detail map[string]string `json:"detail,omitempty"`
 }
 
-// Log menulis ke <dir>/audit.log (izin 0600, mode append).
+// Log menulis ke <dir>/audit.log (izin 0600, mode append). Saat ukurannya
+// melewati batas, file dirotasi ke audit.log.1 (satu arsip), agar banjir
+// percobaan login tidak bisa memenuhi disk sistem.
 type Log struct {
-	mu sync.Mutex
-	f  *os.File
+	mu      sync.Mutex
+	path    string
+	f       *os.File
+	size    int64
+	maxSize int64
 }
 
-// Open membuka file audit.
-func Open(dir string) (*Log, error) {
+// Open membuka file audit dengan batas ukuran maxBytes (0 = tanpa batas).
+func Open(dir string, maxBytes int64) (*Log, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(filepath.Join(dir, "audit.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
+	l := &Log{path: filepath.Join(dir, "audit.log"), maxSize: maxBytes}
+	if err := l.open(); err != nil {
 		return nil, err
 	}
-	return &Log{f: f}, nil
+	return l, nil
+}
+
+func (l *Log) open() error {
+	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	st, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return err
+	}
+	l.f, l.size = f, st.Size()
+	return nil
+}
+
+func (l *Log) rotateLocked() error {
+	if err := l.f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(l.path, l.path+".1"); err != nil {
+		return err
+	}
+	return l.open()
 }
 
 // Record menulis satu kejadian. Kegagalan menulis dikembalikan agar
@@ -53,7 +82,13 @@ func (l *Log) Record(e Event) error {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	_, err = l.f.Write(append(b, '\n'))
+	if l.maxSize > 0 && l.size+int64(len(b))+1 > l.maxSize {
+		if err := l.rotateLocked(); err != nil {
+			return err
+		}
+	}
+	n, err := l.f.Write(append(b, '\n'))
+	l.size += int64(n)
 	return err
 }
 

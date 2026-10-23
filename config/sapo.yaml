@@ -1,11 +1,14 @@
-# Konfigurasi default Sapo. Disalin ke /etc/sapo/sapo.yaml saat instalasi.
-# Semua nilai bisa diubah dari panel (Control Panel); file ini hanya titik awal.
+# Nilai bawaan Sapo. Dipasang paket di /usr/share/sapo/sapo.yaml dan ikut
+# diperbarui setiap upgrade. JANGAN diubah di sana: tulis nilai yang ingin
+# diganti di /etc/sapo/sapo.yaml (atau lewat panel), yang dibaca sesudahnya.
 
 agent:
   socket: /run/sapo/sapod.sock
   socket_group: sapo
   # Direktori manifest fitur (daftar paket Debian per fitur).
   features_dir: /usr/share/sapo/features
+  # Batas koneksi bersamaan ke socket sapod.
+  max_connections: 32
 
 api:
   # Port panel. Siapa yang boleh membuka panel diatur oleh allowed_networks.
@@ -37,6 +40,8 @@ api:
   # Nama host tambahan untuk membuka panel (alamat IP, localhost, nama host
   # mesin, dan <nama host>.local selalu diizinkan). Mencegah DNS rebinding.
   hostnames: []
+  # Log audit dirotasi saat mencapai ukuran ini (MB); satu arsip disimpan.
+  audit_max_mb: 10
 
 auth:
   password_min_length: 10
@@ -48,6 +53,9 @@ auth:
   login_max_attempts: 5
   login_window_minutes: 15
   lockout_minutes: 15
+  # Batas kode 2FA salah per akun, terpisah dari batas password.
+  totp_max_failures: 10
+  totp_window_minutes: 60
   setup_totp_expiry_minutes: 15
   # Argon2 memakai banyak RAM; batasi hash yang berjalan bersamaan.
   max_concurrent_hashes: 2

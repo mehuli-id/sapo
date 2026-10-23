@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -56,6 +57,9 @@ func loadBranding(path string) (*branding, error) {
 	}
 	if b.Theme.Radius != "" && !cssValue.MatchString(b.Theme.Radius) {
 		return nil, fmt.Errorf("radius tidak valid")
+	}
+	if w := b.Product.Website; w != "" && !strings.HasPrefix(w, "https://") && !strings.HasPrefix(w, "http://") {
+		return nil, fmt.Errorf("product.website harus http(s)")
 	}
 	return &b, nil
 }

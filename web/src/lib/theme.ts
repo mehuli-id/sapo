@@ -6,11 +6,17 @@ export function applyBranding(branding: Branding | undefined) {
   if (!branding?.theme) return
   const { radius, light, dark } = branding.theme
   const lines: string[] = []
+  // Server sudah memvalidasi; dicek lagi di sini sebagai lapisan kedua
+  // karena nilainya disisipkan sebagai CSS.
+  const safeName = /^[a-z][a-z0-9_]{0,40}$/
+  const safeValue = /^[a-zA-Z0-9 .,%()/#-]{1,64}$/
   const toVars = (obj?: Record<string, string>) =>
     Object.entries(obj ?? {})
+      .filter(([k, v]) => safeName.test(k) && safeValue.test(v))
       .map(([k, v]) => `--${k.replace(/_/g, "-")}: ${v};`)
       .join(" ")
-  lines.push(`:root { ${radius ? `--radius: ${radius};` : ""} ${toVars(light)} }`)
+  const r = radius && safeValue.test(radius) ? `--radius: ${radius};` : ""
+  lines.push(`:root { ${r} ${toVars(light)} }`)
   lines.push(`.dark { ${toVars(dark)} }`)
 
   let el = document.getElementById("sapo-branding") as HTMLStyleElement | null

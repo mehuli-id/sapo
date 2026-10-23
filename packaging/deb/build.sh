@@ -26,6 +26,10 @@ if [[ -z "${VERSION:-}" ]]; then
   fi
 fi
 
+# Build yang bisa diulang (reproducible): semua waktu file = waktu commit.
+SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(git -C "$ROOT" log -1 --format=%ct 2>/dev/null || date +%s)}"
+export SOURCE_DATE_EPOCH
+
 OUT_DIR="${OUT_DIR:-$ROOT/dist}"
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
@@ -53,7 +57,9 @@ cp -r "$ROOT/features" "$PKG$PREFIX_SHARE/features"
 rm -f "$PKG$PREFIX_SHARE/features/README.md"
 cp -r "$ROOT/wizards" "$PKG$PREFIX_SHARE/wizards"
 cp "$ROOT/branding.yaml" "$PKG$PREFIX_SHARE/branding.yaml"
-install -D -m 0644 "$ROOT/config/sapo.yaml" "$PKG$CONF_DIR/sapo.yaml"
+# Nilai bawaan ikut diperbarui paket; /etc/sapo/sapo.yaml (perubahan admin
+# atau panel) dibuat oleh postinst dan tidak pernah ditimpa upgrade.
+install -D -m 0644 "$ROOT/config/sapo.yaml" "$PKG$PREFIX_SHARE/sapo.yaml"
 
 # 4. systemd & user sistem.
 install -D -m 0644 "$HERE/systemd/sapod.service" "$PKG$UNIT_DIR/sapod.service"
@@ -64,6 +70,14 @@ install -D -m 0644 "$HERE/sysusers.conf" "$PKG$SYSUSERS_DIR/sapo.conf"
 install -D -m 0644 "$HERE/copyright" "$PKG/usr/share/doc/sapo/copyright"
 install -D -m 0644 "$ROOT/README.md" "$PKG/usr/share/doc/sapo/README.md"
 install -D -m 0644 "$ROOT/TRADEMARKS.md" "$PKG/usr/share/doc/sapo/TRADEMARKS.md"
+{
+  echo "sapo ($VERSION) unstable; urgency=medium"
+  echo ""
+  echo "  * Build otomatis dari commit $(git -C "$ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)."
+  echo "    Riwayat lengkap: https://github.com/mehuli-id/sapo/commits"
+  echo ""
+  echo " -- PT. Mehuli Data Media <$MAINTAINER_EMAIL>  $(date -u -d "@$SOURCE_DATE_EPOCH" -R)"
+} | gzip -9n > "$PKG/usr/share/doc/sapo/changelog.Debian.gz"
 
 # Izin standar: direktori 0755, file 0644, binary 0755.
 find "$PKG" -type d -exec chmod 0755 {} +
@@ -73,13 +87,14 @@ chmod 0755 "$PKG$PREFIX_BIN"/*
 # 6. Metadata paket. Depends diambil dari manifest fitur "always" (data).
 DEPENDS="$(go -C "$ROOT" run ./tools/featuredeps -dir "$ROOT/features" -activation always)"
 mkdir -p "$PKG/DEBIAN"
-INSTALLED_SIZE=$(du -sk --exclude=DEBIAN "$PKG" | cut -f1)
+INSTALLED_SIZE=$(du -sk --apparent-size --exclude=DEBIAN "$PKG" | cut -f1)
 sed -e "s|@VERSION@|$VERSION|" -e "s|@ARCH@|$ARCH|" -e "s|@DEPENDS@|$DEPENDS|" \
     -e "s|@INSTALLED_SIZE@|$INSTALLED_SIZE|" -e "s|@MAINTAINER_EMAIL@|$MAINTAINER_EMAIL|" \
     "$HERE/control.in" > "$PKG/DEBIAN/control"
-echo "$CONF_DIR/sapo.yaml" > "$PKG/DEBIAN/conffiles"
 for s in postinst prerm postrm; do install -m 0755 "$HERE/$s" "$PKG/DEBIAN/$s"; done
 (cd "$PKG" && find . -path ./DEBIAN -prune -o -type f -print0 | sort -z | xargs -0 md5sum | sed 's| \./| |') > "$PKG/DEBIAN/md5sums"
+
+find "$PKG" -exec touch --no-dereference --date="@$SOURCE_DATE_EPOCH" {} +
 
 mkdir -p "$OUT_DIR"
 OUT="$OUT_DIR/sapo_${VERSION}_${ARCH}.deb"

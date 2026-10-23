@@ -10,9 +10,17 @@ License: GPL-3.0-only
  Nama dan logo "Sapo by Mehuli" adalah merek PT. Mehuli Data Media;
  lihat TRADEMARKS.md di kode sumber.
 
-Files: web/*
-Copyright: shadcn-vue contributors (komponen UI di web/src/components/ui)
+Files: web/src/components/ui/*
+Copyright: shadcn-vue contributors
 License: MIT
+
+Files: usr/share/sapo/web/assets/*
+Comment: Panel yang sudah dibangun memuat pustaka JavaScript berikut
+ (daftar lengkap beserta versinya ada di web/package-lock.json):
+ vue, vue-i18n, reka-ui, @vueuse/core, class-variance-authority, clsx,
+ tailwind-merge, qrcode (MIT); @lucide/vue (ISC); tailwindcss (MIT).
+Copyright: para penulis masing-masing pustaka
+License: MIT and ISC
 
 Files: vendor/gopkg.in/yaml.v3/*
 Copyright: 2006-2011 Kirill Simonov; 2011-2019 Canonical Ltd
