@@ -27,7 +27,7 @@ Rincian ada di [docs/](docs/) dan dokumen rancangan proyek.
 
 ## Mencoba (pengembangan)
 
-Kebutuhan: Go 1.24+, Node.js 22+, make.
+Kebutuhan: Go 1.26+, Node.js 22+, make.
 
 ```bash
 make build          # build sapod, sapo-api, dan panel
