@@ -1,0 +1,142 @@
+name: Rilis
+
+# Repo APT bertanda tangan di GitHub Pages (packaging/apt/).
+# - Tag v* (misalnya v26.12): paket masuk saluran stable dan GitHub Release.
+# - Manual (tab Actions): paket dari cabang yang dipilih masuk saluran dev.
+# Setelah terbit, paket dipasang lewat apt di container Debian bersih untuk
+# membuktikan repo, tanda tangan, dan dependensinya benar.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Saluran tujuan
+        type: choice
+        options: [dev]
+        default: dev
+
+permissions:
+  contents: read
+
+# Repo APT diperbarui satu per satu (cabang gh-pages).
+concurrency:
+  group: apt-repo
+  cancel-in-progress: false
+
+env:
+  GO_VERSION: stable
+
+jobs:
+  deb:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # versi paket diambil dari tag git
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: build .deb
+        run: make deb ARCH=${{ matrix.arch }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rilis-deb-${{ matrix.arch }}
+          path: dist/*.deb
+
+  publish:
+    needs: deb
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # cabang gh-pages dan GitHub Release
+    outputs:
+      channel: ${{ steps.meta.outputs.channel }}
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: gh-pages
+          path: site
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: rilis-deb-*
+          merge-multiple: true
+          path: debs
+      - id: meta
+        name: saluran dan versi
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then channel=stable; else channel="${{ inputs.channel }}"; fi
+          version="$(dpkg-deb -f debs/*_amd64.deb Version)"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Menerbitkan sapo $version ke saluran $channel"
+      - name: perbarui repo APT dan tanda tangani
+        env:
+          APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends apt-utils >/dev/null
+          # Kunci rahasia hanya ada di GNUPGHOME sementara selama langkah ini.
+          export GNUPGHOME="$(mktemp -d)"
+          trap 'gpgconf --kill gpg-agent; rm -rf "$GNUPGHOME"' EXIT
+          printf '%s\n' "$APT_SIGNING_KEY" | gpg --batch --quiet --import
+          packaging/apt/build-repo.sh site/apt "${{ steps.meta.outputs.channel }}" debs/*.deb
+      - name: terbitkan ke gh-pages
+        working-directory: site
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Repo APT: sapo ${{ steps.meta.outputs.version }} ke ${{ steps.meta.outputs.channel }}"
+          git push -q
+      - name: GitHub Release (hanya tag)
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" debs/*.deb --verify-tag --generate-notes --title "Sapo $GITHUB_REF_NAME"
+
+  verify:
+    needs: publish
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: pasang dari repo APT yang baru terbit
+        env:
+          CHANNEL: ${{ needs.publish.outputs.channel }}
+          VERSION: ${{ needs.publish.outputs.version }}
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euo pipefail
+          . packaging/apt/repo.conf
+          apt-get update -qq && apt-get install -y -qq --no-install-recommends ca-certificates curl gpg >/dev/null
+          # GitHub Pages butuh beberapa menit untuk menayangkan isi baru.
+          for i in $(seq 1 40); do
+            curl -fsS "$REPO_URL/dists/$CHANNEL/main/binary-amd64/Packages" | grep -qxF "Version: $VERSION" && break
+            [ "$i" = 40 ] && { echo "Repo belum menayangkan $VERSION setelah 20 menit" >&2; exit 1; }
+            sleep 30
+          done
+          # Sama dengan yang dipasang paket sapo di NAS.
+          gpg --dearmor < packaging/apt/sapo-archive-key.asc > "$KEYRING"
+          printf 'Types: deb\nURIs: %s\nSuites: %s\nComponents: %s\nSigned-By: %s\n' "$REPO_URL" "$CHANNEL" "$COMPONENT" "$KEYRING" > "$SOURCES"
+          # Peringatan apa pun dari apt (misalnya tanda tangan) = gagal.
+          apt-get update 2>&1 | tee /tmp/update.log
+          if grep -E '^(W|E|Err):' /tmp/update.log; then exit 1; fi
+          # File sumber APT dari paket (conffile) menggantikan yang dibuat di
+          # atas, tanpa pertanyaan dpkg.
+          apt-get install -y --no-install-recommends -o Dpkg::Options::=--force-confnew "sapo=$VERSION"
+          dpkg-query -W sapo
+          # Paket memasang sumber APT dan kuncinya sendiri.
+          grep -qx "Signed-By: $KEYRING" "$SOURCES"
+          cmp "$KEYRING" <(gpg --dearmor < packaging/apt/sapo-archive-key.asc)

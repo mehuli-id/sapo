@@ -9,7 +9,7 @@ make deb                 # arsitektur mesin ini
 make deb ARCH=arm64      # cross-build untuk arm64
 ```
 
-Hasilnya di `dist/sapo_<versi>_<arsitektur>.deb`. Versi diambil dari git: tag `v1.2.3` menjadi `1.2.3`, selain itu `0.0.0~git<tanggal>.<sha>`. CI GitHub Actions membangun paket amd64 dan arm64 di setiap push sebagai artifact.
+Hasilnya di `dist/sapo_<versi>_<arsitektur>.deb`. Build membutuhkan `gpg` untuk memasang kunci publik repo APT. Versi diambil dari git: tag `v1.2.3` menjadi `1.2.3`, selain itu `0.0.0~git<tanggal>.<sha>`. CI GitHub Actions membangun paket amd64 dan arm64 di setiap push sebagai artifact.
 
 ## Memasang (di VM uji)
 
@@ -32,6 +32,7 @@ Lalu buka `http://<nama-host>.local:5000` atau `http://<IP-NAS>:5000` dari kompu
 | `/etc/sapo/sapo.yaml` (perubahan admin/panel, dibuat postinst) | — |
 | `/usr/lib/systemd/system/sapod.service`, `sapo-api.service` | `packaging/deb/systemd/` |
 | `/usr/lib/sysusers.d/sapo.conf` | `packaging/deb/sysusers.conf` |
+| `/usr/share/keyrings/sapo-archive-keyring.gpg`, `/etc/apt/sources.list.d/sapo.sources` (conffile) | `packaging/apt/` (repo APT bertanda tangan, saluran `stable`) |
 | `/etc/issue.d/sapo.issue` (tautan ke `/run/sapo/console.issue`: alamat panel dan sidik jari sertifikat di layar login konsol) | ditulis `sapod` dari templat tetap (operasi `console.panel_address`) |
 
 Baris `Depends` tidak ditulis tangan: diambil dari manifest fitur dengan `activation: always` (`go run ./tools/featuredeps`). Paket untuk fitur lain (Samba, ZFS, Docker, VPN) dipasang oleh `sapod` saat fitur diaktifkan dari panel.

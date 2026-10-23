@@ -8,6 +8,9 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 HERE="$ROOT/packaging/deb"
 # shellcheck source=/dev/null
 source "$HERE/package.conf"
+# Data repo APT (URL, saluran, kunci): paket memasang sumber APT-nya sendiri.
+# shellcheck source=/dev/null
+source "$ROOT/packaging/apt/repo.conf"
 
 ARCH="${ARCH:-$(dpkg --print-architecture 2>/dev/null || go env GOARCH)}"
 case "$ARCH" in
@@ -84,6 +87,22 @@ install -D -m 0644 "$ROOT/TRADEMARKS.md" "$PKG/usr/share/doc/sapo/TRADEMARKS.md"
   echo " -- PT. Mehuli Data Media <$MAINTAINER_EMAIL>  $(date -u -d "@$SOURCE_DATE_EPOCH" -R)"
 } | gzip -9n > "$PKG/usr/share/doc/sapo/changelog.Debian.gz"
 
+# 5b. Repo APT Sapo: kunci publik (biner, untuk Signed-By) dan sumber APT
+#     deb822, agar NAS bisa update lewat apt. Sumber APT adalah conffile:
+#     perubahan admin (misalnya pindah saluran) tidak ditimpa upgrade.
+install -d -m 0755 "$PKG$(dirname "$KEYRING")"
+gpg --dearmor < "$ROOT/packaging/apt/sapo-archive-key.asc" > "$PKG$KEYRING"
+install -d -m 0755 "$PKG$(dirname "$SOURCES")"
+cat > "$PKG$SOURCES" <<SRC
+# Repo APT Sapo by Mehuli. Saluran: $CHANNELS (stable = rilis resmi).
+# Kunci penanda tangan: $KEY_FINGERPRINT
+Types: deb
+URIs: $REPO_URL
+Suites: $DEFAULT_CHANNEL
+Components: $COMPONENT
+Signed-By: $KEYRING
+SRC
+
 # Izin standar: direktori 0755, file 0644, binary 0755.
 find "$PKG" -type d -exec chmod 0755 {} +
 find "$PKG" -type f -exec chmod 0644 {} +
@@ -97,6 +116,7 @@ sed -e "s|@VERSION@|$VERSION|" -e "s|@ARCH@|$ARCH|" -e "s|@DEPENDS@|$DEPENDS|" \
     -e "s|@INSTALLED_SIZE@|$INSTALLED_SIZE|" -e "s|@MAINTAINER_EMAIL@|$MAINTAINER_EMAIL|" \
     "$HERE/control.in" > "$PKG/DEBIAN/control"
 for s in postinst prerm postrm; do install -m 0755 "$HERE/$s" "$PKG/DEBIAN/$s"; done
+echo "$SOURCES" > "$PKG/DEBIAN/conffiles"
 (cd "$PKG" && find . -path ./DEBIAN -prune -o -type f -print0 | sort -z | xargs -0 md5sum | sed 's| \./| |') > "$PKG/DEBIAN/md5sums"
 
 find "$PKG" -exec touch --no-dereference --date="@$SOURCE_DATE_EPOCH" {} +
