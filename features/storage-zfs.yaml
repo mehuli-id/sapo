@@ -1,0 +1,10 @@
+id: storage-zfs
+name: { id: Storage ZFS, en: ZFS storage }
+group: storage
+# zfs-dkms: modul dikompilasi di mesin pengguna (ADR 0001, lisensi CDDL).
+packages: [zfs-dkms, zfsutils-linux]
+services: [zfs-zed]
+requires: [core]
+# always: selalu terpasang · setup: dipilih saat instalasi · optional: diaktifkan dari panel
+activation: setup
+removable: false

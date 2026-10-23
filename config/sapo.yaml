@@ -1,0 +1,22 @@
+# Konfigurasi default Sapo. Disalin ke /etc/sapo/sapo.yaml saat instalasi.
+# Semua nilai bisa diubah dari panel (Control Panel); file ini hanya titik awal.
+
+agent:
+  socket: /run/sapo/sapod.sock
+  socket_group: sapo
+  # Direktori manifest fitur (daftar paket Debian per fitur).
+  features_dir: /usr/share/sapo/features
+
+api:
+  # Default hanya LAN/localhost. Akses dari internet diatur lewat wizard "Akses dari internet".
+  listen: "127.0.0.1:5000"
+  web_dir: /usr/share/sapo/web
+  # Nama produk, warna, dan aset panel (fork cukup mengganti file ini).
+  branding_file: /usr/share/sapo/branding.yaml
+  data_dir: /var/lib/sapo
+  default_language: id
+  session_idle_minutes: 30
+
+ui:
+  # Mode tampilan default untuk user baru: desktop | ringkas
+  default_mode: desktop

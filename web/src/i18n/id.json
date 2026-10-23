@@ -1,0 +1,107 @@
+{
+  "common": {
+    "loading": "Memuat…",
+    "retry": "Coba lagi",
+    "error": "Terjadi kesalahan",
+    "close": "Tutup",
+    "minimize": "Perkecil",
+    "maximize": "Perbesar",
+    "restore": "Kembalikan",
+    "search": "Cari aplikasi atau pengaturan…",
+    "noResults": "Tidak ada yang cocok",
+    "comingSoon": "Segera hadir",
+    "phase": "Direncanakan di Fase {n}"
+  },
+  "shell": {
+    "mainMenu": "Menu utama",
+    "allApps": "Semua aplikasi",
+    "mode": "Mode tampilan",
+    "modeDesktop": "Desktop",
+    "modeCompact": "Ringkas",
+    "theme": "Tema",
+    "themeLight": "Terang",
+    "themeDark": "Gelap",
+    "themeSystem": "Ikuti sistem",
+    "language": "Bahasa",
+    "devBanner": "Pra-alpha · mode pengembangan · jangan dipakai untuk data sungguhan",
+    "agentDown": "Layanan sistem (sapod) tidak bisa dihubungi"
+  },
+  "apps": {
+    "system-info": {
+      "title": "Info Sistem",
+      "description": "Perangkat keras, OS, dan beban sistem"
+    },
+    "features": {
+      "title": "Fitur",
+      "description": "Fitur yang tersedia dan paket yang dibutuhkan"
+    },
+    "storage": {
+      "title": "Storage Manager",
+      "description": "Disk, pool, dan RAID"
+    },
+    "file-station": {
+      "title": "File Station",
+      "description": "Kelola file di browser"
+    },
+    "control-panel": {
+      "title": "Control Panel",
+      "description": "Jaringan, user, layanan, dan sistem"
+    },
+    "sapo-drive": {
+      "title": "Sapo Drive",
+      "description": "Drive pribadi ala Google Drive"
+    },
+    "app-center": {
+      "title": "App Center",
+      "description": "Pasang aplikasi tambahan"
+    },
+    "resource-monitor": {
+      "title": "Resource Monitor",
+      "description": "Grafik CPU, RAM, jaringan, dan disk"
+    },
+    "about": {
+      "title": "Tentang",
+      "description": "Versi, lisensi, dan merek"
+    }
+  },
+  "systemInfo": {
+    "hostname": "Nama perangkat",
+    "os": "Sistem operasi",
+    "kernel": "Kernel",
+    "arch": "Arsitektur",
+    "version": "Versi Sapo",
+    "uptime": "Waktu aktif",
+    "cpu": "Prosesor",
+    "cores": "{n} core",
+    "memory": "Memori",
+    "memoryUsed": "{used} dari {total} terpakai",
+    "load": "Beban rata-rata (1, 5, 15 menit)",
+    "days": "{n} hari",
+    "hours": "{n} jam",
+    "minutes": "{n} menit",
+    "refresh": "Perbarui"
+  },
+  "features": {
+    "intro": "Sapo memakai Debian minimal. Paket untuk setiap fitur baru dipasang saat fitur itu diaktifkan.",
+    "packages": "Paket",
+    "services": "Layanan",
+    "requires": "Membutuhkan",
+    "groups": {
+      "core": "Inti",
+      "storage": "Storage",
+      "file-sharing": "Berbagi file",
+      "vpn": "VPN",
+      "apps": "Aplikasi"
+    },
+    "activation": {
+      "always": "Selalu aktif",
+      "setup": "Dipilih saat instalasi",
+      "optional": "Opsional"
+    }
+  },
+  "about": {
+    "license": "Kode dilisensikan di bawah GPL-3.0. Nama dan logo adalah merek {vendor}.",
+    "website": "Situs web",
+    "source": "Kode sumber"
+  }
+}

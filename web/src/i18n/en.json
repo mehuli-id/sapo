@@ -1,0 +1,107 @@
+{
+  "common": {
+    "loading": "Loading…",
+    "retry": "Try again",
+    "error": "Something went wrong",
+    "close": "Close",
+    "minimize": "Minimize",
+    "maximize": "Maximize",
+    "restore": "Restore",
+    "search": "Search apps or settings…",
+    "noResults": "No matches",
+    "comingSoon": "Coming soon",
+    "phase": "Planned for Phase {n}"
+  },
+  "shell": {
+    "mainMenu": "Main menu",
+    "allApps": "All apps",
+    "mode": "Display mode",
+    "modeDesktop": "Desktop",
+    "modeCompact": "Compact",
+    "theme": "Theme",
+    "themeLight": "Light",
+    "themeDark": "Dark",
+    "themeSystem": "Follow system",
+    "language": "Language",
+    "devBanner": "Pre-alpha · development mode · do not use with real data",
+    "agentDown": "System service (sapod) is unreachable"
+  },
+  "apps": {
+    "system-info": {
+      "title": "System Info",
+      "description": "Hardware, OS, and system load"
+    },
+    "features": {
+      "title": "Features",
+      "description": "Available features and the packages they need"
+    },
+    "storage": {
+      "title": "Storage Manager",
+      "description": "Disks, pools, and RAID"
+    },
+    "file-station": {
+      "title": "File Station",
+      "description": "Manage files in the browser"
+    },
+    "control-panel": {
+      "title": "Control Panel",
+      "description": "Network, users, services, and system"
+    },
+    "sapo-drive": {
+      "title": "Sapo Drive",
+      "description": "Personal drive like Google Drive"
+    },
+    "app-center": {
+      "title": "App Center",
+      "description": "Install additional apps"
+    },
+    "resource-monitor": {
+      "title": "Resource Monitor",
+      "description": "CPU, memory, network, and disk charts"
+    },
+    "about": {
+      "title": "About",
+      "description": "Version, license, and trademarks"
+    }
+  },
+  "systemInfo": {
+    "hostname": "Device name",
+    "os": "Operating system",
+    "kernel": "Kernel",
+    "arch": "Architecture",
+    "version": "Sapo version",
+    "uptime": "Uptime",
+    "cpu": "Processor",
+    "cores": "{n} cores",
+    "memory": "Memory",
+    "memoryUsed": "{used} of {total} used",
+    "load": "Load average (1, 5, 15 min)",
+    "days": "{n} days",
+    "hours": "{n} hours",
+    "minutes": "{n} minutes",
+    "refresh": "Refresh"
+  },
+  "features": {
+    "intro": "Sapo runs on minimal Debian. Packages for each feature are installed only when that feature is enabled.",
+    "packages": "Packages",
+    "services": "Services",
+    "requires": "Requires",
+    "groups": {
+      "core": "Core",
+      "storage": "Storage",
+      "file-sharing": "File sharing",
+      "vpn": "VPN",
+      "apps": "Apps"
+    },
+    "activation": {
+      "always": "Always on",
+      "setup": "Chosen at setup",
+      "optional": "Optional"
+    }
+  },
+  "about": {
+    "license": "Code is licensed under GPL-3.0. The name and logo are trademarks of {vendor}.",
+    "website": "Website",
+    "source": "Source code"
+  }
+}

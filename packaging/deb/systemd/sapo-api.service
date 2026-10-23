@@ -1,0 +1,44 @@
+[Unit]
+Description=Sapo API & panel (sapo-api)
+Documentation=https://github.com/mehuli-id/sapo
+After=sapod.service
+Wants=sapod.service
+
+[Service]
+Type=simple
+User=sapo
+Group=sapo
+ExecStart=/usr/lib/sapo/sapo-api -config /etc/sapo/sapo.yaml
+Restart=on-failure
+RestartSec=2s
+StateDirectory=sapo
+StateDirectoryMode=0750
+# Satu-satunya lokasi di luar StateDirectory yang boleh disentuh: socket sapod.
+ReadWritePaths=/run/sapo
+# sapo-api tidak pernah butuh hak root atau akses ke disk sistem.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

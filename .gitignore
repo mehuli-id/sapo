@@ -1,0 +1,7 @@
+/bin/
+/.dev/
+/dist/
+*.test
+*.out
+.DS_Store
+/deploy/dev/.vm/

@@ -1,0 +1,25 @@
+[Unit]
+Description=Sapo System Agent (sapod)
+Documentation=https://github.com/mehuli-id/sapo
+After=local-fs.target network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/sapo/sapod -config /etc/sapo/sapo.yaml
+Restart=on-failure
+RestartSec=2s
+# sapod butuh root untuk mengelola disk, share, dan layanan, tetapi tidak
+# butuh akses jaringan: ia hanya mendengarkan unix socket lokal.
+RuntimeDirectory=sapo
+RuntimeDirectoryMode=0755
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+IPAddressDeny=any
+NoNewPrivileges=yes
+LockPersonality=yes
+RestrictRealtime=yes
+ProtectHostname=yes
+ProtectClock=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
