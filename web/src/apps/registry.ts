@@ -53,6 +53,7 @@ export function iconFor(name: string): Component {
 const components: Record<string, Component> = {
   SystemInfo: defineAsyncComponent(() => import("./SystemInfo.vue")),
   Features: defineAsyncComponent(() => import("./Features.vue")),
+  Storage: defineAsyncComponent(() => import("./Storage.vue")),
   About: defineAsyncComponent(() => import("./About.vue")),
   Planned: defineAsyncComponent(() => import("./Planned.vue")),
 }

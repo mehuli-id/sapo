@@ -101,6 +101,42 @@
       "optional": "Optional"
     }
   },
+  "storage": {
+    "intro": "Read-only version: your disks and their health (SMART). Creating pools and RAID comes next.",
+    "unavailable": "Disks cannot be read on this system. Storage Manager needs Linux with lsblk and smartctl.",
+    "empty": "No disks detected.",
+    "refresh": "Refresh",
+    "kind": {
+      "hdd": "HDD",
+      "ssd": "SSD",
+      "nvme": "NVMe SSD"
+    },
+    "serial": "Serial number",
+    "partitions": "Partitions and volumes",
+    "noPartitions": "No partitions yet (empty disk).",
+    "mountedAt": "mounted at {path}",
+    "temperature": "{n} °C",
+    "powerOnHours": "{n} power-on hours",
+    "smart": {
+      "loading": "Reading SMART…",
+      "passed": "Healthy",
+      "failed": "Failing",
+      "standby": "Sleeping",
+      "unsupported": "SMART not supported",
+      "unavailable": "SMART unreadable",
+      "failedHelp": "This disk reports that it is about to fail. Back up the data on it now, then replace the disk.",
+      "standbyHelp": "The disk is in power-saving mode. SMART is not read so the disk is not woken up; try again later.",
+      "unsupportedHelp": "This disk does not provide health data (common for virtual disks and some USB adapters).",
+      "showDetails": "Show SMART details",
+      "hideDetails": "Hide details",
+      "attribute": "Attribute",
+      "value": "Value",
+      "worst": "Worst",
+      "threshold": "Threshold",
+      "raw": "Raw",
+      "failingNote": "Attributes marked red have crossed the manufacturer's threshold."
+    }
+  },
   "about": {
     "license": "Code is licensed under GPL-3.0. The name and logo are trademarks of {vendor}.",
     "website": "Website",
@@ -154,6 +190,8 @@
     "agent_unavailable": "The system service (sapod) is unreachable.",
     "generic": "Something went wrong. Try again.",
     "locked_need_code": "This account is protected after many failed attempts. Enter the code from your authenticator app to sign in.",
-    "busy": "The server is busy. Try again shortly."
+    "busy": "The server is busy. Try again shortly.",
+    "unavailable": "A required system tool is not available.",
+    "not_found": "The requested item was not found."
   }
 }

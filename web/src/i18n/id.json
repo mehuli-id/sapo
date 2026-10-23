@@ -101,6 +101,42 @@
       "optional": "Opsional"
     }
   },
+  "storage": {
+    "intro": "Versi baca saja: daftar disk dan kesehatannya (SMART). Membuat pool dan RAID menyusul.",
+    "unavailable": "Daftar disk tidak bisa dibaca di sistem ini. Storage Manager butuh Linux dengan lsblk dan smartctl.",
+    "empty": "Tidak ada disk yang terdeteksi.",
+    "refresh": "Perbarui",
+    "kind": {
+      "hdd": "HDD",
+      "ssd": "SSD",
+      "nvme": "NVMe SSD"
+    },
+    "serial": "Nomor seri",
+    "partitions": "Partisi dan volume",
+    "noPartitions": "Belum ada partisi (disk kosong).",
+    "mountedAt": "terpasang di {path}",
+    "temperature": "{n} °C",
+    "powerOnHours": "{n} jam menyala",
+    "smart": {
+      "loading": "Membaca SMART…",
+      "passed": "Sehat",
+      "failed": "Akan rusak",
+      "standby": "Sedang tidur",
+      "unsupported": "SMART tidak didukung",
+      "unavailable": "SMART tidak terbaca",
+      "failedHelp": "Disk ini melaporkan dirinya akan rusak. Segera cadangkan data di disk ini, lalu ganti disknya.",
+      "standbyHelp": "Disk sedang hemat daya. SMART tidak dibaca agar disk tidak dibangunkan; coba lagi nanti.",
+      "unsupportedHelp": "Disk ini tidak menyediakan data kesehatan (umum pada disk virtual dan beberapa adaptor USB).",
+      "showDetails": "Lihat detail SMART",
+      "hideDetails": "Sembunyikan detail",
+      "attribute": "Atribut",
+      "value": "Nilai",
+      "worst": "Terburuk",
+      "threshold": "Ambang",
+      "raw": "Mentah",
+      "failingNote": "Atribut bertanda merah sudah melewati ambang batas pabrik."
+    }
+  },
   "about": {
     "license": "Kode dilisensikan di bawah GPL-3.0. Nama dan logo adalah merek {vendor}.",
     "website": "Situs web",
@@ -154,6 +190,8 @@
     "agent_unavailable": "Layanan sistem (sapod) tidak bisa dihubungi.",
     "generic": "Terjadi kesalahan. Coba lagi.",
     "locked_need_code": "Akun sedang dilindungi karena banyak percobaan gagal. Masukkan kode dari aplikasi autentikator untuk masuk.",
-    "busy": "Server sedang sibuk. Coba lagi sebentar."
+    "busy": "Server sedang sibuk. Coba lagi sebentar.",
+    "unavailable": "Alat sistem yang dibutuhkan tidak tersedia.",
+    "not_found": "Data yang diminta tidak ditemukan."
   }
 }

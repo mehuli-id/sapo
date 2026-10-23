@@ -25,11 +25,21 @@ import (
 type fakeAgent struct {
 	results map[string]any
 	err     error
+	// errs memberi error per operasi; params mencatat parameter terakhir.
+	errs   map[string]error
+	params map[string]any
 }
 
-func (f *fakeAgent) Call(_ context.Context, op string, _ any, out any) error {
+func (f *fakeAgent) Call(_ context.Context, op string, params any, out any) error {
+	if f.params == nil {
+		f.params = map[string]any{}
+	}
+	f.params[op] = params
 	if f.err != nil {
 		return f.err
+	}
+	if err := f.errs[op]; err != nil {
+		return err
 	}
 	res, ok := f.results[op]
 	if !ok {
@@ -549,6 +559,50 @@ func TestTrailingBracesRejected(t *testing.T) {
 		h.s.ServeHTTP(rec, r)
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("%s harus ditolak, dapat %d", body, rec.Code)
+		}
+	}
+}
+
+func TestStorageEndpoints(t *testing.T) {
+	agent := &fakeAgent{results: map[string]any{
+		proto.OpStorageDisks: []proto.Disk{{Name: "sda", Path: "/dev/sda", SizeBytes: 1 << 40, Partitions: []proto.Partition{}}},
+		proto.OpStorageSMART: proto.SMART{Device: "sda", Status: proto.SMARTPassed, Attributes: []proto.SMARTAttr{}},
+	}}
+	h := newHarness(t, agent)
+	for _, p := range []string{"/api/v1/storage/disks", "/api/v1/storage/disks/sda/smart"} {
+		if rec := h.do(http.MethodGet, p, nil); rec.Code != http.StatusUnauthorized {
+			t.Fatalf("%s tanpa login harus 401, dapat %d", p, rec.Code)
+		}
+	}
+	h.runSetup()
+
+	rec := h.do(http.MethodGet, "/api/v1/storage/disks", nil)
+	var disks []proto.Disk
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &disks) != nil || len(disks) != 1 || disks[0].Name != "sda" {
+		t.Fatalf("disks %d %s", rec.Code, rec.Body)
+	}
+	if rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("data disk tidak boleh di-cache")
+	}
+
+	rec = h.do(http.MethodGet, "/api/v1/storage/disks/sda/smart", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("smart %d %s", rec.Code, rec.Body)
+	}
+	if p, _ := agent.params[proto.OpStorageSMART].(proto.SMARTParams); p.Device != "sda" {
+		t.Fatalf("parameter ke sapod = %#v", agent.params[proto.OpStorageSMART])
+	}
+
+	// Kode error sapod dipetakan ke status HTTP yang sesuai.
+	for code, status := range map[string]int{
+		proto.ErrNotFound:      http.StatusNotFound,
+		proto.ErrInvalidParams: http.StatusBadRequest,
+		proto.ErrUnavailable:   http.StatusServiceUnavailable,
+	} {
+		agent.errs = map[string]error{proto.OpStorageSMART: &proto.Error{Code: code, Message: "x"}}
+		rec = h.do(http.MethodGet, "/api/v1/storage/disks/sdz/smart", nil)
+		if rec.Code != status || errCode(rec) != code {
+			t.Errorf("%s: dapat %d %s, harus %d", code, rec.Code, errCode(rec), status)
 		}
 	}
 }

@@ -40,12 +40,19 @@ const (
 	ErrInvalidParams = "invalid_params"
 	ErrInternal      = "internal"
 	ErrBadRequest    = "bad_request"
+	// ErrNotFound: objek yang diminta (misalnya disk) tidak ada.
+	ErrNotFound = "not_found"
+	// ErrUnavailable: alat sistem yang dibutuhkan tidak ada atau tidak bisa
+	// dijalankan (misalnya mode pengembangan di luar Linux).
+	ErrUnavailable = "unavailable"
 )
 
 // Nama operasi yang dikenal sapod saat ini.
 const (
 	OpSystemInfo   = "system.info"
 	OpFeaturesList = "features.list"
+	OpStorageDisks = "storage.disks"
+	OpStorageSMART = "storage.smart"
 )
 
 // SystemInfo adalah hasil operasi system.info.
@@ -83,4 +90,65 @@ type Feature struct {
 	Requires   []string          `json:"requires" yaml:"requires"`
 	Activation string            `json:"activation" yaml:"activation"`
 	Removable  bool              `json:"removable" yaml:"removable"`
+}
+
+// Disk adalah satu disk fisik (atau virtual) hasil operasi storage.disks.
+type Disk struct {
+	Name       string      `json:"name"` // nama kernel, misalnya sda atau nvme0n1
+	Path       string      `json:"path"`
+	SizeBytes  uint64      `json:"size_bytes"`
+	Model      string      `json:"model"`
+	Vendor     string      `json:"vendor"`
+	Serial     string      `json:"serial"`
+	WWN        string      `json:"wwn"`
+	Transport  string      `json:"transport"` // sata, sas, nvme, usb, virtio, …
+	Rotational bool        `json:"rotational"`
+	Removable  bool        `json:"removable"`
+	Partitions []Partition `json:"partitions"`
+}
+
+// Partition adalah partisi atau perangkat turunan sebuah disk.
+type Partition struct {
+	Name        string   `json:"name"`
+	SizeBytes   uint64   `json:"size_bytes"`
+	Type        string   `json:"type"` // part, raid1, lvm, crypt, …
+	FSType      string   `json:"fstype"`
+	Label       string   `json:"label"`
+	Mountpoints []string `json:"mountpoints"`
+}
+
+// SMARTParams adalah parameter operasi storage.smart.
+type SMARTParams struct {
+	Device string `json:"device"` // nama disk dari storage.disks, misalnya sda
+}
+
+// Status SMART sebuah disk.
+const (
+	SMARTPassed      = "passed"      // tes kesehatan keseluruhan lulus
+	SMARTFailed      = "failed"      // disk melaporkan akan rusak: segera ganti
+	SMARTStandby     = "standby"     // disk sedang tidur; tidak dibangunkan untuk dibaca
+	SMARTUnsupported = "unsupported" // disk tidak mendukung SMART (misalnya disk virtual)
+	SMARTUnavailable = "unavailable" // SMART tidak bisa dibaca (izin, alat tidak ada, waktu habis)
+)
+
+// SMART adalah hasil operasi storage.smart.
+type SMART struct {
+	Device       string      `json:"device"`
+	Status       string      `json:"status"`
+	Message      string      `json:"message,omitempty"`
+	Protocol     string      `json:"protocol,omitempty"` // ATA, NVMe, SCSI
+	TemperatureC *int        `json:"temperature_c,omitempty"`
+	PowerOnHours *int        `json:"power_on_hours,omitempty"`
+	Attributes   []SMARTAttr `json:"attributes"`
+}
+
+// SMARTAttr adalah satu atribut SMART (ATA) atau satu nilai log kesehatan (NVMe).
+type SMARTAttr struct {
+	ID        int    `json:"id,omitempty"`
+	Name      string `json:"name"`
+	Value     *int   `json:"value,omitempty"`
+	Worst     *int   `json:"worst,omitempty"`
+	Threshold *int   `json:"threshold,omitempty"`
+	Raw       string `json:"raw"`
+	Failing   bool   `json:"failing"`
 }

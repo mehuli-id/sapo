@@ -10,6 +10,8 @@ import (
 	"io/fs"
 	"net/netip"
 	"os"
+	"path"
+	"path/filepath"
 	"regexp"
 
 	"gopkg.in/yaml.v3"
@@ -32,7 +34,19 @@ type Agent struct {
 	SocketGroup string `yaml:"socket_group"`
 	FeaturesDir string `yaml:"features_dir"`
 	// Batas koneksi bersamaan ke socket sapod.
-	MaxConnections int `yaml:"max_connections"`
+	MaxConnections int     `yaml:"max_connections"`
+	Storage        Storage `yaml:"storage"`
+}
+
+// Storage mengatur operasi baca disk di sapod.
+type Storage struct {
+	// Lokasi program (path absolut, tidak dicari lewat PATH).
+	Lsblk    string `yaml:"lsblk"`
+	Smartctl string `yaml:"smartctl"`
+	// Batas waktu satu pemanggilan program, dalam detik.
+	CommandTimeoutSeconds int `yaml:"command_timeout_seconds"`
+	// Pola nama perangkat (glob) yang tidak ditampilkan sebagai disk.
+	IgnoreDevices []string `yaml:"ignore_devices"`
 }
 
 // API mengatur sapo-api.
@@ -97,6 +111,12 @@ func Default() Config {
 			SocketGroup:    "sapo",
 			FeaturesDir:    "/usr/share/sapo/features",
 			MaxConnections: 32,
+			Storage: Storage{
+				Lsblk:                 "/usr/bin/lsblk",
+				Smartctl:              "/usr/sbin/smartctl",
+				CommandTimeoutSeconds: 20,
+				IgnoreDevices:         []string{"zram*", "ram*", "loop*"},
+			},
 		},
 		API: API{
 			Listen:          "127.0.0.1:5000",
@@ -172,6 +192,11 @@ func (c Config) Validate() error {
 		return errors.New("agent.socket wajib diisi")
 	case c.Agent.MaxConnections < 1:
 		return errors.New("agent.max_connections minimal 1")
+	case !filepath.IsAbs(c.Agent.Storage.Lsblk) || !filepath.IsAbs(c.Agent.Storage.Smartctl):
+		return errors.New("agent.storage: lsblk dan smartctl harus path absolut")
+	case c.Agent.Storage.CommandTimeoutSeconds < 1 || c.Agent.Storage.CommandTimeoutSeconds > 25:
+		// sapo-api menunggu sapod paling lama 30 detik.
+		return errors.New("agent.storage.command_timeout_seconds harus 1 sampai 25")
 	case c.API.Listen == "":
 		return errors.New("api.listen wajib diisi")
 	case c.UI.DefaultMode != "desktop" && c.UI.DefaultMode != "ringkas":
@@ -197,6 +222,11 @@ func (c Config) Validate() error {
 	}
 	if _, err := regexp.Compile(c.Auth.UsernamePattern); err != nil {
 		return fmt.Errorf("auth.username_pattern tidak valid: %w", err)
+	}
+	for _, p := range c.Agent.Storage.IgnoreDevices {
+		if _, err := path.Match(p, ""); err != nil {
+			return fmt.Errorf("agent.storage.ignore_devices: pola %q tidak valid", p)
+		}
 	}
 	if _, err := c.Networks(); err != nil {
 		return err
