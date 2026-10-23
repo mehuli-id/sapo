@@ -20,7 +20,8 @@ VM_CPUS="${VM_CPUS:-2}"
 DATA_DISKS="${DATA_DISKS:-6}"          # jumlah disk data virtual
 DATA_DISK_SIZE="${DATA_DISK_SIZE:-8G}" # ukuran tiap disk data
 SSH_PORT="${SSH_PORT:-2222}"           # ssh -p 2222 sapo@localhost
-PANEL_PORT="${PANEL_PORT:-5000}"       # http://localhost:5000
+PANEL_PORT="${PANEL_PORT:-5000}"       # http://localhost:5000 (petunjuk HTTPS)
+PANEL_TLS_PORT="${PANEL_TLS_PORT:-5001}" # https://localhost:5001 (panel)
 SSH_PUBKEY="${SSH_PUBKEY:-$HOME/.ssh/id_ed25519.pub}"
 # ---------------------------------------------------------------------------
 
@@ -70,7 +71,7 @@ run() {
     -drive "file=$VM_DIR/system.qcow2,if=virtio,format=qcow2" \
     -drive "file=$VM_DIR/seed.iso,if=virtio,format=raw,readonly=on" \
     "${disks[@]}" \
-    -nic "user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:$SSH_PORT-:22,hostfwd=tcp:127.0.0.1:$PANEL_PORT-:5000" \
+    -nic "user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:$SSH_PORT-:22,hostfwd=tcp:127.0.0.1:$PANEL_PORT-:5000,hostfwd=tcp:127.0.0.1:$PANEL_TLS_PORT-:5001" \
     -nographic
 }
 

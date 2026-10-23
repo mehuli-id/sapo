@@ -70,7 +70,9 @@ EOF
       echo ""
       echo "Sapo terpasang. Buka panel dari komputer di jaringan yang sama:"
       echo "  http://$host.local:$PORT_HINT  atau  http://<alamat-IP-NAS>:$PORT_HINT"
-      echo "lalu ikuti wizard setup awal."
+      echo "Halaman itu mengarahkan ke panel HTTPS dan menampilkan sidik jari"
+      echo "sertifikat untuk dicocokkan (juga di layar login konsol), lalu ikuti"
+      echo "wizard setup awal."
       echo ""
     fi
     ;;

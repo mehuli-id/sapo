@@ -42,6 +42,16 @@ type Options struct {
 	Audit  *audit.Log
 	Log    *slog.Logger
 	Now    func() time.Time
+	// HTTPS berisi info HTTPS panel; nil bila HTTPS tidak aktif.
+	HTTPS *HTTPSInfo
+}
+
+// HTTPSInfo adalah info HTTPS yang ditampilkan di halaman petunjuk HTTP.
+type HTTPSInfo struct {
+	Port string
+	// Fingerprint mengembalikan sidik jari sertifikat yang sedang dipakai
+	// (bisa berganti saat sertifikat diperbarui).
+	Fingerprint func() string
 }
 
 // Server adalah handler HTTP sapo-api.
@@ -52,6 +62,7 @@ type Server struct {
 	audit    *audit.Log
 	log      *slog.Logger
 	now      func() time.Time
+	https    *HTTPSInfo
 	mux      *http.ServeMux
 	networks []netip.Prefix
 	denied   []netip.Prefix
@@ -101,7 +112,7 @@ func New(o Options) (*Server, error) {
 		return nil, err
 	}
 	s := &Server{
-		cfg: cfg, agent: o.Agent, store: o.Store, audit: o.Audit, log: o.Log, now: o.Now,
+		cfg: cfg, agent: o.Agent, store: o.Store, audit: o.Audit, log: o.Log, now: o.Now, https: o.HTTPS,
 		mux:      http.NewServeMux(),
 		networks: nets,
 		denied:   denied,
@@ -169,9 +180,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 	h.Set("Cross-Origin-Opener-Policy", "same-origin")
 	h.Set("Cross-Origin-Resource-Policy", "same-origin")
-	if r.TLS != nil {
-		h.Set("Strict-Transport-Security", "max-age=31536000")
-	}
+	// HSTS sengaja tidak dikirim selama sertifikat panel self-signed: dengan
+	// HSTS, browser tidak lagi memberi pilihan melewati peringatan sertifikat,
+	// sehingga admin terkunci dari panel bila sertifikat berganti (ADR 0004).
 
 	rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 	switch {
@@ -181,6 +192,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Melindungi dari DNS rebinding: situs lain yang mengarahkan domainnya
 		// ke IP NAS tetap ditolak karena header Host-nya bukan milik NAS.
 		writeError(rec, http.StatusMisdirectedRequest, "host_not_allowed", "nama host tidak dikenal")
+	case s.https != nil && r.TLS == nil && !plainHTTPAllowed(r):
+		// HTTPS wajib: lewat HTTP hanya halaman petunjuk (panel dalam mode
+		// petunjuk) yang tersedia, sehingga password tidak pernah lewat HTTP.
+		writeError(rec, http.StatusForbidden, "https_required", "gunakan HTTPS di port "+s.https.Port)
 	case isMutating(r.Method) && !s.csrfOK(r):
 		writeError(rec, http.StatusForbidden, "csrf", "permintaan ditolak")
 	default:
@@ -189,6 +204,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if s.log != nil && strings.HasPrefix(r.URL.Path, "/api/") {
 		s.log.Info("http", "method", r.Method, "path", r.URL.Path, "status", rec.status, "ip", clientIP(r), "durasi", s.now().Sub(start))
 	}
+}
+
+// plainHTTPAllowed: yang boleh lewat HTTP saat HTTPS wajib. Hanya file panel
+// dan data tanpa rahasia yang dibutuhkan halaman petunjuk HTTPS.
+func plainHTTPAllowed(r *http.Request) bool {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	switch r.URL.Path {
+	case "/api/v1/ui/config", "/api/v1/health":
+		return true
+	}
+	return !strings.HasPrefix(r.URL.Path, "/api/")
 }
 
 func isMutating(m string) bool {
@@ -329,6 +357,9 @@ func (s *Server) handleUIConfig(w http.ResponseWriter, _ *http.Request) {
 			"password_min_length": s.cfg.Auth.PasswordMinLength,
 			"username_pattern":    s.cfg.Auth.UsernamePattern,
 		},
+	}
+	if s.https != nil {
+		resp["https"] = map[string]any{"port": s.https.Port, "fingerprint_sha256": s.https.Fingerprint()}
 	}
 	if b, err := loadBranding(s.cfg.API.BrandingFile); err == nil {
 		resp["branding"] = b

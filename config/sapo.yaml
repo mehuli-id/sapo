@@ -62,6 +62,19 @@ api:
   hostnames: []
   # Log audit dirotasi saat mencapai ukuran ini (MB); satu arsip disimpan.
   audit_max_mb: 10
+  # HTTPS di jaringan lokal (ADR 0004). Sertifikat self-signed dibuat
+  # otomatis di <data_dir>/tls. Selama aktif, alamat HTTP di atas hanya
+  # menampilkan petunjuk pindah ke HTTPS beserta sidik jari sertifikat, jadi
+  # password tidak pernah dikirim tanpa enkripsi.
+  # HSTS sengaja tidak dikirim: dengan sertifikat self-signed, HSTS membuat
+  # browser menolak membuka panel sama sekali bila sertifikat berganti.
+  tls:
+    enabled: true
+    listen: ":5001"
+    validity_days: 825
+    renew_before_days: 30
+    # Alamat panel dan sidik jari untuk layar login konsol NAS.
+    console_issue_file: /run/sapo-api/console.issue
 
 auth:
   password_min_length: 10

@@ -42,14 +42,15 @@ lint:
 	cd web && npm run typecheck
 
 # Mode pengembangan: sapod tanpa root (hanya operasi baca), sapo-api di
-# localhost, dan panel Vite dengan hot reload di http://localhost:5173.
+# localhost tanpa HTTPS (-no-tls), dan panel Vite dengan hot reload di
+# http://localhost:5173.
 dev: go
 	@mkdir -p $(DEV_DIR)
 	@echo "Panel: http://localhost:5173  (Ctrl+C untuk berhenti)"
 	@trap 'kill 0' INT TERM; \
 	  $(BIN)/sapod -config config/sapo.yaml -socket $(DEV_SOCK) -features features & \
 	  sleep 1; \
-	  $(BIN)/sapo-api -config config/sapo.yaml -listen $(DEV_LISTEN) -socket $(DEV_SOCK) -web web/dist -branding branding.yaml -wizards wizards -data $(DEV_DIR)/data & \
+	  $(BIN)/sapo-api -config config/sapo.yaml -listen $(DEV_LISTEN) -socket $(DEV_SOCK) -web web/dist -branding branding.yaml -wizards wizards -data $(DEV_DIR)/data -no-tls & \
 	  cd web && npm run dev; \
 	  wait
 

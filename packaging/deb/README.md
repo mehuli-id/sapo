@@ -17,7 +17,7 @@ Hasilnya di `dist/sapo_<versi>_<arsitektur>.deb`. Versi diambil dari git: tag `v
 sudo apt install ./sapo_<versi>_amd64.deb
 ```
 
-Lalu buka `http://<nama-host>.local:5000` atau `http://<IP-NAS>:5000` dari komputer di jaringan yang sama dan ikuti wizard setup awal.
+Lalu buka `http://<nama-host>.local:5000` atau `http://<IP-NAS>:5000` dari komputer di jaringan yang sama. Halaman itu menampilkan sidik jari sertifikat dan mengarahkan ke panel HTTPS di port 5001 (ADR 0004). Setelah itu ikuti wizard setup awal.
 
 ## Isi paket
 
@@ -32,6 +32,7 @@ Lalu buka `http://<nama-host>.local:5000` atau `http://<IP-NAS>:5000` dari kompu
 | `/etc/sapo/sapo.yaml` (perubahan admin/panel, dibuat postinst) | — |
 | `/usr/lib/systemd/system/sapod.service`, `sapo-api.service` | `packaging/deb/systemd/` |
 | `/usr/lib/sysusers.d/sapo.conf` | `packaging/deb/sysusers.conf` |
+| `/etc/issue.d/sapo.issue` (tautan ke `/run/sapo-api/console.issue`: alamat panel dan sidik jari sertifikat di layar login konsol) | ditulis `sapo-api` saat berjalan |
 
 Baris `Depends` tidak ditulis tangan: diambil dari manifest fitur dengan `activation: always` (`go run ./tools/featuredeps`). Paket untuk fitur lain (Samba, ZFS, Docker, VPN) dipasang oleh `sapod` saat fitur diaktifkan dari panel.
 

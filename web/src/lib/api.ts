@@ -75,11 +75,18 @@ export interface AuthPolicy {
   username_pattern: string
 }
 
+export interface HTTPSConfig {
+  port: string
+  fingerprint_sha256: string
+}
+
 export interface UIConfig {
   default_mode: "desktop" | "ringkas"
   default_language: string
   auth_policy: AuthPolicy
   branding?: Branding
+  // Ada bila HTTPS wajib; lewat HTTP panel hanya menampilkan petunjuk.
+  https?: HTTPSConfig
 }
 
 export interface Branding {

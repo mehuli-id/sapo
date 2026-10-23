@@ -6,14 +6,18 @@ import { initMode, useShell } from "@/composables/useShell"
 import CompactShell from "@/desktop/CompactShell.vue"
 import DesktopShell from "@/desktop/DesktopShell.vue"
 import { setLocale } from "@/i18n"
+import type { HTTPSConfig } from "@/lib/api"
 import { api } from "@/lib/api"
 import { applyBranding } from "@/lib/theme"
+import HttpsNoticeView from "@/views/HttpsNoticeView.vue"
 import LoginView from "@/views/LoginView.vue"
 import SetupView from "@/views/SetupView.vue"
 
 const { effectiveMode, branding } = useShell()
 const { status, policy, refresh } = useSession()
 const ready = ref(false)
+// Diisi bila panel dibuka lewat HTTP padahal HTTPS wajib.
+const httpsNotice = ref<HTTPSConfig | null>(null)
 
 onMounted(async () => {
   try {
@@ -30,6 +34,11 @@ onMounted(async () => {
       // abaikan
     }
     if (!saved && cfg.default_language) setLocale(cfg.default_language)
+    if (cfg.https && window.location.protocol === "http:") {
+      httpsNotice.value = cfg.https
+      ready.value = true
+      return
+    }
   } catch {
     initMode("desktop")
   }
@@ -41,6 +50,7 @@ onMounted(async () => {
 <template>
   <TooltipProvider>
     <div v-if="!ready" class="desktop-wallpaper h-full" />
+    <HttpsNoticeView v-else-if="httpsNotice" :https="httpsNotice" />
     <SetupView v-else-if="status?.setup_required" />
     <LoginView v-else-if="!status?.authenticated" />
     <DesktopShell v-else-if="effectiveMode === 'desktop'" />

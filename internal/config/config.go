@@ -77,6 +77,21 @@ type API struct {
 	Hostnames []string `yaml:"hostnames"`
 	// Batas ukuran log audit sebelum dirotasi (MB).
 	AuditMaxMB int `yaml:"audit_max_mb"`
+	TLS        TLS `yaml:"tls"`
+}
+
+// TLS mengatur HTTPS panel di jaringan lokal (ADR 0004).
+type TLS struct {
+	// Bila aktif, panel dan API hanya dilayani lewat HTTPS; alamat HTTP
+	// (api.listen) hanya menampilkan petunjuk pindah ke HTTPS.
+	Enabled bool   `yaml:"enabled"`
+	Listen  string `yaml:"listen"`
+	// Masa berlaku sertifikat self-signed dan kapan diperbarui (hari).
+	ValidityDays    int `yaml:"validity_days"`
+	RenewBeforeDays int `yaml:"renew_before_days"`
+	// File berisi alamat panel dan sidik jari sertifikat untuk layar login
+	// konsol (/etc/issue.d menautkan ke sini). Kosong = tidak ditulis.
+	ConsoleIssueFile string `yaml:"console_issue_file"`
 }
 
 // Auth berisi kebijakan login. Semua angka di sini bisa diubah admin.
@@ -144,6 +159,13 @@ func Default() Config {
 			},
 			DeniedNetworks: []string{"172.17.0.0/16"}, // bridge Docker bawaan
 			AuditMaxMB:     10,
+			TLS: TLS{
+				Enabled:          true,
+				Listen:           ":5001",
+				ValidityDays:     825,
+				RenewBeforeDays:  30,
+				ConsoleIssueFile: "/run/sapo-api/console.issue",
+			},
 		},
 		Auth: Auth{
 			PasswordMinLength:      10,
@@ -227,6 +249,12 @@ func (c Config) Validate() error {
 		return errors.New("auth: durasi sesi harus lebih dari 0")
 	case c.Auth.TOTPMaxFailures < 1 || c.Auth.TOTPWindowMinutes < 1:
 		return errors.New("auth: totp_max_failures dan totp_window_minutes harus lebih dari 0")
+	case c.API.TLS.Enabled && c.API.TLS.Listen == "":
+		return errors.New("api.tls.listen wajib diisi bila HTTPS aktif")
+	case c.API.TLS.Enabled && c.API.TLS.Listen == c.API.Listen:
+		return errors.New("api.tls.listen harus berbeda dari api.listen")
+	case c.API.TLS.ValidityDays < 30 || c.API.TLS.RenewBeforeDays < 1 || c.API.TLS.RenewBeforeDays >= c.API.TLS.ValidityDays:
+		return errors.New("api.tls: validity_days minimal 30 dan renew_before_days antara 1 dan validity_days")
 	case c.API.AuditMaxMB < 1:
 		return errors.New("api.audit_max_mb minimal 1")
 	case c.Auth.MaxConcurrentHashes < 1:

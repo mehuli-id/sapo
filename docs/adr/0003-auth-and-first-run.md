@@ -27,7 +27,7 @@ Panel tidak boleh terbuka ke jaringan sebelum ada login. Pengguna juga ingin sem
 
 ## Konsekuensi dan batasan yang diketahui
 
-- Sampai HTTPS bawaan tersedia, password dikirim tanpa enkripsi di LAN (sama seperti NAS komersial pada setelan awal). HTTPS lokal dengan sertifikat yang dibuat otomatis dijadwalkan berikutnya.
+- HTTPS wajib di jaringan lokal sejak ADR 0004; sebelumnya password dikirim tanpa enkripsi di LAN.
 - Selama setup belum selesai, siapa pun di LAN bisa membuka wizard setup. Ini sama dengan perilaku NAS komersial; jendela waktunya sempit (hanya sampai admin pertama dibuat).
 - Sesi hilang saat `sapo-api` di-restart; pengguna cukup login ulang.
 - Rentang Tailscale/CGNAT (100.64.0.0/10) tidak dibuka secara default; integrasi Tailscale nanti menambahkannya.
