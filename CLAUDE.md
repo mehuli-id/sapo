@@ -26,6 +26,7 @@ make build      # sapod, sapo-api, panel
 make dev        # mode pengembangan; panel di http://localhost:5173
 make check      # gofmt + vet + typecheck + test (wajib sebelum commit)
 make deb        # paket .deb ke dist/ (ARCH=amd64|arm64)
+make iso        # ISO live dev ke dist/ (Debian + live-build, memakai sudo)
 go test -race ./...
 ```
 - Dependensi Go di-vendor (`vendor/`). Menambah dependensi: `go mod tidy && go mod vendor`, sertakan `go.sum` dan `vendor/` di commit yang sama.
