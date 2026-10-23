@@ -1,0 +1,10 @@
+id: app-center
+name: { id: App Center, en: App Center }
+group: apps
+# Docker dari mirror repo Sapo (versi dikunci & diuji).
+packages: [docker-ce, docker-compose-plugin]
+services: [docker]
+requires: [core]
+# always: selalu terpasang · setup: dipilih saat instalasi · optional: diaktifkan dari panel
+activation: optional
+removable: true

@@ -1,0 +1,9 @@
+id: storage-mdadm
+name: { id: Storage mdadm + Btrfs, en: mdadm + Btrfs storage }
+group: storage
+packages: [mdadm, btrfs-progs, lvm2]
+services: [mdmonitor]
+requires: [core]
+# always: selalu terpasang · setup: dipilih saat instalasi · optional: diaktifkan dari panel
+activation: setup
+removable: false

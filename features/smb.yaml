@@ -1,0 +1,9 @@
+id: smb
+name: { id: Berbagi file SMB, en: SMB file sharing }
+group: file-sharing
+packages: [samba, wsdd]
+services: [smbd, wsdd]
+requires: [core]
+# always: selalu terpasang · setup: dipilih saat instalasi · optional: diaktifkan dari panel
+activation: optional
+removable: true

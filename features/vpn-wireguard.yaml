@@ -1,0 +1,9 @@
+id: vpn-wireguard
+name: { id: VPN WireGuard, en: WireGuard VPN }
+group: vpn
+packages: [wireguard-tools]
+services: []
+requires: [core]
+# always: selalu terpasang · setup: dipilih saat instalasi · optional: diaktifkan dari panel
+activation: optional
+removable: true

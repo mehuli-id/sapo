@@ -1,0 +1,31 @@
+# Branding Sapo. Fork wajib mengganti nilai dan aset di file ini (lihat TRADEMARKS.md).
+# Semua tampilan (panel, layar login, halaman berbagi) membaca nilai dari sini — tidak ada nama atau warna yang ditulis di kode.
+
+product:
+  name: Sapo
+  full_name: Sapo by Mehuli
+  vendor: PT. Mehuli Data Media
+  website: https://mehuli.id
+  tagline:
+    id: Lumbung data Anda sendiri
+    en: Your own data granary
+
+assets:
+  logo: web/public/brand/logo.svg
+  icon: web/public/brand/icon.svg
+
+theme:
+  # Warna dalam OKLCH, dipakai sebagai CSS variable shadcn-vue.
+  radius: 0.625rem
+  light:
+    primary: "oklch(0.52 0.12 152)"
+    primary_foreground: "oklch(0.98 0.01 152)"
+  dark:
+    primary: "oklch(0.72 0.13 152)"
+    primary_foreground: "oklch(0.18 0.03 152)"
+
+updates:
+  # Sumber update rilis Sapo. Fork mengarahkan ke repo & kuncinya sendiri.
+  repository: https://repo.sapo.mehuli.id
+  signing_key: https://repo.sapo.mehuli.id/sapo-release.asc
+  channel: stable

@@ -1,0 +1,9 @@
+id: nfs
+name: { id: Berbagi file NFS, en: NFS file sharing }
+group: file-sharing
+packages: [nfs-kernel-server]
+services: [nfs-server]
+requires: [core]
+# always: selalu terpasang · setup: dipilih saat instalasi · optional: diaktifkan dari panel
+activation: optional
+removable: true
