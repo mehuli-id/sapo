@@ -1,0 +1,24 @@
+#!/bin/sh
+# postrm untuk paket sapo.
+# Catatan: data pengguna (pool, shared folder, Sapo Drive) TIDAK PERNAH
+# disentuh oleh paket ini. Yang dihapus saat purge hanya data panel
+# (akun & log audit) di /var/lib/sapo.
+set -e
+
+case "$1" in
+  remove)
+    if [ -d /run/systemd/system ]; then
+      systemctl daemon-reload || true
+    fi
+    ;;
+  purge)
+    rm -rf /var/lib/sapo /run/sapo
+    # User sistem "sapo" sengaja tidak dihapus (sesuai Debian Policy), agar
+    # file yang mungkin masih dimilikinya tidak berpindah ke user baru.
+    if [ -d /run/systemd/system ]; then
+      systemctl daemon-reload || true
+    fi
+    ;;
+esac
+
+exit 0

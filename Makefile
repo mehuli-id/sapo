@@ -7,8 +7,9 @@ DEV_DIR   := .dev
 DEV_SOCK  := $(DEV_DIR)/sapod.sock
 DEV_LISTEN ?= 127.0.0.1:5000
 LDFLAGS   := -s -w -X main.version=$(VERSION)
+ARCH      ?= $(shell dpkg --print-architecture 2>/dev/null || go env GOARCH)
 
-.PHONY: all build go web check test lint dev dev-agent dev-api dev-web clean
+.PHONY: all build go web deb check test lint dev clean
 
 all: build
 
@@ -20,6 +21,9 @@ go: ## Build binary Go
 
 web: ## Build panel ke web/dist
 	cd web && npm ci && npm run build
+
+deb: web ## Bangun paket .deb ke dist/ (ARCH=amd64|arm64)
+	ARCH=$(ARCH) packaging/deb/build.sh
 
 check: lint test ## Lint + test (wajib sebelum pull request)
 
@@ -44,4 +48,4 @@ dev: go
 	  wait
 
 clean:
-	rm -rf $(BIN) $(DEV_DIR) web/dist
+	rm -rf $(BIN) $(DEV_DIR) web/dist dist

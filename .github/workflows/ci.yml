@@ -42,3 +42,30 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm audit --audit-level=high
+
+  deb:
+    needs: [go, web]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # versi paket diambil dari tag git
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: build .deb
+        run: make deb ARCH=${{ matrix.arch }}
+      - name: cek isi paket
+        run: dpkg-deb -I dist/*.deb && dpkg-deb -c dist/*.deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sapo-deb-${{ matrix.arch }}
+          path: dist/*.deb

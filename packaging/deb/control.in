@@ -1,0 +1,15 @@
+Package: sapo
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: PT. Mehuli Data Media <@MAINTAINER_EMAIL@>
+Installed-Size: @INSTALLED_SIZE@
+Depends: @DEPENDS@
+Section: admin
+Priority: optional
+Homepage: https://github.com/mehuli-id/sapo
+Description: Sapo by Mehuli - sistem NAS dengan panel web ala DSM
+ Sapo mengelola storage, shared folder, akses jarak jauh, dan aplikasi
+ lewat panel web dengan wizard dan petunjuk. Paket ini memasang sapod
+ (agen sistem), sapo-api (server panel), dan panel web.
+ .
+ Tahap pra-alpha: jangan dipakai untuk data sungguhan.
