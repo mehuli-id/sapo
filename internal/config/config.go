@@ -123,7 +123,7 @@ func Default() Config {
 				Lsblk:                 "/usr/bin/lsblk",
 				Smartctl:              "/usr/sbin/smartctl",
 				CommandTimeoutSeconds: 20,
-				IgnoreDevices:         []string{"zram*", "ram*", "loop*"},
+				IgnoreDevices:         []string{"zram*", "ram*", "loop*", "fd*"},
 				MaxConcurrentCommands: 2,
 				SMARTCacheSeconds:     60,
 				WarnATARawIDs:         []int{5, 187, 197, 198},
