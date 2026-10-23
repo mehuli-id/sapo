@@ -75,6 +75,7 @@ type Server struct {
 	argon       auth.Argon2Params
 	dummy       string
 	setup       pendingTOTP
+	reenroll    pendingTOTP // pendaftaran ulang 2FA dari panel (per user)
 
 	hashSlots chan struct{}
 
@@ -136,10 +137,11 @@ func New(o Options) (*Server, error) {
 			time.Duration(cfg.Auth.LoginWindowMinutes)*time.Minute, time.Duration(cfg.Auth.LockoutMinutes)*time.Minute),
 		totpLimiter: auth.NewLimiter(cfg.Auth.TOTPMaxFailures,
 			time.Duration(cfg.Auth.TOTPWindowMinutes)*time.Minute, time.Duration(cfg.Auth.TOTPWindowMinutes)*time.Minute),
-		userRe: regexp.MustCompile(cfg.Auth.UsernamePattern),
-		argon:  argon,
-		dummy:  dummy,
-		setup:  pendingTOTP{entries: map[string]pendingEntry{}},
+		userRe:   regexp.MustCompile(cfg.Auth.UsernamePattern),
+		argon:    argon,
+		dummy:    dummy,
+		setup:    pendingTOTP{entries: map[string]pendingEntry{}},
+		reenroll: pendingTOTP{entries: map[string]pendingEntry{}},
 
 		hashSlots: make(chan struct{}, cfg.Auth.MaxConcurrentHashes),
 	}
@@ -168,6 +170,9 @@ func New(o Options) (*Server, error) {
 	s.mux.HandleFunc("GET /api/v1/wizards/{id}", s.handleWizard)
 	s.mux.HandleFunc("POST /api/v1/setup/totp", s.handleSetupTOTP)
 	s.mux.HandleFunc("POST /api/v1/setup", s.handleSetup)
+	s.mux.Handle("POST /api/v1/account/recovery-codes", s.requireAuth(http.HandlerFunc(s.handleRecoveryCodes)))
+	s.mux.Handle("POST /api/v1/account/totp/begin", s.requireAuth(http.HandlerFunc(s.handleTOTPBegin)))
+	s.mux.Handle("POST /api/v1/account/totp/confirm", s.requireAuth(http.HandlerFunc(s.handleTOTPConfirm)))
 
 	// Butuh login.
 	s.mux.Handle("GET /api/v1/system/info", s.requireAuth(s.proxyRead(proto.OpSystemInfo)))

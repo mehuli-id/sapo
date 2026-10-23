@@ -52,7 +52,7 @@ var wizardID = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
 // file data ketahuan saat dimuat, bukan saat pengguna sedang mengisi.
 var (
 	stepTypes  = map[string]bool{"": true, "form": true, "review": true}
-	fieldTypes = map[string]bool{"text": true, "username": true, "password": true, "password-confirm": true, "language": true, "totp-enroll": true}
+	fieldTypes = map[string]bool{"text": true, "username": true, "password": true, "password-confirm": true, "language": true, "totp-enroll": true, "recovery-codes": true}
 )
 
 // LoadWizard membaca dan memvalidasi wizard dari dir.

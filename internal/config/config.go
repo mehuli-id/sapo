@@ -117,6 +117,10 @@ type Auth struct {
 	TOTPMaxFailures        int `yaml:"totp_max_failures"`
 	TOTPWindowMinutes      int `yaml:"totp_window_minutes"`
 	SetupTOTPExpiryMinutes int `yaml:"setup_totp_expiry_minutes"`
+	// Jumlah kode cadangan 2FA yang dibuat, dan batas sisa yang memicu
+	// peringatan di panel.
+	RecoveryCodeCount int `yaml:"recovery_code_count"`
+	RecoveryCodesLow  int `yaml:"recovery_codes_low"`
 	// Batas hash password yang berjalan bersamaan (Argon2 memakai banyak RAM).
 	MaxConcurrentHashes int    `yaml:"max_concurrent_hashes"`
 	Argon2              Argon2 `yaml:"argon2"`
@@ -188,6 +192,8 @@ func Default() Config {
 			TOTPMaxFailures:        10,
 			TOTPWindowMinutes:      60,
 			SetupTOTPExpiryMinutes: 15,
+			RecoveryCodeCount:      10,
+			RecoveryCodesLow:       3,
 			MaxConcurrentHashes:    2,
 			Argon2:                 Argon2{MemoryKiB: 64 * 1024, Iterations: 3, Parallelism: 2},
 		},
@@ -268,6 +274,10 @@ func (c Config) Validate() error {
 		return errors.New("api.audit_max_mb minimal 1")
 	case c.Auth.MaxConcurrentHashes < 1:
 		return errors.New("auth.max_concurrent_hashes minimal 1")
+	case c.Auth.RecoveryCodeCount < 4 || c.Auth.RecoveryCodeCount > 20:
+		return errors.New("auth.recovery_code_count harus 4 sampai 20")
+	case c.Auth.RecoveryCodesLow < 0 || c.Auth.RecoveryCodesLow >= c.Auth.RecoveryCodeCount:
+		return errors.New("auth.recovery_codes_low harus 0 sampai kurang dari recovery_code_count")
 	case c.Auth.SetupTOTPExpiryMinutes < 1:
 		return errors.New("auth.setup_totp_expiry_minutes harus lebih dari 0")
 	case c.Auth.Argon2.MemoryKiB < 8*1024 || c.Auth.Argon2.Iterations < 1 || c.Auth.Argon2.Parallelism < 1:

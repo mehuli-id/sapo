@@ -61,6 +61,10 @@
       "title": "Resource Monitor",
       "description": "Grafik CPU, RAM, jaringan, dan disk"
     },
+    "account-security": {
+      "title": "Keamanan Akun",
+      "description": "Verifikasi dua langkah dan kode cadangan"
+    },
     "about": {
       "title": "Tentang",
       "description": "Versi, lisensi, dan merek"
@@ -176,7 +180,11 @@
     "codeHint": "Buka aplikasi autentikator dan masukkan 6 digit kodenya.",
     "submit": "Masuk",
     "submitting": "Memeriksa…",
-    "back": "Kembali"
+    "back": "Kembali",
+    "recoveryCode": "Kode cadangan",
+    "recoveryHint": "Masukkan salah satu kode cadangan yang Anda simpan saat setup. Setiap kode hanya bisa dipakai sekali.",
+    "useRecovery": "HP tidak ada? Pakai kode cadangan",
+    "useApp": "Pakai kode dari aplikasi autentikator"
   },
   "https": {
     "title": "Panel memakai koneksi aman",
@@ -187,6 +195,41 @@
     "fingerprint": "Sidik jari sertifikat (SHA-256). Hanya untuk memudahkan: halaman ini belum terenkripsi, jadi yang bisa dipercaya adalah yang tampil di layar NAS.",
     "open": "Buka panel aman",
     "why": "Bila sidik jari di browser berbeda dengan di layar NAS, jangan lanjutkan: ada perangkat lain yang menyamar sebagai NAS Anda. Setelah ini, buka panel langsung dengan alamat https://."
+  },
+  "recovery": {
+    "download": "Unduh",
+    "copy": "Salin",
+    "copied": "Tersalin",
+    "fileTitle": "Kode cadangan 2FA {product} di {host}",
+    "fileHint": "Setiap kode hanya bisa dipakai sekali. Simpan terpisah dari HP.",
+    "mustConfirm": "Simpan kode cadangan dulu, lalu centang kotak ini.",
+    "needTwofa": "Selesaikan langkah verifikasi dua langkah dulu.",
+    "saved": "{n} kode disimpan"
+  },
+  "account": {
+    "twofaOn": "Verifikasi dua langkah aktif",
+    "codesLeft": "Sisa kode cadangan: {n}",
+    "codesLow": "Kode cadangan tinggal {n}. Buat kode baru agar tetap bisa masuk bila HP hilang.",
+    "codesNone": "Belum ada kode cadangan. Buat sekarang agar tetap bisa masuk bila HP hilang.",
+    "codesTitle": "Kode cadangan",
+    "codesIntro": "Kode sekali pakai untuk masuk bila aplikasi autentikator tidak tersedia.",
+    "codesWarn": "Semua kode lama tidak berlaku lagi setelah kode baru dibuat.",
+    "codesCreate": "Buat kode cadangan baru",
+    "codesShownOnce": "Kode ini hanya ditampilkan sekali. Unduh atau salin sekarang.",
+    "totpTitle": "Aplikasi autentikator",
+    "totpIntro": "Pindahkan 2FA ke HP atau aplikasi baru, misalnya setelah masuk dengan kode cadangan karena HP lama hilang.",
+    "totpStart": "Pindah ke aplikasi baru",
+    "totpScan": "Pindai QR ini dengan aplikasi autentikator yang baru, lalu masukkan kode 6 digitnya.",
+    "totpQr": "QR code untuk aplikasi autentikator",
+    "totpCode": "Kode dari aplikasi baru",
+    "totpOldStillWorks": "Aplikasi lama tetap berlaku sampai kode dari aplikasi baru dikonfirmasi.",
+    "totpConfirm": "Konfirmasi",
+    "totpDone": "Aplikasi autentikator baru aktif. Aplikasi lama tidak berlaku lagi.",
+    "password": "Password Anda",
+    "continue": "Lanjut",
+    "cancel": "Batal",
+    "done": "Selesai",
+    "menuLow": "Kode cadangan hampir habis"
   },
   "errors": {
     "bad_credentials": "Nama pengguna atau password salah.",
@@ -206,6 +249,8 @@
     "busy": "Server sedang sibuk. Coba lagi sebentar.",
     "unavailable": "Alat sistem yang dibutuhkan tidak tersedia.",
     "not_found": "Data yang diminta tidak ditemukan.",
-    "https_required": "Gunakan alamat HTTPS untuk membuka panel."
+    "https_required": "Gunakan alamat HTTPS untuk membuka panel.",
+    "bad_password": "Password salah.",
+    "totp_not_enabled": "Verifikasi dua langkah belum aktif untuk akun ini."
   }
 }

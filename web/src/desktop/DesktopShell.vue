@@ -152,7 +152,7 @@ const isMac = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform
         <span class="text-sm font-medium tabular-nums">{{ clock }}</span>
         <span class="text-[11px] text-muted-foreground">{{ date }}</span>
       </div>
-      <ShellMenu />
+      <ShellMenu @open="(id) => findApp(id) && launch(findApp(id)!)" />
     </footer>
   </div>
 </template>

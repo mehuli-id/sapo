@@ -59,6 +59,8 @@ type harness struct {
 	now    time.Time
 	cookie *http.Cookie
 	data   string
+	// Kode cadangan yang diterima saat runSetup.
+	recovery []string
 }
 
 func newHarness(t *testing.T, agent AgentCaller) *harness {
@@ -144,6 +146,7 @@ func (h *harness) runSetup() string {
 	}
 	var tr setupTOTPResponse
 	_ = json.Unmarshal(rec.Body.Bytes(), &tr)
+	h.recovery = tr.RecoveryCodes
 	if !strings.HasPrefix(tr.URI, "otpauth://totp/Sapo:arthur?") {
 		h.t.Fatalf("uri %s", tr.URI)
 	}
@@ -709,5 +712,153 @@ func TestHTTPOnlyModeUnchanged(t *testing.T) {
 	_ = json.Unmarshal(h.do(http.MethodGet, "/api/v1/ui/config", nil).Body.Bytes(), &cfg)
 	if _, ok := cfg["https"]; ok {
 		t.Fatal("ui/config tidak boleh memuat info HTTPS bila HTTPS mati")
+	}
+}
+
+const testPassword = "lumbung padi di bukit"
+
+func (h *harness) login(code string) *httptest.ResponseRecorder {
+	h.t.Helper()
+	h.cookie = nil
+	return h.do(http.MethodPost, "/api/v1/auth/login", loginRequest{Username: "arthur", Password: testPassword, TOTPCode: code})
+}
+
+func recoveryLeft(t *testing.T, h *harness) (int, bool) {
+	t.Helper()
+	var st struct {
+		User struct {
+			Left *int `json:"recovery_codes_left"`
+			Low  bool `json:"recovery_codes_low"`
+		} `json:"user"`
+	}
+	_ = json.Unmarshal(h.do(http.MethodGet, "/api/v1/auth/status", nil).Body.Bytes(), &st)
+	if st.User.Left == nil {
+		t.Fatal("auth/status harus memuat recovery_codes_left")
+	}
+	return *st.User.Left, st.User.Low
+}
+
+func TestRecoveryCodesLoginOnce(t *testing.T) {
+	h := newHarness(t, &fakeAgent{})
+	h.runSetup()
+	if len(h.recovery) != 10 {
+		t.Fatalf("setup harus memberi 10 kode cadangan, dapat %d", len(h.recovery))
+	}
+	if left, low := recoveryLeft(t, h); left != 10 || low {
+		t.Fatalf("sisa %d low %v", left, low)
+	}
+
+	// Kode cadangan diterima di kolom kode 2FA, dalam format apa pun.
+	rec := h.login(strings.ToLower(strings.ReplaceAll(h.recovery[0], "-", "")))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("login dengan kode cadangan: %d %s", rec.Code, rec.Body)
+	}
+	var lr struct {
+		Left int `json:"recovery_codes_left"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &lr)
+	if lr.Left != 9 {
+		t.Fatalf("sisa setelah dipakai %d, harus 9", lr.Left)
+	}
+	// Sekali pakai.
+	if rec := h.login(h.recovery[0]); rec.Code != http.StatusUnauthorized || errCode(rec) != "totp_invalid" {
+		t.Fatalf("kode bekas: %d %s", rec.Code, errCode(rec))
+	}
+	// Pemakaian tercatat di log audit.
+	b, _ := os.ReadFile(filepath.Join(h.data, "audit.log"))
+	if !strings.Contains(string(b), `"method":"recovery_code"`) {
+		t.Fatalf("log audit harus mencatat kode cadangan:\n%s", b)
+	}
+	// Peringatan saat sisa kode sedikit.
+	for _, c := range h.recovery[1:7] {
+		if rec := h.login(c); rec.Code != http.StatusOK {
+			t.Fatalf("login %s: %d", c, rec.Code)
+		}
+	}
+	if left, low := recoveryLeft(t, h); left != 3 || !low {
+		t.Fatalf("sisa %d low %v, harus 3 dan low", left, low)
+	}
+}
+
+func TestRecoveryCodesCountTowardTOTPLimit(t *testing.T) {
+	h := newHarness(t, &fakeAgent{})
+	h.runSetup()
+	for i := 0; i < h.s.cfg.Auth.TOTPMaxFailures; i++ {
+		h.login("AAAAA-AAAAA")
+	}
+	// Kode cadangan yang benar pun ditolak setelah batas tercapai.
+	if rec := h.login(h.recovery[0]); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("setelah batas, harus 429, dapat %d", rec.Code)
+	}
+}
+
+func TestRegenerateRecoveryCodesNeedsPassword(t *testing.T) {
+	h := newHarness(t, &fakeAgent{})
+	h.runSetup()
+	if rec := h.do(http.MethodPost, "/api/v1/account/recovery-codes", map[string]string{"password": "salah sekali"}); rec.Code != http.StatusUnauthorized || errCode(rec) != "bad_password" {
+		t.Fatalf("password salah: %d %s", rec.Code, errCode(rec))
+	}
+	rec := h.do(http.MethodPost, "/api/v1/account/recovery-codes", map[string]string{"password": testPassword})
+	var out struct {
+		Codes []string `json:"recovery_codes"`
+	}
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &out) != nil || len(out.Codes) != 10 {
+		t.Fatalf("buat ulang: %d %s", rec.Code, rec.Body)
+	}
+	// Kode lama tidak berlaku, kode baru berlaku.
+	if rec := h.login(h.recovery[0]); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("kode lama harus ditolak, dapat %d", rec.Code)
+	}
+	if rec := h.login(out.Codes[0]); rec.Code != http.StatusOK {
+		t.Fatalf("kode baru harus diterima, dapat %d", rec.Code)
+	}
+	// Tanpa login: ditolak.
+	h.cookie = nil
+	if rec := h.do(http.MethodPost, "/api/v1/account/recovery-codes", map[string]string{"password": testPassword}); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("tanpa login harus 401, dapat %d", rec.Code)
+	}
+}
+
+func TestReenrollTOTP(t *testing.T) {
+	h := newHarness(t, &fakeAgent{})
+	oldSecret := h.runSetup()
+
+	if rec := h.do(http.MethodPost, "/api/v1/account/totp/begin", map[string]string{"password": "salah sekali"}); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("password salah: %d", rec.Code)
+	}
+	rec := h.do(http.MethodPost, "/api/v1/account/totp/begin", map[string]string{"password": testPassword})
+	var tr setupTOTPResponse
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &tr) != nil || tr.Secret == "" || tr.Secret == oldSecret {
+		t.Fatalf("begin: %d %s", rec.Code, rec.Body)
+	}
+	// Token palsu atau kode salah: rahasia lama tetap berlaku.
+	if rec := h.do(http.MethodPost, "/api/v1/account/totp/confirm", map[string]string{"token": "palsu", "code": "000000"}); errCode(rec) != "totp_expired" {
+		t.Fatalf("token palsu: %s", errCode(rec))
+	}
+	if rec := h.do(http.MethodPost, "/api/v1/account/totp/confirm", map[string]string{"token": tr.Token, "code": "000000"}); errCode(rec) != "totp_invalid" {
+		t.Fatalf("kode salah: %s", errCode(rec))
+	}
+	h.now = h.now.Add(31 * time.Second)
+	code, _ := auth.TOTPCodeAt(tr.Secret, h.now)
+	if rec := h.do(http.MethodPost, "/api/v1/account/totp/confirm", map[string]string{"token": tr.Token, "code": code}); rec.Code != http.StatusOK {
+		t.Fatalf("confirm: %d %s", rec.Code, rec.Body)
+	}
+	// Kode yang dipakai untuk konfirmasi tidak bisa dipakai ulang untuk login.
+	if rec := h.login(code); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("kode konfirmasi dipakai ulang: %d", rec.Code)
+	}
+	h.now = h.now.Add(31 * time.Second)
+	oldCode, _ := auth.TOTPCodeAt(oldSecret, h.now)
+	if rec := h.login(oldCode); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("rahasia lama harus tidak berlaku, dapat %d", rec.Code)
+	}
+	h.now = h.now.Add(31 * time.Second)
+	newCode, _ := auth.TOTPCodeAt(tr.Secret, h.now)
+	if rec := h.login(newCode); rec.Code != http.StatusOK {
+		t.Fatalf("rahasia baru harus berlaku, dapat %d %s", rec.Code, rec.Body)
+	}
+	// Token sudah terpakai.
+	if rec := h.do(http.MethodPost, "/api/v1/account/totp/confirm", map[string]string{"token": tr.Token, "code": newCode}); errCode(rec) != "totp_expired" {
+		t.Fatalf("token bekas: %s", errCode(rec))
 	}
 }

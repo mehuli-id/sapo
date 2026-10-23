@@ -10,6 +10,7 @@ import {
   LayoutGrid,
   Package,
   Settings,
+  ShieldCheck,
 } from "@lucide/vue"
 import appsData from "./apps.json"
 
@@ -43,6 +44,7 @@ const icons: Record<string, Component> = {
   "layout-grid": LayoutGrid,
   "package": Package,
   "settings": Settings,
+  "shield-check": ShieldCheck,
 }
 
 export function iconFor(name: string): Component {
@@ -54,6 +56,7 @@ const components: Record<string, Component> = {
   SystemInfo: defineAsyncComponent(() => import("./SystemInfo.vue")),
   Features: defineAsyncComponent(() => import("./Features.vue")),
   Storage: defineAsyncComponent(() => import("./Storage.vue")),
+  AccountSecurity: defineAsyncComponent(() => import("./AccountSecurity.vue")),
   About: defineAsyncComponent(() => import("./About.vue")),
   Planned: defineAsyncComponent(() => import("./Planned.vue")),
 }

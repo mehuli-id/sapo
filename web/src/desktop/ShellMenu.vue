@@ -2,7 +2,7 @@
 // Menu pengguna: akun, mode tampilan, tema, dan bahasa. Dipakai di kedua mode.
 import { ref } from "vue"
 import { useI18n } from "vue-i18n"
-import { Languages, LogOut, Monitor, Moon, PanelsTopLeft, Sun, UserRound } from "@lucide/vue"
+import { Languages, LogOut, Monitor, Moon, PanelsTopLeft, ShieldCheck, Sun, TriangleAlert, UserRound } from "@lucide/vue"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,6 +20,8 @@ import { languages, setLocale } from "@/i18n"
 import { useColorScheme } from "@/lib/theme"
 
 defineProps<{ triggerClass?: string }>()
+// Membuka aplikasi (misalnya Keamanan Akun); ditangani shell masing-masing.
+const emit = defineEmits<{ open: [appId: string] }>()
 
 const { t, locale } = useI18n()
 const { mode, setMode, isSmall } = useShell()
@@ -39,12 +41,21 @@ function onTheme(v: unknown) {
       :class="triggerClass ?? 'grid size-9 place-items-center rounded-md hover:bg-accent'"
       :aria-label="t('shell.mode')"
     >
-      <UserRound class="size-4" />
+      <span class="relative">
+        <UserRound class="size-4" />
+        <!-- Kode cadangan 2FA habis atau tinggal sedikit. -->
+        <span v-if="status?.user?.recovery_codes_low" class="absolute -top-1 -right-1 size-2 rounded-full bg-amber-500" />
+      </span>
     </DropdownMenuTrigger>
     <DropdownMenuContent align="end" side="top" class="w-56">
       <DropdownMenuLabel v-if="status?.user" class="truncate font-normal">
         {{ t("shell.signedInAs", { name: status.user.username }) }}
       </DropdownMenuLabel>
+      <DropdownMenuItem v-if="status?.user" @select="emit('open', 'account-security')">
+        <TriangleAlert v-if="status.user.recovery_codes_low" class="text-amber-600" />
+        <ShieldCheck v-else />
+        {{ status.user.recovery_codes_low ? t("account.menuLow") : t("apps.account-security.title") }}
+      </DropdownMenuItem>
       <DropdownMenuSeparator v-if="status?.user" />
       <template v-if="!isSmall">
         <DropdownMenuLabel class="flex items-center gap-2 text-xs text-muted-foreground">

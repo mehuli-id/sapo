@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -37,6 +38,8 @@ type pendingEntry struct {
 	secret  string
 	client  string
 	expires time.Time
+	// Hash kode cadangan yang ditampilkan bersama QR; disimpan saat setup selesai.
+	recovery []string
 }
 
 func randomToken() (string, error) {
@@ -91,7 +94,13 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]any{"setup_required": s.store.SetupRequired(), "authenticated": false}
 	if sess, _, ok := s.currentSession(r); ok {
 		resp["authenticated"] = true
-		resp["user"] = map[string]any{"username": sess.Username, "role": sess.Role}
+		user := map[string]any{"username": sess.Username, "role": sess.Role}
+		if u, found := s.store.Get(sess.Username); found && u.TOTPSecret != "" {
+			// Panel memberi peringatan bila kode cadangan habis atau tinggal sedikit.
+			user["recovery_codes_left"] = len(u.RecoveryCodes)
+			user["recovery_codes_low"] = len(u.RecoveryCodes) <= s.cfg.Auth.RecoveryCodesLow
+		}
+		resp["user"] = user
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -133,6 +142,8 @@ type setupTOTPResponse struct {
 	Token  string `json:"token"`
 	Secret string `json:"secret"`
 	URI    string `json:"uri"`
+	// Kode cadangan 2FA (hanya ditampilkan sekali).
+	RecoveryCodes []string `json:"recovery_codes"`
 }
 
 // handleSetupTOTP membuat rahasia 2FA untuk admin pertama. Hanya berlaku
@@ -158,6 +169,11 @@ func (s *Server) handleSetupTOTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "gagal membuat rahasia 2FA")
 		return
 	}
+	codes, hashes, err := auth.NewRecoveryCodes(s.cfg.Auth.RecoveryCodeCount)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "gagal membuat kode cadangan")
+		return
+	}
 	now := s.now()
 	client := clientNet(r)
 	s.setup.mu.Lock()
@@ -173,14 +189,14 @@ func (s *Server) handleSetupTOTP(w http.ResponseWriter, r *http.Request) {
 		writeBusy(w)
 		return
 	}
-	s.setup.entries[token] = pendingEntry{secret: secret, client: client, expires: now.Add(time.Duration(s.cfg.Auth.SetupTOTPExpiryMinutes) * time.Minute)}
+	s.setup.entries[token] = pendingEntry{secret: secret, client: client, recovery: hashes, expires: now.Add(time.Duration(s.cfg.Auth.SetupTOTPExpiryMinutes) * time.Minute)}
 	s.setup.mu.Unlock()
 
 	account := strings.ToLower(strings.TrimSpace(req.Username))
 	if !s.validUsername(account) {
 		account = "admin"
 	}
-	writeJSON(w, http.StatusOK, setupTOTPResponse{Token: token, Secret: secret, URI: auth.TOTPURI(s.productName(), account, secret)})
+	writeJSON(w, http.StatusOK, setupTOTPResponse{Token: token, Secret: secret, URI: auth.TOTPURI(s.productName(), account, secret), RecoveryCodes: codes})
 }
 
 type setupRequest struct {
@@ -230,6 +246,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 
 	var secret string
 	var step int64
+	var recovery []string
 	if s.cfg.Auth.RequireTOTPForAdmin {
 		s.setup.mu.Lock()
 		pending, found := s.setup.entries[req.TOTPToken]
@@ -244,6 +261,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		secret = pending.secret
+		recovery = pending.recovery
 	}
 
 	var hash string
@@ -256,7 +274,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "gagal menyimpan password")
 		return
 	}
-	admin := auth.User{Username: req.Username, Role: auth.RoleAdmin, PasswordHash: hash, TOTPSecret: secret, TOTPLastStep: step, CreatedAt: s.now().UTC()}
+	admin := auth.User{Username: req.Username, Role: auth.RoleAdmin, PasswordHash: hash, TOTPSecret: secret, TOTPLastStep: step, RecoveryCodes: recovery, CreatedAt: s.now().UTC()}
 	if err := s.store.CompleteSetup(admin, req.Language, s.now().UTC()); err != nil {
 		if errors.Is(err, auth.ErrSetupDone) {
 			writeError(w, http.StatusConflict, "setup_done", "setup awal sudah selesai")
@@ -322,6 +340,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		user, exists = s.store.Get(req.Username)
 	}
 	hasTOTP := exists && user.TOTPSecret != ""
+	usedRecovery, recoveryLeft := false, 0
 
 	// 1. Batas per jaringan klien (IPv4 per alamat, IPv6 per /64, karena satu
 	//    perangkat bisa memakai banyak alamat IPv6). Dipesan atomik.
@@ -407,20 +426,35 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			s.writeLocked(w, rem)
 			return
 		}
-		step, valid := auth.VerifyTOTP(user.TOTPSecret, code, s.now(), user.TOTPLastStep)
-		if !valid {
-			badCode("bad_totp")
-			return
-		}
-		// Compare-and-set: dua login bersamaan dengan kode yang sama, hanya
-		// satu yang berhasil.
-		if err := s.store.ConsumeTOTPStep(user.Username, step); err != nil {
-			if errors.Is(err, auth.ErrTOTPReused) {
-				badCode("totp_reused")
+		if auth.LooksLikeRecoveryCode(code) {
+			// Kode cadangan (HP autentikator tidak tersedia): sekali pakai,
+			// dihitung di penghitung kode 2FA salah yang sama.
+			left, err := s.store.ConsumeRecoveryCode(user.Username, code)
+			if err != nil {
+				if errors.Is(err, auth.ErrRecoveryInvalid) {
+					badCode("bad_recovery_code")
+					return
+				}
+				writeError(w, http.StatusInternalServerError, "internal", "gagal menyimpan status 2FA")
 				return
 			}
-			writeError(w, http.StatusInternalServerError, "internal", "gagal menyimpan status 2FA")
-			return
+			usedRecovery, recoveryLeft = true, left
+		} else {
+			step, valid := auth.VerifyTOTP(user.TOTPSecret, code, s.now(), user.TOTPLastStep)
+			if !valid {
+				badCode("bad_totp")
+				return
+			}
+			// Compare-and-set: dua login bersamaan dengan kode yang sama, hanya
+			// satu yang berhasil.
+			if err := s.store.ConsumeTOTPStep(user.Username, step); err != nil {
+				if errors.Is(err, auth.ErrTOTPReused) {
+					badCode("totp_reused")
+					return
+				}
+				writeError(w, http.StatusInternalServerError, "internal", "gagal menyimpan status 2FA")
+				return
+			}
 		}
 	}
 
@@ -443,6 +477,12 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.setCookie(w, r, tok, 0)
+	if usedRecovery {
+		// Dicatat terpisah: pemakaian kode cadangan perlu diketahui admin.
+		s.record(r, user.Username, "auth.login", true, map[string]string{"method": "recovery_code", "recovery_codes_left": strconv.Itoa(recoveryLeft)})
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": map[string]any{"username": user.Username, "role": user.Role}, "recovery_codes_left": recoveryLeft})
+		return
+	}
 	s.record(r, user.Username, "auth.login", true, nil)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": map[string]any{"username": user.Username, "role": user.Role}})
 }

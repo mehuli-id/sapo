@@ -20,12 +20,14 @@ const RoleAdmin Role = "admin"
 
 // User adalah akun panel.
 type User struct {
-	Username     string    `json:"username"`
-	Role         Role      `json:"role"`
-	PasswordHash string    `json:"password_hash"`
-	TOTPSecret   string    `json:"totp_secret,omitempty"`
-	TOTPLastStep int64     `json:"totp_last_step,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
+	Username     string `json:"username"`
+	Role         Role   `json:"role"`
+	PasswordHash string `json:"password_hash"`
+	TOTPSecret   string `json:"totp_secret,omitempty"`
+	TOTPLastStep int64  `json:"totp_last_step,omitempty"`
+	// Hash kode cadangan 2FA yang belum dipakai (lihat recovery.go).
+	RecoveryCodes []string  `json:"recovery_codes,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // State adalah isi file penyimpanan.
@@ -123,6 +125,41 @@ func (s *Store) ConsumeTOTPStep(username string, step int64) error {
 		if step <= u.TOTPLastStep {
 			return ErrTOTPReused
 		}
+		u.TOTPLastStep = step
+		return nil
+	})
+}
+
+// ConsumeRecoveryCode memakai satu kode cadangan: bila cocok, hash-nya
+// dihapus (sekali pakai) dan jumlah kode yang tersisa dikembalikan. Dua login
+// bersamaan dengan kode yang sama: hanya satu yang berhasil.
+func (s *Store) ConsumeRecoveryCode(username, code string) (int, error) {
+	remaining := 0
+	err := s.updateUser(username, func(u *User) error {
+		i := matchRecovery(u.RecoveryCodes, code)
+		if i < 0 {
+			return ErrRecoveryInvalid
+		}
+		u.RecoveryCodes = append(append([]string(nil), u.RecoveryCodes[:i]...), u.RecoveryCodes[i+1:]...)
+		remaining = len(u.RecoveryCodes)
+		return nil
+	})
+	return remaining, err
+}
+
+// SetRecoveryCodes mengganti semua kode cadangan (kode lama tidak berlaku).
+func (s *Store) SetRecoveryCodes(username string, hashes []string) error {
+	return s.updateUser(username, func(u *User) error {
+		u.RecoveryCodes = append([]string(nil), hashes...)
+		return nil
+	})
+}
+
+// SetTOTP mengganti rahasia 2FA (misalnya pindah ke HP baru). step adalah
+// langkah waktu kode yang dipakai untuk konfirmasi, agar tidak bisa dipakai ulang.
+func (s *Store) SetTOTP(username, secret string, step int64) error {
+	return s.updateUser(username, func(u *User) error {
+		u.TOTPSecret = secret
 		u.TOTPLastStep = step
 		return nil
 	})
