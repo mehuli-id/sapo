@@ -13,11 +13,12 @@ ARCH      ?= $(shell dpkg --print-architecture 2>/dev/null || go env GOARCH)
 
 all: build
 
-build: go web ## Build sapod, sapo-api, dan panel
+build: go web ## Build sapod, sapo-api, sapo-console, dan panel
 
 go: ## Build binary Go
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN)/sapod ./cmd/sapod
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN)/sapo-api ./cmd/sapo-api
+	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN)/sapo-console ./cmd/sapo-console
 
 web: ## Build panel ke web/dist
 	cd web && npm ci && npm run build

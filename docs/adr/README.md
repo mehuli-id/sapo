@@ -11,3 +11,4 @@ Setiap keputusan arsitektur penting dicatat di sini sebagai file bernomor (`NNNN
 | [0005](0005-zfs-pools.md) | Pool penyimpanan ZFS dari panel | Diterima |
 | [0006](0006-shared-folders-smb.md) | Shared folder, akun sistem, dan SMB | Diterima |
 | [0007](0007-nfs.md) | Shared folder lewat NFS (v4, semua akses sebagai satu pengguna) | Diterima |
+| [0008](0008-console-recovery.md) | Menu darurat di konsol NAS (reset password admin, jaringan, restart) | Diterima |

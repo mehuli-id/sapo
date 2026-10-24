@@ -42,7 +42,7 @@ echo "Membangun sapo $VERSION ($ARCH)…"
 
 # 1. Binary Go (statis, tanpa cgo).
 mkdir -p "$PKG$PREFIX_BIN"
-for cmd in sapod sapo-api; do
+for cmd in sapod sapo-api sapo-console; do
   CGO_ENABLED=0 GOOS=linux GOARCH="$GOARCH" go -C "$ROOT" build -trimpath \
     -ldflags "-s -w -X main.version=$VERSION" -o "$PKG$PREFIX_BIN/$cmd" "./cmd/$cmd"
 done
@@ -67,6 +67,7 @@ install -D -m 0644 "$ROOT/config/sapo.yaml" "$PKG$PREFIX_SHARE/sapo.yaml"
 # 4. systemd & user sistem.
 install -D -m 0644 "$HERE/systemd/sapod.service" "$PKG$UNIT_DIR/sapod.service"
 install -D -m 0644 "$HERE/systemd/sapo-api.service" "$PKG$UNIT_DIR/sapo-api.service"
+install -D -m 0644 "$HERE/systemd/sapo-console@.service" "$PKG$UNIT_DIR/sapo-console@.service"
 install -D -m 0644 "$HERE/sysusers.conf" "$PKG$SYSUSERS_DIR/sapo.conf"
 # Layar login konsol menampilkan alamat panel dan sidik jari sertifikat
 # HTTPS. File-nya ditulis sapod (root) dari templat tetap, atas permintaan

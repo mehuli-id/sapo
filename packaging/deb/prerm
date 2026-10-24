@@ -6,6 +6,7 @@ case "$1" in
   remove|deconfigure)
     if [ -d /run/systemd/system ]; then
       systemctl stop sapo-api.service sapod.service || true
+      systemctl stop 'sapo-console@*.service' || true
     fi
     ;;
   upgrade)

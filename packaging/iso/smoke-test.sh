@@ -6,7 +6,8 @@
 # ext4 dan harus ditolak tanpa konfirmasi penghapusan (ADR 0005). Setelah
 # scrub, shared folder dibuat dan dibuka lewat SMB dengan tiga pengguna
 # (tulis, baca, tanpa akses) dan lewat NFS (dipasang dari host dengan sudo),
-# satu disk diganti disk ketiga (resilver), lalu pool dihapus.
+# satu disk diganti disk ketiga (resilver), lalu pool dihapus. Terakhir, menu
+# darurat di port serial (ADR 0008) me-reset password admin dan jaringan.
 # HTTPS wajib (ADR 0004): HTTP hanya boleh menyajikan halaman petunjuk, dan
 # sidik jari yang diumumkan panel harus sama dengan sertifikat yang dipakai.
 # Pemakaian: packaging/iso/smoke-test.sh dist/sapo-dev_<versi>_amd64.iso
@@ -42,7 +43,8 @@ if [[ -w /dev/kvm ]]; then accel=(-accel kvm -cpu host); fi
 qemu-system-x86_64 "${accel[@]}" -m "$VM_RAM_MB" -smp 2 \
   -cdrom "$ISO" -boot d "${disks[@]}" \
   -nic "user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:$PORT-:5000,hostfwd=tcp:127.0.0.1:$TLS_PORT-:5001,hostfwd=tcp:127.0.0.1:$SMB_PORT-:445,hostfwd=tcp:127.0.0.1:$NFS_PORT-:2049,hostfwd=tcp:127.0.0.1:$RPCBIND_PORT-:111,hostfwd=tcp:127.0.0.1:$MOUNTD_PORT-:20048" \
-  -display none -serial "file:$LOG" &
+  -display none \
+  -chardev "socket,id=ser0,path=$WORK/serial.sock,server=on,wait=off,logfile=$LOG" -serial chardev:ser0 &
 qemu=$!
 trap 'sudo umount -f -l "$WORK/nfs" 2>/dev/null || true; kill "$qemu" 2>/dev/null || true; rm -rf "$WORK"' EXIT
 
@@ -346,4 +348,54 @@ json "u={x['serial']:(x['usage'],x.get('usage_reason','')) for x in v}
 assert all(u[s]==('data','zfs_label') for s in ('SAPOUJI1','SAPOUJI2','SAPOUJI3')), u" <<<"$disks_json" \
   || fail "disk pool terhapus harus berstatus data/zfs_label: $disks_json"
 echo "pool dihapus; disknya tampil berisi data (label ZFS lama)"
+# --- Menu darurat di konsol (port serial) ----------------------------------------
+# console_chat POLA KIRIM [POLA KIRIM ...]: tunggu POLA (regex) di keluaran
+# serial lalu kirim teks (\n = Enter). Mencetak grup pertama dari pola
+# terakhir yang cocok dan memuatnya.
+console_chat() {
+  python3 - "$WORK/serial.sock" "$@" <<'PY'
+import re, socket, sys, time
+sock = socket.socket(socket.AF_UNIX); sock.connect(sys.argv[1]); sock.settimeout(1)
+steps, buf, found = sys.argv[2:], "", ""
+for pat, send in zip(steps[0::2], steps[1::2]):
+    deadline = time.time() + 180
+    while not (m := re.search(pat, buf)):
+        if time.time() > deadline:
+            sys.stderr.write("tidak muncul: %r\n--- keluaran ---\n%s\n" % (pat, buf[-3000:])); sys.exit(1)
+        try:
+            buf += sock.recv(4096).decode("utf-8", "replace")
+        except socket.timeout:
+            pass
+    found = m.group(1) if m.groups() else found
+    buf = buf[m.end():]
+    if send:
+        sock.sendall(send.encode().decode("unicode_escape").encode())
+print(found)
+PY
+}
+console_chat '' '\n' '\(1-5\): ' '' >/dev/null || fail "menu darurat tidak tampil di konsol serial"
+temp="$(console_chat '' '\n' '\(1-5\): ' '1\n' 'penguji untuk melanjutkan: ' 'penguji\n' \
+  '\n    ([a-z2-9]{4}(?:-[a-z2-9]{4}){3})\r?\n' '')" || fail "reset password admin lewat menu darurat"
+old_jar="$JAR"
+res="$(api GET /api/v1/storage/pools)"
+[[ "$res" == *' 401' ]] || fail "sesi lama harus berakhir setelah reset admin: $res"
+JAR="$WORK/cookies-baru"
+res="$(api POST /api/v1/auth/login "{\"username\":\"penguji\",\"password\":\"$PASS\",\"totp_code\":\"$(totp "$secret")\"}")"
+[[ "$res" != *' 200' ]] || fail "password lama harus ditolak setelah reset: $res"
+res="$(api POST /api/v1/auth/login "{\"username\":\"penguji\",\"password\":\"$temp\"}")"
+[[ "$res" == *' 200' ]] || fail "login dengan password sementara (tanpa 2FA): $res"
+status="$(api GET /api/v1/auth/status)"
+json 'p=v["user"]["pending"]; assert "password" in p and "totp" in p, p' <<<"$status" || fail "admin harus wajib ganti password dan pasang 2FA: $status"
+res="$(api GET /api/v1/storage/pools)"
+[[ "$res" == *' 403'* || "$res" == *' 401' ]] || fail "panel harus terkunci sampai langkah wajib selesai: $res"
+echo "menu darurat: password admin di-reset (sesi lama berakhir, password lama ditolak, wajib ganti password dan 2FA)"
+
+console_chat '' '\n' '\(1-5\): ' '2\n' 'RESET[^\n]*: ' 'RESET\n' '(sudah di-reset)' '' >/dev/null || fail "reset jaringan lewat menu darurat"
+deadline=$((SECONDS + 120))
+until curl -kfsS --max-time 5 "$HTTPS/api/v1/health" 2>/dev/null | grep -q '"agent":true'; do
+  (( SECONDS <= deadline )) || fail "panel tidak kembali setelah reset jaringan"
+  sleep 3
+done
+echo "menu darurat: jaringan di-reset (DHCP), panel kembali dalam $((SECONDS + 120 - deadline)) detik"
+JAR="$old_jar"
 echo "Uji asap lulus."

@@ -15,6 +15,7 @@ Sapo by Mehuli adalah sistem operasi NAS open source (GPL-3.0) ala Synology DSM 
 
 ## Arsitektur singkat
 - `cmd/sapod`, `internal/agent` — agen root, unix socket `/run/sapo/sapod.sock` (0660, grup `sapo`), JSON per baris.
+- `cmd/sapo-console`, `internal/console` — menu darurat root di terminal fisik (ADR 0008); tidak menerima masukan dari jaringan.
 - `cmd/sapo-api`, `internal/api`, `internal/auth`, `internal/audit`, `internal/config` — server panel & API (login Argon2id + TOTP, CSRF header `X-Sapo-Request`, validasi Host, allowlist jaringan).
 - `web/` — Vue 3 + TypeScript + shadcn-vue (Tailwind v4, Reka UI). Mode Desktop berjendela ala DSM (default) + mode Ringkas; HP selalu layar penuh.
 - `packaging/deb/` — paket `.deb`; konfigurasi berlapis `/usr/share/sapo/sapo.yaml` (bawaan) → `/etc/sapo/sapo.yaml` (admin).
@@ -37,5 +38,5 @@ go test -race ./...
 
 ## Status & langkah berikutnya (per 24 Okt 2026)
 Sudah: kerangka, login + wizard setup awal + 2FA, paket `.deb`, tiga ronde review keamanan (`docs/security/2026-10-23-review.md`), repo publik `mehuli-id/sapo`, ISO live dev (`packaging/iso/`, workflow **ISO dev**: build + uji boot QEMU, artifact `sapo-iso-dev`), Storage Manager baca saja (`storage.disks`/`storage.smart` di `sapod`, program eksternal hanya lewat `runTool` di `internal/agent/tool.go`), HTTPS wajib di LAN (ADR 0004: sertifikat self-signed, HTTP hanya halaman petunjuk, sidik jari di layar konsol lewat `sapod`), pemulihan 2FA (kode cadangan + aplikasi Keamanan Akun), repo APT bertanda tangan di GitHub Pages (`packaging/apt/`, workflow **Rilis**: tag `v*` → stable, manual → dev). Pool ZFS dari panel (ADR 0005): buat pool (wizard), status, scrub, ganti disk, hapus pool; operasi destruktif di `internal/agent/pool.go` wajib lolos pemeriksaan identitas disk, status pakai, `O_EXCL`, konfirmasi hapus, password, dan log audit; uji asap ISO menjalankan semuanya di ZFS sungguhan. Pengguna dan grup (peran admin/pengguna, langkah wajib akun). Shared folder + SMB (ADR 0006): akun sistem Linux dikelola `sapod` (`internal/agent/accounts.go`, hanya akun yang tercatat di state file), folder = dataset ZFS bertanda `sapo:share` dengan ACL POSIX, `smb.conf` ditulis utuh dari templat; uji asap ISO membuka folder lewat `smbclient`. NFS (ADR 0007): v4 saja, per folder daftar alamat klien dan satu pengguna Sapo; semua akses dari klien dipetakan ke akun itu (`all_squash`), izinnya izin efektif pengguna itu; file ekspor ditulis utuh oleh `sapod`; uji asap ISO memasang folder lewat NFS dari host.
-Berikutnya:
-1. Menu darurat di konsol NAS (reset jaringan, reset password admin, restart) untuk pemulihan bila password dan kode cadangan hilang.
+Menu darurat di konsol NAS (ADR 0008): `sapo-console` (root, hanya keyboard/layar fisik, `sapo-console@tty1`) untuk reset password admin, reset jaringan, restart, matikan; uji asap ISO memakainya lewat port serial.
+Berikutnya: tentukan bersama pengguna (misalnya pengaturan jaringan dari panel, snapshot, atau installer ke disk).
