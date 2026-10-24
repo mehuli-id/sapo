@@ -32,6 +32,27 @@ type fakeAgent struct {
 	params map[string]any
 }
 
+// setErrs, called, dan forget: akses berkunci (Call juga dipanggil dari
+// goroutine latar belakang, misalnya sinkronisasi setelah setup).
+func (f *fakeAgent) setErrs(errs map[string]error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.errs = errs
+}
+
+func (f *fakeAgent) called(op string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	_, ok := f.params[op]
+	return ok
+}
+
+func (f *fakeAgent) forget(op string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.params, op)
+}
+
 func (f *fakeAgent) Call(_ context.Context, op string, params any, out any) error {
 	// Dipanggil juga dari goroutine (misalnya password Samba saat login).
 	f.mu.Lock()
@@ -599,8 +620,8 @@ func TestStorageEndpoints(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("smart %d %s", rec.Code, rec.Body)
 	}
-	if p, _ := agent.params[proto.OpStorageSMART].(proto.SMARTParams); p.Device != "sda" {
-		t.Fatalf("parameter ke sapod = %#v", agent.params[proto.OpStorageSMART])
+	if p, _ := agent.param(proto.OpStorageSMART).(proto.SMARTParams); p.Device != "sda" {
+		t.Fatalf("parameter ke sapod = %#v", agent.param(proto.OpStorageSMART))
 	}
 
 	// Kode error sapod dipetakan ke status HTTP yang sesuai.
@@ -610,7 +631,7 @@ func TestStorageEndpoints(t *testing.T) {
 		proto.ErrUnavailable:   http.StatusServiceUnavailable,
 		proto.ErrBusy:          http.StatusServiceUnavailable,
 	} {
-		agent.errs = map[string]error{proto.OpStorageSMART: &proto.Error{Code: code, Message: "x"}}
+		agent.setErrs(map[string]error{proto.OpStorageSMART: &proto.Error{Code: code, Message: "x"}})
 		rec = h.do(http.MethodGet, "/api/v1/storage/disks/sdz/smart", nil)
 		if rec.Code != status || errCode(rec) != code {
 			t.Errorf("%s: dapat %d %s, harus %d", code, rec.Code, errCode(rec), status)

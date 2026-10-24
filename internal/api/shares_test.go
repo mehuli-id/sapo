@@ -93,18 +93,14 @@ func TestShareLifecycle(t *testing.T) {
 	}
 
 	// Hapus: gagal di sapod = folder tetap ada di daftar.
-	agent.mu.Lock()
-	agent.errs = map[string]error{proto.OpSharesDelete: &proto.Error{Code: proto.ErrPoolBusy, Message: "busy"}}
-	agent.mu.Unlock()
+	agent.setErrs(map[string]error{proto.OpSharesDelete: &proto.Error{Code: proto.ErrPoolBusy, Message: "busy"}})
 	if rec := h.do(http.MethodPost, "/api/v1/shares/keluarga/delete", map[string]string{"confirm_name": "keluarga", "admin_password": adminPassword}); rec.Code != http.StatusConflict {
 		t.Fatalf("hapus saat sibuk: %d %s", rec.Code, rec.Body)
 	}
 	if _, ok := h.s.shares.get("keluarga"); !ok {
 		t.Fatal("folder yang gagal dihapus harus tetap ada")
 	}
-	agent.mu.Lock()
-	agent.errs = nil
-	agent.mu.Unlock()
+	agent.setErrs(nil)
 	if rec := h.do(http.MethodPost, "/api/v1/shares/keluarga/delete", map[string]string{"confirm_name": "kel", "admin_password": adminPassword}); errCode(rec) != "confirm_mismatch" {
 		t.Fatalf("konfirmasi salah: %d", rec.Code)
 	}
@@ -133,9 +129,7 @@ func TestSMBPasswordSkipsStaleOrDisabled(t *testing.T) {
 	h := newHarness(t, agent)
 	h.runSetup()
 	h.createUser("budi", "user", false)
-	agent.mu.Lock()
-	agent.params[proto.OpSMBPassword] = nil
-	agent.mu.Unlock()
+	agent.forget(proto.OpSMBPassword)
 	// Password lama dari login yang tertunda: hash sudah berbeda, dilewati.
 	h.s.setSMBPassword(context.Background(), "budi", "password lama sekali", "hash-lama")
 	if agent.param(proto.OpSMBPassword) != nil {
@@ -165,9 +159,7 @@ func TestSyncFailsClosedWhenAccountsFail(t *testing.T) {
 	h.do(http.MethodPost, "/api/v1/shares", map[string]any{"name": "data", "pool": "tank", "permissions": map[string]string{"user:budi": "write"}, "admin_password": adminPassword})
 	// Akun tidak bisa disinkronkan (misalnya catatan akun rusak): semua
 	// folder dikirim tanpa izin.
-	agent.mu.Lock()
-	agent.errs = map[string]error{proto.OpAccountsSync: &proto.Error{Code: proto.ErrConflict, Message: "catatan rusak"}}
-	agent.mu.Unlock()
+	agent.setErrs(map[string]error{proto.OpAccountsSync: &proto.Error{Code: proto.ErrConflict, Message: "catatan rusak"}})
 	if _, err := h.s.syncSystem(context.Background()); err == nil {
 		t.Fatal("sinkronisasi harus gagal")
 	}

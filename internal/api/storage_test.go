@@ -34,7 +34,7 @@ func TestPoolCreateNeedsPasswordAndConfirmation(t *testing.T) {
 	if rec := h.do(http.MethodPost, "/api/v1/storage/pools", poolRequest("data", "password salah sekali")); rec.Code != http.StatusUnauthorized || errCode(rec) != "bad_password" {
 		t.Fatalf("password salah: %d %s", rec.Code, rec.Body)
 	}
-	if _, called := agent.params[proto.OpStoragePoolCreate]; called {
+	if agent.called(proto.OpStoragePoolCreate) {
 		t.Fatal("sapod tidak boleh dipanggil sebelum password dan konfirmasi benar")
 	}
 	// Tanpa header CSRF ditolak.
@@ -46,7 +46,7 @@ func TestPoolCreateNeedsPasswordAndConfirmation(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"health":"ONLINE"`) {
 		t.Fatalf("buat pool: %d %s", rec.Code, rec.Body)
 	}
-	got, _ := agent.params[proto.OpStoragePoolCreate].(proto.PoolCreateParams)
+	got, _ := agent.param(proto.OpStoragePoolCreate).(proto.PoolCreateParams)
 	if got.Name != "data" || got.Layout != proto.LayoutMirror || len(got.Disks) != 2 || got.Disks[0].Erase || !got.Disks[1].Erase {
 		t.Fatalf("parameter ke sapod = %+v", got)
 	}
@@ -93,7 +93,7 @@ func TestPoolCreateRefusedWithoutAudit(t *testing.T) {
 	if rec.Code != http.StatusInternalServerError || errCode(rec) != "audit_unavailable" {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
-	if _, called := agent.params[proto.OpStoragePoolCreate]; called {
+	if agent.called(proto.OpStoragePoolCreate) {
 		t.Fatal("pool tidak boleh dibuat tanpa log audit")
 	}
 }
@@ -111,14 +111,14 @@ func TestPoolListAndScrub(t *testing.T) {
 	if rec := h.do(http.MethodPost, "/api/v1/storage/pools/tank/scrub", map[string]string{"action": "start"}); rec.Code != http.StatusOK {
 		t.Fatalf("scrub: %d %s", rec.Code, rec.Body)
 	}
-	if p, _ := agent.params[proto.OpStoragePoolScrub].(proto.PoolScrubParams); p.Name != "tank" || p.Action != "start" {
-		t.Fatalf("parameter scrub = %+v", agent.params[proto.OpStoragePoolScrub])
+	if p, _ := agent.param(proto.OpStoragePoolScrub).(proto.PoolScrubParams); p.Name != "tank" || p.Action != "start" {
+		t.Fatalf("parameter scrub = %+v", agent.param(proto.OpStoragePoolScrub))
 	}
 	b, _ := os.ReadFile(filepath.Join(h.data, "audit.log"))
 	if !strings.Contains(string(b), `"action":"storage.pool_scrub"`) {
 		t.Fatalf("scrub harus tercatat:\n%s", b)
 	}
-	agent.errs = map[string]error{proto.OpStoragePoolScrub: &proto.Error{Code: proto.ErrPoolBusy, Message: "resilver"}}
+	agent.setErrs(map[string]error{proto.OpStoragePoolScrub: &proto.Error{Code: proto.ErrPoolBusy, Message: "resilver"}})
 	if rec := h.do(http.MethodPost, "/api/v1/storage/pools/tank/scrub", map[string]string{"action": "start"}); rec.Code != http.StatusConflict {
 		t.Fatalf("pool sibuk: %d", rec.Code)
 	}
@@ -168,15 +168,15 @@ func TestPoolReplaceAndDestroy(t *testing.T) {
 	if rec := h.do(http.MethodPost, "/api/v1/storage/pools/tank/replace", map[string]any{"old_guid": "7", "disk": disk, "password": adminPassword}); rec.Code != http.StatusOK {
 		t.Fatalf("ganti disk: %d %s", rec.Code, rec.Body)
 	}
-	if p, _ := agent.params[proto.OpStoragePoolReplace].(proto.PoolReplaceParams); p.Name != "tank" || p.OldGUID != "7" || p.Disk.Name != "vdd" {
-		t.Fatalf("parameter = %+v", agent.params[proto.OpStoragePoolReplace])
+	if p, _ := agent.param(proto.OpStoragePoolReplace).(proto.PoolReplaceParams); p.Name != "tank" || p.OldGUID != "7" || p.Disk.Name != "vdd" {
+		t.Fatalf("parameter = %+v", agent.param(proto.OpStoragePoolReplace))
 	}
 
 	// Hapus pool: nama diketik ulang dan password.
 	if rec := h.do(http.MethodPost, "/api/v1/storage/pools/tank/destroy", map[string]string{"confirm_name": "tnak", "password": adminPassword}); rec.Code != http.StatusBadRequest || errCode(rec) != "confirm_mismatch" {
 		t.Fatalf("konfirmasi salah: %d", rec.Code)
 	}
-	if _, called := agent.params[proto.OpStoragePoolDestroy]; called {
+	if agent.called(proto.OpStoragePoolDestroy) {
 		t.Fatal("sapod tidak boleh dipanggil")
 	}
 	if rec := h.do(http.MethodPost, "/api/v1/storage/pools/tank/destroy", map[string]string{"confirm_name": "tank", "password": adminPassword}); rec.Code != http.StatusOK {
