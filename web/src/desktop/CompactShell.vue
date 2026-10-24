@@ -1,10 +1,11 @@
 <script setup lang="ts">
 // Mode Ringkas (dan tampilan HP): sidebar + satu halaman konten.
-import { computed, ref } from "vue"
+import { computed, ref, watch } from "vue"
 import { useI18n } from "vue-i18n"
 import { Menu, X } from "@lucide/vue"
 import { componentFor, findApp, iconFor, useVisibleApps } from "@/apps/registry"
 import SapoLogo from "@/components/SapoLogo.vue"
+import { useLauncher } from "@/composables/useLauncher"
 import { useShell } from "@/composables/useShell"
 import { cn } from "@/lib/utils"
 import ShellMenu from "./ShellMenu.vue"
@@ -20,6 +21,12 @@ function select(id: string) {
   activeId.value = id
   sidebarOpen.value = false
 }
+
+const { request } = useLauncher()
+watch(request, (id) => {
+  if (id && findApp(id)) select(id)
+  request.value = null
+})
 </script>
 
 <template>
