@@ -182,6 +182,8 @@ func New(o Options) (*Server, error) {
 	s.mux.Handle("GET /api/v1/storage/pools", s.requireAuth(s.proxyRead(proto.OpStoragePools)))
 	s.mux.Handle("POST /api/v1/storage/pools", s.requireAdmin(http.HandlerFunc(s.handlePoolCreate)))
 	s.mux.Handle("POST /api/v1/storage/pools/{name}/scrub", s.requireAdmin(http.HandlerFunc(s.handlePoolScrub)))
+	s.mux.Handle("POST /api/v1/storage/pools/{name}/replace", s.requireAdmin(http.HandlerFunc(s.handlePoolReplace)))
+	s.mux.Handle("POST /api/v1/storage/pools/{name}/destroy", s.requireAdmin(http.HandlerFunc(s.handlePoolDestroy)))
 
 	s.mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "endpoint tidak ada")
@@ -434,7 +436,7 @@ func (s *Server) agentError(w http.ResponseWriter, op string, err error) {
 			status = http.StatusServiceUnavailable
 		case proto.ErrDiskChanged, proto.ErrDiskInUse, proto.ErrDiskHasData, proto.ErrDiskRemovable, proto.ErrPoolExists, proto.ErrPoolBusy:
 			status = http.StatusConflict
-		case "pool_create_failed", "pool_scrub_failed":
+		case "pool_create_failed", "pool_scrub_failed", "pool_replace_failed", "pool_destroy_failed":
 			status = http.StatusUnprocessableEntity
 		}
 		writeError(w, status, pe.Code, pe.Message)

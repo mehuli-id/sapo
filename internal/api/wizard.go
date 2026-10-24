@@ -51,7 +51,12 @@ type WizardField struct {
 	Source string `yaml:"source" json:"source,omitempty"`
 	// Pattern: pola isian teks untuk petunjuk di panel; server tetap
 	// memeriksa sendiri.
-	Pattern      string `yaml:"pattern" json:"pattern,omitempty"`
+	Pattern string `yaml:"pattern" json:"pattern,omitempty"`
+	// MatchContext: isian confirm yang harus sama dengan nilai dari konteks
+	// wizard (pool = nama pool yang sedang dikerjakan).
+	MatchContext string `yaml:"match_context" json:"match_context,omitempty"`
+	// Max: jumlah pilihan paling banyak (disk-select).
+	Max          int    `yaml:"max" json:"max,omitempty"`
 	Autocomplete string `yaml:"autocomplete" json:"autocomplete,omitempty"`
 	Secret       bool   `yaml:"secret" json:"secret,omitempty"`
 }
@@ -65,7 +70,7 @@ var (
 	fieldTypes = map[string]bool{
 		"text": true, "username": true, "password": true, "password-confirm": true, "current-password": true,
 		"language": true, "totp-enroll": true, "recovery-codes": true,
-		"disk-select": true, "pool-layout": true, "erase-confirm": true, "confirm": true,
+		"disk-select": true, "pool-layout": true, "erase-confirm": true, "confirm": true, "acknowledge": true,
 	}
 	// Jenis isian yang wajib merujuk isian disk-select lewat source.
 	needsDiskSource = map[string]bool{"pool-layout": true, "erase-confirm": true}
@@ -113,7 +118,10 @@ func LoadWizard(dir, id string) (*Wizard, error) {
 			if f.Match != "" && !keys[f.Match] {
 				return nil, fmt.Errorf("wizard %s: isian %q merujuk %q yang tidak ada", id, f.Key, f.Match)
 			}
-			if (f.Type == "confirm" || f.Type == "password-confirm") && f.Match == "" {
+			if f.MatchContext != "" && f.MatchContext != "pool" {
+				return nil, fmt.Errorf("wizard %s: match_context %q tidak dikenal", id, f.MatchContext)
+			}
+			if (f.Type == "confirm" && f.Match == "" && f.MatchContext == "") || (f.Type == "password-confirm" && f.Match == "") {
 				return nil, fmt.Errorf("wizard %s: isian %q butuh match", id, f.Key)
 			}
 			if needsDiskSource[f.Type] && types[f.Source] != "disk-select" {

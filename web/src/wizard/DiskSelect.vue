@@ -11,7 +11,8 @@ import { formatBytes } from "@/lib/format"
 import { ineligibleReason } from "@/lib/pool"
 import { cn } from "@/lib/utils"
 
-const props = defineProps<{ modelValue: string; disks: Disk[]; allowRemovable: boolean; inputId: string; invalid?: boolean }>()
+// max: jumlah disk paling banyak; 1 = pilih satu (memilih disk lain mengganti pilihan).
+const props = defineProps<{ modelValue: string; disks: Disk[]; allowRemovable: boolean; inputId: string; invalid?: boolean; max?: number }>()
 const emit = defineEmits<{ "update:modelValue": [string] }>()
 const { t, locale } = useI18n()
 
@@ -20,8 +21,8 @@ const size = (b: number) => formatBytes(b, locale.value, 1000)
 
 function toggle(d: Disk) {
   if (ineligibleReason(d, props.allowRemovable)) return
-  const next = new Set(selected.value)
-  if (next.has(d.name)) next.delete(d.name)
+  const next = new Set(props.max === 1 ? [] : selected.value)
+  if (selected.value.has(d.name)) next.delete(d.name)
   else next.add(d.name)
   // Urutan mengikuti daftar disk, bukan urutan klik.
   emit("update:modelValue", props.disks.filter((x) => next.has(x.name)).map((x) => x.name).join(","))
@@ -38,7 +39,7 @@ const smallest = computed(() => Math.min(...picked.value.map((d) => d.size_bytes
       <li v-for="d in disks" :key="d.name">
         <button
           type="button"
-          role="checkbox"
+          :role="max === 1 ? 'radio' : 'checkbox'"
           :aria-checked="selected.has(d.name)"
           :disabled="!!ineligibleReason(d, allowRemovable)"
           :class="

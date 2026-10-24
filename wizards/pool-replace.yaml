@@ -1,0 +1,64 @@
+# Wizard mengganti satu disk pool (ADR 0005). Pool dan disk yang diganti
+# datang dari Storage Manager; sapod memeriksa ulang disk pengganti seketat
+# disk untuk pool baru, karena isinya dihapus.
+id: pool-replace
+action: storage.pool_replace
+destructive: true
+title:
+  id: Ganti disk
+  en: Replace a disk
+finish_label:
+  id: Hapus disk baru dan ganti
+  en: Erase new disk and replace
+
+steps:
+  - id: disk
+    title: { id: Pilih disk pengganti, en: Choose the replacement disk }
+    description:
+      id: >-
+        Data dibangun ulang ke disk ini dari disk lain di pool (resilver).
+        Pool tetap bisa dipakai selama proses berjalan.
+      en: >-
+        Data is rebuilt onto this disk from the other disks in the pool
+        (resilver). The pool stays usable while this runs.
+    help:
+      id: >-
+        Disk pengganti minimal sebesar disk yang diganti. Pasang disk baru
+        dulu (atau cabut disk yang rusak bila tidak ada slot kosong), lalu
+        tekan Perbarui di Storage Manager. Disk lama yang masih terbaca
+        dilepas dari pool setelah resilver selesai.
+      en: >-
+        The replacement disk must be at least as large as the disk it
+        replaces. Install the new disk first (or remove the failed one if
+        there's no free slot), then press Refresh in Storage Manager. An old
+        disk that can still be read is detached once the resilver finishes.
+    fields:
+      - key: disk
+        type: disk-select
+        max: 1
+        required: true
+        label: { id: Disk pengganti, en: Replacement disk }
+
+  - id: confirm
+    type: review
+    title: { id: Konfirmasi, en: Confirm }
+    description:
+      id: Isi disk pengganti dihapus begitu tombol terakhir ditekan.
+      en: The replacement disk is erased as soon as you press the last button.
+    fields:
+      - key: erase_ok
+        type: erase-confirm
+        source: disk
+        required: true
+        label:
+          id: Saya mengerti semua data di disk ini akan dihapus permanen
+          en: I understand all data on this disk will be permanently erased
+      - key: password
+        type: current-password
+        required: true
+        secret: true
+        autocomplete: current-password
+        label: { id: Password Anda, en: Your password }
+        help:
+          id: Diminta lagi karena tindakan ini menghapus data.
+          en: Asked again because this erases data.
