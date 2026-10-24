@@ -719,4 +719,6 @@ type UpdateRun struct {
 	FinishedAt time.Time `json:"finished_at,omitempty"`
 	OK         bool      `json:"ok"`
 	ExitCode   int       `json:"exit_code"`
+	// Interrupted: pemasangan berhenti sebelum selesai (diisi updates.status).
+	Interrupted bool `json:"interrupted,omitempty"`
 }

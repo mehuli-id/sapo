@@ -118,11 +118,14 @@ agent:
   # sapo sendiri diperbarui dan sapod di-restart.
   updates:
     apt_get: /usr/bin/apt-get
+    dpkg: /usr/bin/dpkg
     systemd_run: /usr/bin/systemd-run
     unit: sapo-updates.service
     log_file: /var/lib/sapod/updates.log
     result_file: /var/lib/sapod/updates-result.json
     check_timeout_seconds: 240
+    # Pemasangan yang lebih lama dari ini dihentikan (3 jam).
+    install_timeout_seconds: 10800
 
   # File Station (ADR 0010): operasi file dijalankan sebagai akun pengguna.
   # Penghapusan folder besar dibatasi delete_timeout_seconds (di bawah batas

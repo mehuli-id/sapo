@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -25,7 +26,7 @@ import (
 
 // UpdatesTools mengatur operasi updates.* (agent.updates di sapo.yaml).
 type UpdatesTools struct {
-	AptGet, SystemdRun, Systemctl string
+	AptGet, Dpkg, SystemdRun, Systemctl string
 	// Self: program sapod (dijalankan systemd-run dengan argumen apt-run).
 	Self string
 	// Unit: unit systemd sementara tempat pemasangan berjalan, terpisah dari
@@ -34,6 +35,9 @@ type UpdatesTools struct {
 	// LogFile dan ResultFile ditulis oleh apt-run.
 	LogFile, ResultFile string
 	CheckTimeout        time.Duration
+	// InstallTimeout: unit pemasangan dihentikan systemd setelah selang ini
+	// (misalnya apt menggantung menunggu jaringan).
+	InstallTimeout time.Duration
 }
 
 // Updates melayani updates.check, updates.install, dan updates.status.
@@ -50,7 +54,9 @@ func NewUpdates(t UpdatesTools) *Updates {
 }
 
 // aptEnv: apt dan dpkg tanpa pertanyaan interaktif.
-var aptEnv = append([]string{"DEBIAN_FRONTEND=noninteractive", "APT_LISTCHANGES_FRONTEND=none"}, toolEnv...)
+// ucf mempertahankan konfigurasi lama seperti --force-confold; needrestart
+// hanya mendaftar layanan, tidak me-restart di tengah pemasangan.
+var aptEnv = append([]string{"DEBIAN_FRONTEND=noninteractive", "APT_LISTCHANGES_FRONTEND=none", "UCF_FORCE_CONFFOLD=1", "NEEDRESTART_MODE=l"}, toolEnv...)
 
 // runFixed menjalankan program dengan argumen tetap dari kode (bukan dari
 // masukan), tanpa shell.
@@ -106,6 +112,9 @@ func parseSimulation(out []byte) []proto.UpdatePackage {
 // dipertahankan.
 var upgradeArgs = []string{"-q", "-y", "-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold", "upgrade", "--with-new-pkgs"}
 
+// lockWait: menunggu kunci apt/dpkg (misalnya apt-daily) sebelum menyerah.
+var lockWait = []string{"-o", "DPkg::Lock::Timeout=120"}
+
 // CheckOp mengembalikan handler updates.check.
 func (u *Updates) CheckOp() Handler {
 	return func(ctx context.Context, _ json.RawMessage) (any, error) {
@@ -118,7 +127,7 @@ func (u *Updates) CheckOp() Handler {
 		if u.running(ctx) {
 			return nil, &OpError{Code: proto.ErrBusy, Message: "pembaruan sedang dipasang"}
 		}
-		res, err := u.run(ctx, u.t.AptGet, "-q", "update")
+		res, err := u.run(ctx, u.t.AptGet, append(slices.Clone(lockWait), "-q", "update")...)
 		if err != nil {
 			return nil, err
 		}
@@ -151,8 +160,8 @@ func (u *Updates) InstallOp() Handler {
 		_ = os.Remove(u.t.ResultFile)
 		res, err := u.run(ctx, u.t.SystemdRun,
 			"--unit="+u.t.Unit, "--description=Pembaruan sistem Sapo", "--collect", "--quiet",
-			"--property=Type=exec", "--",
-			u.t.Self, "apt-run", u.t.AptGet, u.t.LogFile, u.t.ResultFile)
+			"--property=Type=exec", fmt.Sprintf("--property=RuntimeMaxSec=%d", int(u.t.InstallTimeout.Seconds())), "--",
+			u.t.Self, "apt-run", u.t.AptGet, u.t.Dpkg, u.t.LogFile, u.t.ResultFile)
 		if err != nil {
 			return nil, err
 		}
@@ -170,6 +179,9 @@ func (u *Updates) StatusOp() Handler {
 		if data, err := os.ReadFile(u.t.ResultFile); err == nil {
 			var r proto.UpdateRun
 			if json.Unmarshal(data, &r) == nil {
+				// Unit sudah tidak berjalan tetapi hasil akhir tidak pernah
+				// ditulis: pemasangan terputus (listrik mati, dihentikan).
+				r.Interrupted = !out.Running && r.FinishedAt.IsZero()
 				out.Last = &r
 			}
 		}
@@ -209,22 +221,27 @@ func lastLines(b []byte, n int) string {
 	return strings.Join(lines, " | ")
 }
 
-// AptRunMain adalah "sapod apt-run <apt-get> <log> <hasil>": dijalankan
-// systemd-run sebagai root di unit tersendiri. Menjalankan apt-get update
-// lalu upgrade, mencatat keluaran ke log dan hasil ke file hasil.
+// AptRunMain adalah "sapod apt-run <apt-get> <dpkg> <log> <hasil>":
+// dijalankan systemd-run sebagai root di unit tersendiri. Melanjutkan
+// pemasangan dpkg yang terputus (bila ada), lalu apt-get update dan
+// upgrade, mencatat keluaran ke log dan hasil ke file hasil.
 func AptRunMain(args []string) int {
-	if len(args) != 3 || !filepath.IsAbs(args[0]) || !filepath.IsAbs(args[1]) || !filepath.IsAbs(args[2]) {
-		fmt.Fprintln(os.Stderr, "pemakaian: sapod apt-run <apt-get> <log> <hasil>")
+	if len(args) != 4 || !filepath.IsAbs(args[0]) || !filepath.IsAbs(args[1]) || !filepath.IsAbs(args[2]) || !filepath.IsAbs(args[3]) {
+		fmt.Fprintln(os.Stderr, "pemakaian: sapod apt-run <apt-get> <dpkg> <log> <hasil>")
 		return 2
 	}
-	aptGet, logPath, resultPath := args[0], args[1], args[2]
+	aptGet, dpkg, logPath, resultPath := args[0], args[1], args[2], args[3]
 	run := proto.UpdateRun{StartedAt: time.Now().UTC()}
+	var log *os.File
 	writeResult := func() {
 		data, _ := json.Marshal(run)
-		_ = writePrivateFile(resultPath, data)
+		if err := writePrivateFile(resultPath, data); err != nil && log != nil {
+			fmt.Fprintf(log, "hasil gagal ditulis: %v\n", err)
+		}
 	}
 	log, err := os.OpenFile(logPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
+		log = nil
 		run.ExitCode = -1
 		run.FinishedAt = time.Now().UTC()
 		writeResult()
@@ -232,9 +249,19 @@ func AptRunMain(args []string) int {
 	}
 	defer log.Close()
 	writeResult()
-	for _, a := range [][]string{{"-q", "update"}, upgradeArgs} {
-		fmt.Fprintf(log, "$ apt-get %s\n", strings.Join(a, " "))
-		cmd := exec.Command(aptGet, a...)
+	steps := []struct {
+		prog string
+		args []string
+	}{
+		// Pemasangan sebelumnya yang terputus dilanjutkan dulu (tanpa ini
+		// apt-get menolak dan meminta terminal).
+		{dpkg, []string{"--force-confdef", "--force-confold", "--configure", "-a"}},
+		{aptGet, append(slices.Clone(lockWait), "-q", "update")},
+		{aptGet, append(slices.Clone(lockWait), upgradeArgs...)},
+	}
+	for _, st := range steps {
+		fmt.Fprintf(log, "$ %s %s\n", filepath.Base(st.prog), strings.Join(st.args, " "))
+		cmd := exec.Command(st.prog, st.args...)
 		cmd.Env = aptEnv
 		cmd.Dir = "/"
 		cmd.Stdout, cmd.Stderr = log, log

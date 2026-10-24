@@ -665,6 +665,7 @@
     "installing": "Installing updates… You can close this window; installation keeps running.",
     "installed": "Updates last installed {when}.",
     "installFailed": "The last update installation failed (code {code}). See the log.",
-    "updateLog": "Installation log"
+    "updateLog": "Installation log",
+    "installInterrupted": "The last update installation stopped before finishing. Install again: the interrupted installation is resumed first."
   }
 }

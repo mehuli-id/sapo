@@ -115,8 +115,9 @@ async function pollUpdates() {
   } catch {
     // Panel mungkin sedang dinyalakan ulang (paket Sapo diperbarui): coba lagi.
   }
-  // Selesai: unit tidak berjalan lagi dan hasilnya sudah ditulis.
-  if (installing.value && upd.value && !upd.value.running && upd.value.last?.finished_at) installing.value = false
+  // Selesai: unit tidak berjalan lagi dan hasilnya sudah ditulis (atau
+  // terputus tanpa hasil akhir).
+  if (installing.value && upd.value && !upd.value.running && (upd.value.last?.finished_at || upd.value.last?.interrupted)) installing.value = false
   if (installing.value || upd.value?.running) updTimer = window.setTimeout(pollUpdates, 3000)
 }
 async function check() {
@@ -214,6 +215,9 @@ onMounted(async () => {
       <div v-if="upd?.running || installing" class="space-y-2">
         <p class="flex items-center gap-2 text-sm"><LoaderCircle class="size-4 animate-spin" />{{ t("controlPanel.installing") }}</p>
       </div>
+      <p v-else-if="upd?.last?.interrupted" class="flex items-center gap-2 text-sm text-destructive">
+        <TriangleAlert class="size-4" />{{ t("controlPanel.installInterrupted") }}
+      </p>
       <p v-else-if="upd?.last?.finished_at" :class="['flex items-center gap-2 text-sm', upd.last.ok ? '' : 'text-destructive']">
         <CircleCheck v-if="upd.last.ok" class="size-4 text-emerald-600" /><TriangleAlert v-else class="size-4" />
         {{ upd.last.ok ? t("controlPanel.installed", { when: new Date(upd.last.finished_at).toLocaleString(locale) }) : t("controlPanel.installFailed", { code: upd.last.exit_code }) }}
