@@ -1,0 +1,29 @@
+[Unit]
+# Menu darurat Sapo di terminal fisik NAS (ADR 0008): reset password admin,
+# reset jaringan, restart, matikan. Menggantikan layar login di terminal ini
+# (getty-nya di-mask oleh postinst); login konsol tetap ada di tty lain.
+Description=Menu darurat Sapo di %I
+Documentation=https://github.com/mehuli-id/sapo
+After=systemd-user-sessions.service sapod.service
+Before=getty.target
+Conflicts=getty@%i.service serial-getty@%i.service
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/sapo/sapo-console -config /etc/sapo/sapo.yaml -defaults /usr/share/sapo/sapo.yaml
+StandardInput=tty
+StandardOutput=tty
+StandardError=journal
+TTYPath=/dev/%I
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+# Terminal ditutup atau program berhenti: menu ditampilkan lagi.
+Restart=always
+RestartSec=1s
+UtmpIdentifier=%I
+IgnoreSIGPIPE=no
+KillMode=process
+
+[Install]
+WantedBy=getty.target

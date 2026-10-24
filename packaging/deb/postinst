@@ -72,6 +72,23 @@ EOF
       fi
     fi
 
+    # 5. Menu darurat di tty1 (ADR 0008) menggantikan layar login tty1.
+    #    Sekali saja (penanda di /var/lib/sapod), agar keputusan admin untuk
+    #    mematikannya tetap dihormati saat upgrade.
+    CONSOLE_MARK=/var/lib/sapod/console-menu-enabled
+    if [ ! -e "$CONSOLE_MARK" ]; then
+      systemctl mask getty@tty1.service >/dev/null 2>&1 || true
+      systemctl enable sapo-console@tty1.service >/dev/null 2>&1 || true
+      install -d -m 0700 /var/lib/sapod
+      : > "$CONSOLE_MARK"
+      if [ -d /run/systemd/system ]; then
+        systemctl stop getty@tty1.service >/dev/null 2>&1 || true
+        systemctl start sapo-console@tty1.service || true
+      fi
+    elif [ -d /run/systemd/system ] && [ -n "$2" ]; then
+      systemctl try-restart sapo-console@tty1.service || true
+    fi
+
     if [ -z "$2" ]; then
       host=$(hostname 2>/dev/null || echo sapo)
       echo ""

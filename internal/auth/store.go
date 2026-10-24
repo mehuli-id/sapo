@@ -222,6 +222,7 @@ var (
 	ErrLastAdmin     = errors.New("harus tetap ada minimal satu administrator aktif")
 	ErrGroupExists   = errors.New("nama grup sudah dipakai")
 	ErrGroupNotFound = errors.New("grup tidak ditemukan")
+	ErrNotAdmin      = errors.New("bukan administrator")
 )
 
 // Users mengembalikan salinan semua user, urut nama.
@@ -300,6 +301,21 @@ func (s *Store) SetPassword(username, hash string, mustChange bool) error {
 	return s.updateUser(username, func(u *User) error {
 		u.PasswordHash = hash
 		u.MustChangePassword = mustChange
+		return nil
+	})
+}
+
+// RecoveryReset dipakai menu darurat di konsol NAS (sapo-console) saat
+// password dan kode cadangan admin hilang: password diganti hash baru dan
+// wajib diganti saat login, 2FA dan kode cadangan dihapus (didaftarkan ulang
+// saat login), dan akun diaktifkan kembali. Hanya untuk administrator.
+func (s *Store) RecoveryReset(username, hash string) error {
+	return s.updateUser(username, func(u *User) error {
+		if u.Role != RoleAdmin {
+			return ErrNotAdmin
+		}
+		u.PasswordHash, u.MustChangePassword, u.Disabled = hash, true, false
+		u.TOTPSecret, u.TOTPLastStep, u.RecoveryCodes = "", 0, nil
 		return nil
 	})
 }

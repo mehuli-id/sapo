@@ -9,8 +9,13 @@ UNITS="sapod.service sapo-api.service"
 
 case "$1" in
   remove)
+    # Layar login tty1 dikembalikan (menu darurat ikut terhapus).
+    systemctl disable sapo-console@tty1.service >/dev/null 2>&1 || true
+    systemctl unmask getty@tty1.service >/dev/null 2>&1 || true
+    rm -f /var/lib/sapod/console-menu-enabled
     if [ -d /run/systemd/system ]; then
       systemctl daemon-reload || true
+      systemctl start getty@tty1.service >/dev/null 2>&1 || true
     fi
     # Status "enabled" disimpan, sehingga dipasang ulang = aktif kembali.
     if command -v deb-systemd-helper >/dev/null 2>&1; then

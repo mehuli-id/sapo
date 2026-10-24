@@ -31,6 +31,28 @@ type Config struct {
 	API   API   `yaml:"api"`
 	Auth  Auth  `yaml:"auth"`
 	UI    UI    `yaml:"ui"`
+	// Recovery mengatur menu darurat di konsol NAS (sapo-console).
+	Recovery Recovery `yaml:"recovery"`
+}
+
+// Recovery mengatur menu darurat di konsol NAS (sapo-console, ADR 0008):
+// reset password admin, reset jaringan, restart, dan matikan. Menu hanya
+// ada di layar dan keyboard yang terpasang ke NAS, tidak lewat jaringan.
+type Recovery struct {
+	Systemctl string `yaml:"systemctl"`
+	// Layanan yang dimulai ulang: panel (setelah reset password atau akses
+	// panel) dan jaringan (ifupdown, setelah reset jaringan).
+	APIService     string `yaml:"api_service"`
+	NetworkService string `yaml:"network_service"`
+	// InterfacesFile ditulis ulang saat reset jaringan: semua antarmuka
+	// fisik (dari NetDir) memakai DHCP. File lama disimpan sebagai cadangan.
+	InterfacesFile string `yaml:"interfaces_file"`
+	NetDir         string `yaml:"net_dir"`
+	// ResetAPIKeys: kunci api.* di file konfigurasi admin yang dihapus saat
+	// reset jaringan (kembali ke nilai bawaan paket).
+	ResetAPIKeys []string `yaml:"reset_api_keys"`
+	// Panjang password sementara setelah reset (huruf dan angka).
+	TempPasswordLength int `yaml:"temp_password_length"`
 }
 
 // Agent mengatur sapod.
@@ -310,6 +332,12 @@ func Default() Config {
 			Argon2:                 Argon2{MemoryKiB: 64 * 1024, Iterations: 3, Parallelism: 2},
 		},
 		UI: UI{DefaultMode: "desktop"},
+		Recovery: Recovery{
+			Systemctl: "/usr/bin/systemctl", APIService: "sapo-api.service", NetworkService: "networking.service",
+			InterfacesFile: "/etc/network/interfaces", NetDir: "/sys/class/net",
+			ResetAPIKeys:       []string{"listen", "allowed_networks", "denied_networks", "hostnames"},
+			TempPasswordLength: 16,
+		},
 	}
 }
 
@@ -422,6 +450,9 @@ func (c Config) Validate() error {
 		return err
 	}
 	if err := c.Agent.Accounts.validate(); err != nil {
+		return err
+	}
+	if err := c.Recovery.validate(); err != nil {
 		return err
 	}
 	if err := c.Agent.Shares.validate(); err != nil {
@@ -549,6 +580,7 @@ var (
 	smbValue = regexp.MustCompile(`^[A-Za-z0-9 ._-]{1,64}$`)
 	// serviceName: nama unit systemd (tidak diawali "-", agar tidak dibaca
 	// sebagai opsi).
+	configKey   = regexp.MustCompile(`^[a-z_]{1,32}$`)
 	serviceName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9@._-]{0,63}\.service$`)
 )
 
@@ -568,6 +600,28 @@ func (s Shares) validate() error {
 		return errors.New("agent.shares.exports_file harus berakhiran .exports")
 	case !serviceName.MatchString(s.NFSService):
 		return errors.New("agent.shares.nfs_service harus nama unit systemd (misalnya nfs-server.service)")
+	}
+	return nil
+}
+
+func (r Recovery) validate() error {
+	for _, p := range []string{r.Systemctl, r.InterfacesFile, r.NetDir} {
+		if !filepath.IsAbs(p) {
+			return fmt.Errorf("recovery: %q harus path absolut", p)
+		}
+	}
+	for _, u := range []string{r.APIService, r.NetworkService} {
+		if !serviceName.MatchString(u) {
+			return fmt.Errorf("recovery: %q bukan nama unit systemd", u)
+		}
+	}
+	for _, k := range r.ResetAPIKeys {
+		if !configKey.MatchString(k) {
+			return fmt.Errorf("recovery.reset_api_keys: %q tidak valid", k)
+		}
+	}
+	if r.TempPasswordLength < 12 || r.TempPasswordLength > 64 {
+		return errors.New("recovery.temp_password_length harus 12-64")
 	}
 	return nil
 }
