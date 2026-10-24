@@ -132,13 +132,17 @@ func (c *Client) CallFile(ctx context.Context, op string, params any, out any) (
 	buf := make([]byte, 64*1024)
 	oob := make([]byte, unix.CmsgSpace(4))
 	for !bytes.Contains(line, []byte{'\n'}) {
-		n, oobn, _, _, err := uc.ReadMsgUnix(buf, oob)
-		if oobn > 0 && file == nil {
+		n, oobn, flags, _, err := uc.ReadMsgUnix(buf, oob)
+		if flags&unix.MSG_CTRUNC != 0 && err == nil {
+			err = errors.New("pesan file dari sapod terpotong")
+		}
+		if oobn > 0 {
 			if msgs, perr := unix.ParseSocketControlMessage(oob[:oobn]); perr == nil {
 				for _, m := range msgs {
 					if fds, ferr := unix.ParseUnixRights(&m); ferr == nil {
 						for i, fd := range fds {
 							if i == 0 && file == nil {
+								// Hanya satu file per jawaban; sisanya ditutup.
 								file = os.NewFile(uintptr(fd), "sapod")
 							} else {
 								unix.Close(fd)

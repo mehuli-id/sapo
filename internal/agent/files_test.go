@@ -13,12 +13,12 @@ import (
 
 func TestCleanFilePath(t *testing.T) {
 	for _, ok := range []string{"", "a", "foto/2026/a b.jpg", ".tersembunyi", "dokumen/ñ.txt"} {
-		if _, err := cleanFilePath(ok); err != nil {
+		if _, err := CleanFilePath(ok); err != nil {
 			t.Errorf("%q harus diterima: %v", ok, err)
 		}
 	}
 	for _, bad := range []string{"/a", "a/", "a//b", ".", "..", "a/../b", ".zfs", "a/.zfs/snapshot", "a\x00b", "a\nb", ".sapo-upload-0123456789abcdef", string(make([]byte, 256))} {
-		if _, err := cleanFilePath(bad); err == nil {
+		if _, err := CleanFilePath(bad); err == nil {
 			t.Errorf("%q harus ditolak", bad)
 		}
 	}
@@ -92,5 +92,25 @@ func TestFilesOps(t *testing.T) {
 	}
 	if err := call(f.RenameOp(), proto.FilesRenameParams{FilesTarget: target, To: "../x"}); !errors.As(err, &oe) {
 		t.Fatalf("rename keluar: %v", err)
+	}
+}
+
+func TestFilesLimitsConcurrency(t *testing.T) {
+	f, _, _ := testFiles(t)
+	for i := 0; i < maxFileOps; i++ {
+		f.slots <- struct{}{}
+	}
+	raw, _ := json.Marshal(proto.FilesTarget{User: "budi", Pool: "tank", Share: "keluarga"})
+	var oe *OpError
+	if _, err := f.ListOp()(context.Background(), raw); !errors.As(err, &oe) || oe.Code != proto.ErrBusy {
+		t.Fatalf("slot penuh: %v", err)
+	}
+	for i := 0; i < maxFileOps; i++ {
+		<-f.slots
+	}
+	f.deleting["budi"] = true
+	raw, _ = json.Marshal(proto.FilesTarget{User: "budi", Pool: "tank", Share: "keluarga", Path: "a"})
+	if _, err := f.DeleteOp()(context.Background(), raw); !errors.As(err, &oe) || oe.Code != proto.ErrBusy {
+		t.Fatalf("hapus kedua: %v", err)
 	}
 }

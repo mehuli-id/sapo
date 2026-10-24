@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/mehuli-id/sapo/internal/proto"
 	"golang.org/x/sys/unix"
@@ -106,7 +107,7 @@ func fsDo(req fsRequest) (any, error) {
 		parent, name := splitParent(req.Path)
 		return nil, withDir(root, parent, func(pfd int) error { return removeAt(pfd, name, 0) })
 	case "open_read":
-		fd, err := openBeneath(root, req.Path, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
+		fd, err := openBeneath(root, req.Path, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_NOCTTY, 0)
 		if err != nil {
 			return nil, err
 		}
@@ -129,6 +130,7 @@ func fsDo(req fsRequest) (any, error) {
 	case "open_write":
 		var out proto.FilesOpenResult
 		err := withDir(root, req.Path, func(pfd int) error {
+			cleanStaleUploads(pfd)
 			b := make([]byte, 8)
 			if _, err := rand.Read(b); err != nil {
 				return err
@@ -153,10 +155,19 @@ func fsDo(req fsRequest) (any, error) {
 			}
 			flags := uint(unix.RENAME_NOREPLACE)
 			if req.Overwrite {
-				// Hanya menimpa file biasa, bukan direktori atau symlink.
+				// Hanya menimpa file biasa, bukan direktori atau symlink, dan
+				// hanya file yang boleh ditulis pengguna (bukan sekadar
+				// direktorinya yang boleh ditulis).
 				var st unix.Stat_t
-				if err := unix.Fstatat(pfd, name, &st, unix.AT_SYMLINK_NOFOLLOW); err == nil && st.Mode&unix.S_IFMT != unix.S_IFREG {
-					return &OpError{Code: errFileExists, Message: "nama sudah dipakai folder atau symlink"}
+				if err := unix.Fstatat(pfd, name, &st, unix.AT_SYMLINK_NOFOLLOW); err == nil {
+					if st.Mode&unix.S_IFMT != unix.S_IFREG {
+						return &OpError{Code: errFileExists, Message: "nama sudah dipakai folder atau symlink"}
+					}
+					// Sudah pasti file biasa (bukan symlink); tanpa flag agar
+					// kernel memeriksa ACL sungguhan.
+					if err := unix.Faccessat(pfd, name, unix.W_OK, 0); err != nil {
+						return err
+					}
 				}
 				flags = 0
 			}
@@ -192,21 +203,31 @@ func fsList(root int, path string, max int) (proto.FilesListResult, error) {
 		names, out.Truncated = names[:max], true
 	}
 	slices.Sort(names)
+	// Jawaban harus muat di satu pesan sapod (1 MiB).
+	budget := proto.MaxMessageBytes * 3 / 4
 	for _, n := range names {
 		if strings.HasPrefix(n, uploadTempPrefix) || (path == "" && n == ".zfs") {
 			continue
+		}
+		if budget -= len(n) + 96; budget < 0 {
+			out.Truncated = true
+			break
 		}
 		var st unix.Stat_t
 		if err := unix.Fstatat(fd, n, &st, unix.AT_SYMLINK_NOFOLLOW); err != nil {
 			continue
 		}
 		e := proto.FileEntry{Name: n, Size: st.Size, ModTime: time.Unix(st.Mtim.Unix()).UTC()}
-		switch st.Mode & unix.S_IFMT {
-		case unix.S_IFDIR:
+		switch {
+		case !utf8.ValidString(n):
+			// Nama yang bukan UTF-8 (misalnya dari klien lama) tidak bisa
+			// disebut ulang dengan tepat dari panel: tampil saja.
+			e.Type = "other"
+		case st.Mode&unix.S_IFMT == unix.S_IFDIR:
 			e.Type, e.Size = "dir", 0
-		case unix.S_IFREG:
+		case st.Mode&unix.S_IFMT == unix.S_IFREG:
 			e.Type = "file"
-		case unix.S_IFLNK:
+		case st.Mode&unix.S_IFMT == unix.S_IFLNK:
 			e.Type = "symlink"
 		default:
 			e.Type = "other"
@@ -223,33 +244,62 @@ func removeAt(dirfd int, name string, depth int) error {
 	if depth > 256 {
 		return &OpError{Code: proto.ErrInvalidParams, Message: "folder terlalu dalam"}
 	}
-	err := unix.Unlinkat(dirfd, name, 0)
-	if err == nil || !(errors.Is(err, unix.EISDIR) || errors.Is(err, unix.EPERM)) {
-		return err
+	unlinkErr := unix.Unlinkat(dirfd, name, 0)
+	if unlinkErr == nil || !(errors.Is(unlinkErr, unix.EISDIR) || errors.Is(unlinkErr, unix.EPERM)) {
+		return unlinkErr
 	}
 	fd, err := openBeneath(dirfd, name, unix.O_RDONLY|unix.O_DIRECTORY, 0)
+	if errors.Is(err, unix.ENOTDIR) {
+		return unlinkErr // file yang tidak boleh dihapus (EPERM)
+	}
 	if err != nil {
 		return err
 	}
 	dir := os.NewFile(uintptr(fd), "dir")
+	defer dir.Close()
+	// Dibaca ulang dari awal sampai kosong: menghapus sambil membaca bisa
+	// membuat sebagian nama terlewat.
 	for {
+		if _, err := unix.Seek(fd, 0, 0); err != nil {
+			return err
+		}
 		names, rerr := dir.Readdirnames(512)
+		if len(names) == 0 {
+			if rerr != nil && !errors.Is(rerr, io.EOF) {
+				return rerr
+			}
+			break
+		}
 		for _, n := range names {
 			if err := removeAt(fd, n, depth+1); err != nil && !errors.Is(err, unix.ENOENT) {
-				dir.Close()
 				return err
 			}
 		}
-		if rerr != nil {
-			break
-		}
 	}
-	dir.Close()
 	return unix.Unlinkat(dirfd, name, unix.AT_REMOVEDIR)
 }
 
 // fdSocket: unix socket ke sapod (fd 3 dari ExtraFiles; diganti di test).
 var fdSocket = 3
+
+// cleanStaleUploads membuang file unggahan sementara yang tertinggal lebih
+// dari sehari (sapo-api atau sapod berhenti di tengah unggahan).
+func cleanStaleUploads(dirfd int) {
+	fd, err := unix.Dup(dirfd)
+	if err != nil {
+		return
+	}
+	dir := os.NewFile(uintptr(fd), "dir")
+	defer dir.Close()
+	names, _ := dir.Readdirnames(-1)
+	cutoff := time.Now().Add(-24 * time.Hour).Unix()
+	for _, n := range names {
+		var st unix.Stat_t
+		if validTemp(n) && unix.Fstatat(dirfd, n, &st, unix.AT_SYMLINK_NOFOLLOW) == nil && st.Mode&unix.S_IFMT == unix.S_IFREG && st.Mtim.Sec < cutoff {
+			_ = unix.Unlinkat(dirfd, n, 0)
+		}
+	}
+}
 
 // sendFD mengirim fd ke sapod.
 func sendFD(fd int) error {
@@ -269,9 +319,12 @@ func socketPair() (*os.File, *os.File, error) {
 func recvFile(sock *os.File) (*os.File, error) {
 	buf := make([]byte, 1)
 	oob := make([]byte, unix.CmsgSpace(4))
-	_, oobn, _, _, err := unix.Recvmsg(int(sock.Fd()), buf, oob, unix.MSG_DONTWAIT|unix.MSG_CMSG_CLOEXEC)
+	_, oobn, flags, _, err := unix.Recvmsg(int(sock.Fd()), buf, oob, unix.MSG_DONTWAIT|unix.MSG_CMSG_CLOEXEC)
 	if err != nil {
 		return nil, err
+	}
+	if flags&unix.MSG_CTRUNC != 0 {
+		return nil, errors.New("pesan file dari proses pembantu terpotong")
 	}
 	msgs, err := unix.ParseSocketControlMessage(oob[:oobn])
 	if err != nil || len(msgs) == 0 {

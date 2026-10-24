@@ -113,6 +113,24 @@ func TestFSHelperOps(t *testing.T) {
 	}
 	_, _ = do(fsRequest{Op: "abort", Path: "x", Temp: res.(proto.FilesOpenResult).Temp})
 
+	// Menimpa file yang hanya boleh dibaca ditolak walau direktorinya
+	// boleh ditulis.
+	_ = os.WriteFile(filepath.Join(root, "baca.txt"), []byte("lama"), 0o444)
+	res, _ = do(fsRequest{Op: "open_write", Path: ""})
+	f, _ = recvFile(pr)
+	f.Close()
+	if _, err := do(fsRequest{Op: "commit", Path: "baca.txt", Temp: res.(proto.FilesOpenResult).Temp, Overwrite: true}); code(err) != errFilePermission {
+		t.Fatalf("menimpa file baca-saja: %v", err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(root, "baca.txt")); string(b) != "lama" {
+		t.Fatal("file baca-saja tertimpa")
+	}
+	// Nama yang bukan UTF-8 tampil sebagai "other" (tidak bisa dipakai).
+	_ = os.WriteFile(filepath.Join(root, "lama-\xe9.txt"), nil, 0o644)
+	if res, _ := do(fsRequest{Op: "list", Path: "", Max: 100}); !strings.Contains(mustJSON(res), `"type":"other"`) {
+		t.Fatalf("nama bukan UTF-8: %s", mustJSON(res))
+	}
+
 	// Unduh.
 	res, err = do(fsRequest{Op: "open_read", Path: "dokumen/b.jpg"})
 	if err != nil || res.(proto.FilesOpenResult).Size != 8 {

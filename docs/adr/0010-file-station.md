@@ -15,9 +15,10 @@ Pengguna ingin membuka, mengunggah, dan mengatur file di shared folder dari brow
 - **Path dibuka dengan `openat2`** relatif terhadap akar folder dengan `RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS | RESOLVE_NO_XDEV`: tidak bisa keluar dari folder, tidak mengikuti symlink (termasuk nama terakhir), tidak masuk sistem berkas lain (snapshot `.zfs`, mount lain). Panel dan `sapod` juga menolak `..`, `.zfs`, karakter kendali, dan nama lebih dari 255 byte. Symlink dan file khusus tampil tetapi tidak bisa dibuka.
 - **Isi file mengalir lewat file descriptor**: pembantu membuka file (sebagai pengguna), mengirim descriptor-nya ke `sapod` lewat socketpair, lalu `sapod` meneruskannya ke `sapo-api` (SCM_RIGHTS di socket `sapod`). `sapo-api` membaca atau menulis langsung; data tidak melewati pesan JSON (batas 1 MiB).
   - Unduhan selalu `Content-Disposition: attachment`, `application/octet-stream`, dan `Content-Security-Policy: sandbox`: file HTML atau SVG pengguna tidak pernah berjalan di origin panel.
-  - Unggahan ditulis ke file sementara `.sapo-upload-<acak>` (tidak tampil, tidak bisa dipakai sebagai nama), lalu diberi nama akhir dengan `renameat2(RENAME_NOREPLACE)`. Menimpa file yang ada hanya bila pengguna setuju, dan tidak pernah menimpa folder atau symlink. Unggahan yang terputus dibuang.
-- **Operasi**: daftar isi (paling banyak `agent.files.max_entries`), unduh, unggah, buat folder, ganti nama/pindah (tidak menimpa), dan hapus (folder beserta isinya, tanpa mengikuti symlink, dengan konfirmasi di panel).
-- **Semua pengguna** bisa memakai File Station; panel hanya menampilkan folder dengan izin efektif pengguna itu (aturan ACL POSIX: izin langsung dulu, lalu grup), dan menolak perubahan di folder baca-saja sebelum sampai ke `sapod`. Unggah, buat folder, ganti nama, dan hapus tercatat di log audit.
+  - Unggahan ditulis ke file sementara `.sapo-upload-<acak>` (tidak tampil, tidak bisa dipakai sebagai nama), lalu diberi nama akhir dengan `renameat2(RENAME_NOREPLACE)`. Menimpa file yang ada hanya bila pengguna setuju, hanya file yang boleh ditulis pengguna (bukan sekadar direktorinya), dan tidak pernah folder atau symlink. Unggahan yang terputus dibuang; file sementara yang tertinggal lebih dari sehari dibersihkan saat unggahan berikutnya di folder itu.
+- **Operasi**: daftar isi (paling banyak `agent.files.max_entries`, dan tetap muat di satu pesan `sapod`; nama yang bukan UTF-8 tampil tetapi tidak bisa dipakai), unduh, unggah, buat folder, ganti nama/pindah (tidak menimpa), dan hapus (folder beserta isinya, tanpa mengikuti symlink, dengan konfirmasi di panel).
+- **Semua pengguna** bisa memakai File Station; panel hanya menampilkan folder dengan izin efektif pengguna itu (aturan ACL POSIX: izin langsung dulu, lalu grup), dan menolak perubahan di folder baca-saja sebelum sampai ke `sapod`. Unggah (termasuk yang gagal), buat folder, ganti nama, dan hapus tercatat di log audit; hasil hapus dicatat setelah `sapod` selesai.
+- **Batas**: paling banyak 8 operasi file bersamaan dan satu penghapusan per pengguna, agar File Station tidak menghabiskan koneksi `sapod` untuk operasi lain. Selama data mengalir, batas waktu HTTP diperpanjang (unggahan dan unduhan besar).
 
 ## Alasan
 
@@ -29,4 +30,5 @@ Pengguna ingin membuka, mengunggah, dan mengatur file di shared folder dari brow
 - `sapo-api` dipercaya menyebut pengguna yang login. `sapo-api` yang disusupi bisa membuka file pengguna Sapo mana pun (tidak pernah file root atau akun sistem). Itu setara dengan kemampuannya mengganti password pengguna (ADR 0003, 0006).
 - Satu proses per operasi: cukup untuk penggunaan di panel, bukan untuk ribuan operasi per detik.
 - Menghapus folder yang sangat besar dibatasi waktu (`delete_timeout_seconds`); bila lewat, sebagian sudah terhapus.
+- Unggahan yang sangat lambat tetap ditunggu selama data terus datang (tanpa kecepatan minimum).
 - Unduh folder sebagai zip, pratinjau, dan pencarian belum ada.

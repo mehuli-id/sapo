@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mehuli-id/sapo/internal/agent"
 	"github.com/mehuli-id/sapo/internal/proto"
 )
 
@@ -112,20 +113,18 @@ func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
 
 // keepAlive memperpanjang batas waktu baca/tulis koneksi HTTP selama data
 // masih mengalir (unduhan dan unggahan besar melebihi batas server).
+// Baca dan tulis diperpanjang bersama: HTTP/2 juga memutus aliran bila
+// batas tulis habis selama badan permintaan masih dibaca.
 type keepAlive struct {
 	rc   *http.ResponseController
-	read bool
 	last time.Time
 }
 
 func (k *keepAlive) touch() {
 	if now := time.Now(); now.Sub(k.last) > 5*time.Second {
 		k.last = now
-		if k.read {
-			_ = k.rc.SetReadDeadline(now.Add(60 * time.Second))
-		} else {
-			_ = k.rc.SetWriteDeadline(now.Add(60 * time.Second))
-		}
+		_ = k.rc.SetReadDeadline(now.Add(60 * time.Second))
+		_ = k.rc.SetWriteDeadline(now.Add(60 * time.Second))
 	}
 }
 
@@ -183,6 +182,11 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dir := strings.Trim(q.Get("path"), "/")
+	// Nama diperiksa sebelum isi file dikirim, bukan setelahnya.
+	if _, err := agent.CleanFilePath(strings.TrimPrefix(dir+"/"+name, "/")); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_params", err.Error())
+		return
+	}
 	t, ok := s.fileTarget(w, r, q.Get("share"), dir, true)
 	if !ok {
 		return
@@ -196,12 +200,14 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) {
 	final := t
 	final.Path = strings.TrimPrefix(dir+"/"+name, "/")
 	commit := proto.FilesCommitParams{FilesTarget: final, Temp: info.Temp, Overwrite: q.Get("overwrite") == "1"}
-	k := &keepAlive{rc: http.NewResponseController(w), read: true}
+	k := &keepAlive{rc: http.NewResponseController(w)}
+	k.touch()
 	n, copyErr := io.Copy(f, deadlineReader{r: r.Body, k: k})
 	closeErr := f.Close()
 	ctx := context.WithoutCancel(r.Context())
 	if copyErr != nil || closeErr != nil {
 		_ = s.agent.Call(ctx, proto.OpFilesAbort, commit, nil)
+		s.record(r, t.User, "files.upload", false, map[string]string{"share": t.Share, "path": auditText(final.Path), "bytes": strconv.FormatInt(n, 10), "error": "upload_failed"})
 		writeError(w, http.StatusBadRequest, "upload_failed", "unggahan terputus")
 		return
 	}
@@ -236,7 +242,19 @@ func (s *Server) handleFileChange(op, action string) http.HandlerFunc {
 			params = proto.FilesRenameParams{FilesTarget: t, To: strings.Trim(req.To, "/")}
 			detail["to"] = auditText(req.To)
 		}
-		err := s.agent.Call(r.Context(), op, params, nil)
+		ctx := r.Context()
+		if op == proto.OpFilesDelete {
+			// Menghapus folder besar bisa lama: tunggu selama sapod mencoba,
+			// agar hasil yang dicatat dan dilaporkan sesuai kenyataan.
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), time.Duration(s.cfg.Agent.Files.DeleteTimeoutSeconds+20)*time.Second)
+			defer cancel()
+			_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(time.Duration(s.cfg.Agent.Files.DeleteTimeoutSeconds+40) * time.Second))
+		}
+		err := s.agent.Call(ctx, op, params, nil)
+		if err != nil {
+			detail["error"] = errorCode(err)
+		}
 		s.record(r, t.User, action, err == nil, detail)
 		if err != nil {
 			s.fileError(w, op, err)
