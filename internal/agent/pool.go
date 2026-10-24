@@ -62,25 +62,29 @@ func NewPools(st *Storage, t PoolTools) *Pools {
 	return p
 }
 
-// memberDevices mengembalikan nama perangkat kernel (disk atau partisi)
-// anggota pool yang sedang aktif. ok=false bila tidak bisa dipastikan.
-func (p *Pools) memberDevices(ctx context.Context) (map[string]bool, bool) {
+// memberDevices mengembalikan anggota pool yang sedang aktif: nama perangkat
+// kernel (disk atau partisi, dari semua kelas: data, log, special, dedup,
+// cache, spare) dan nama pool. ok=false bila tidak bisa dipastikan.
+func (p *Pools) memberDevices(ctx context.Context) (poolMembers, bool) {
 	status, err := p.readStatus(ctx)
 	if err != nil {
-		return nil, false
+		return poolMembers{}, false
 	}
-	out := map[string]bool{}
+	out := poolMembers{Devices: map[string]bool{}, Pools: map[string]bool{}}
 	var walk func(vs map[string]zpoolVdev)
 	walk = func(vs map[string]zpoolVdev) {
 		for _, v := range vs {
 			if v.Path != "" {
-				out[devName(v.Path)] = true
+				out.Devices[devName(v.Path)] = true
 			}
 			walk(v.Vdevs)
 		}
 	}
-	for _, pool := range status {
-		walk(pool.Vdevs)
+	for name, pool := range status {
+		out.Pools[name] = true
+		for _, tree := range pool.trees() {
+			walk(tree)
+		}
 	}
 	return out, true
 }
@@ -222,6 +226,32 @@ type zpoolStatusPool struct {
 	ErrorCount flexUint             `json:"error_count"`
 	ScanStats  *zpoolScanStats      `json:"scan_stats"`
 	Vdevs      map[string]zpoolVdev `json:"vdevs"`
+	// Kelas perangkat lain ada di luar pohon vdevs (tanpa --json-flat-vdevs).
+	Dedup   map[string]zpoolVdev `json:"dedup"`
+	Special map[string]zpoolVdev `json:"special"`
+	Logs    map[string]zpoolVdev `json:"logs"`
+	L2Cache map[string]zpoolVdev `json:"l2cache"`
+	Spares  map[string]zpoolVdev `json:"spares"`
+}
+
+// classes mengembalikan kelas perangkat di luar pohon utama, berurutan.
+func (s zpoolStatusPool) classes() []struct {
+	name  string
+	vdevs map[string]zpoolVdev
+} {
+	return []struct {
+		name  string
+		vdevs map[string]zpoolVdev
+	}{{"special", s.Special}, {"dedup", s.Dedup}, {"logs", s.Logs}, {"cache", s.L2Cache}, {"spares", s.Spares}}
+}
+
+// trees mengembalikan semua pohon perangkat pool: utama dan kelas lain.
+func (s zpoolStatusPool) trees() []map[string]zpoolVdev {
+	out := []map[string]zpoolVdev{s.Vdevs}
+	for _, c := range s.classes() {
+		out = append(out, c.vdevs)
+	}
+	return out
 }
 
 type zpoolVdev struct {
@@ -280,6 +310,13 @@ func mergeStatus(pool *proto.Pool, st zpoolStatusPool, owner map[string]string, 
 	}
 	pool.Vdevs = convertVdevs(root.Vdevs, owner, budget)
 	pool.Layout = layoutOf(pool.Vdevs)
+	// Perangkat log, special, cache, dan spare tampil sebagai grup sendiri,
+	// agar yang rusak terlihat dan bisa diganti.
+	for _, c := range st.classes() {
+		if len(c.vdevs) > 0 {
+			pool.Vdevs = append(pool.Vdevs, proto.Vdev{Name: c.name, Type: c.name, Children: convertVdevs(c.vdevs, owner, budget)})
+		}
+	}
 }
 
 func convertVdevs(in map[string]zpoolVdev, owner map[string]string, budget *int) []proto.Vdev {
@@ -750,7 +787,8 @@ func (p *Pools) logWarn(msg string, args ...any) {
 	}
 }
 
-var guidPattern = regexp.MustCompile(`^[0-9]{1,20}$`)
+// GUID ZFS tidak pernah 0 (0 = GUID tidak terbaca).
+var guidPattern = regexp.MustCompile(`^[1-9][0-9]{0,19}$`)
 
 // PoolReplaceOp mengembalikan handler storage.pool_replace: disk lama
 // (ditunjuk dengan GUID ZFS, juga bila disknya hilang) diganti disk baru,
@@ -780,7 +818,11 @@ func (p *Pools) PoolReplaceOp() Handler {
 		if !ok {
 			return nil, &OpError{Code: proto.ErrNotFound, Message: "pool " + req.Name + " tidak ditemukan"}
 		}
-		if !hasLeaf(pool.Vdevs, req.OldGUID) {
+		found := false
+		for _, tree := range pool.trees() {
+			found = found || hasLeaf(tree, req.OldGUID)
+		}
+		if !found {
 			return nil, &OpError{Code: proto.ErrNotFound, Message: "disk yang diganti tidak ada di pool " + req.Name}
 		}
 		disks, err := p.st.listDisks(checkCtx)
@@ -799,23 +841,30 @@ func (p *Pools) PoolReplaceOp() Handler {
 			return nil, err
 		}
 
+		// ashift tidak ditulis: zpool memakai properti ashift pool itu sendiri,
+		// yang bisa berbeda dari konfigurasi (misalnya pool dari luar panel).
 		flags := []string{"replace"}
 		if force {
 			flags = append(flags, "-f")
 		}
-		flags = append(flags, "-o", "ashift="+strconv.Itoa(p.t.Ashift))
 		p.logInfo("mengganti disk pool", "pool", req.Name, "lama", req.OldGUID, "baru", dev, "paksa", force)
 		runCtx, cancelRun := context.WithTimeout(context.WithoutCancel(ctx), p.t.CreateTimeout)
 		defer cancelRun()
-		res, err := p.st.run(runCtx, p.t.Zpool, flags, req.Name, req.OldGUID, dev)
+		res, runErr := p.st.run(runCtx, p.t.Zpool, flags, req.Name, req.OldGUID, dev)
 		p.st.forgetDisks()
-		if err != nil {
-			return nil, err
-		}
-		if res.ExitCode != 0 {
-			msg := clipTo(strings.TrimSpace(string(res.Stderr)), maxErrorText)
-			p.logWarn("disk gagal diganti", "pool", req.Name, "kode", res.ExitCode, "stderr", msg)
-			return nil, &OpError{Code: "pool_replace_failed", Message: msg}
+		if runErr != nil || res.ExitCode != 0 {
+			// Hasil nyata: disk baru sudah masuk pohon pool = penggantian berjalan.
+			afterCtx, cancelAfter := context.WithTimeout(context.WithoutCancel(ctx), p.st.t.Timeout)
+			defer cancelAfter()
+			if m, ok := p.memberDevices(afterCtx); !ok || !m.Devices[devName(dev)] {
+				msg := clipTo(strings.TrimSpace(string(res.Stderr)), maxErrorText)
+				if runErr != nil {
+					msg = runErr.Error()
+				}
+				p.logWarn("disk gagal diganti", "pool", req.Name, "kode", res.ExitCode, "pesan", msg)
+				return nil, &OpError{Code: "pool_replace_failed", Message: msg}
+			}
+			p.logWarn("zpool replace melapor gagal, tetapi disk baru sudah masuk pool", "pool", req.Name, "err", runErr)
 		}
 		p.logInfo("disk diganti, resilver dimulai", "pool", req.Name)
 		return map[string]bool{"ok": true}, nil
@@ -865,10 +914,20 @@ func (p *Pools) PoolDestroyOp() Handler {
 		p.logInfo("menghapus pool", "pool", req.Name)
 		runCtx, cancelRun := context.WithTimeout(context.WithoutCancel(ctx), p.t.CreateTimeout)
 		defer cancelRun()
-		res, err := p.st.run(runCtx, p.t.Zpool, []string{"destroy"}, req.Name)
+		res, runErr := p.st.run(runCtx, p.t.Zpool, []string{"destroy"}, req.Name)
 		p.st.forgetDisks()
-		if err != nil {
-			return nil, err
+		if runErr != nil || res.ExitCode != 0 {
+			// Hasil nyata: pool sudah tidak ada = terhapus.
+			afterCtx, cancelAfter := context.WithTimeout(context.WithoutCancel(ctx), p.st.t.Timeout)
+			defer cancelAfter()
+			if names, err := p.poolNames(afterCtx); err == nil && !names[req.Name] {
+				p.logWarn("zpool destroy melapor gagal, tetapi pool sudah tidak ada", "pool", req.Name, "err", runErr)
+				p.logInfo("pool dihapus", "pool", req.Name)
+				return map[string]bool{"ok": true}, nil
+			}
+		}
+		if runErr != nil {
+			return nil, runErr
 		}
 		if res.ExitCode != 0 {
 			msg := clipTo(strings.TrimSpace(string(res.Stderr)), maxErrorText)

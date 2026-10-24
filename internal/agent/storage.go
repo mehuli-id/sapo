@@ -42,7 +42,7 @@ type Storage struct {
 
 	// poolMembers mengembalikan perangkat anggota pool ZFS yang aktif (diisi
 	// Pools); ok=false bila tidak terbaca.
-	poolMembers func(ctx context.Context) (map[string]bool, bool)
+	poolMembers func(ctx context.Context) (poolMembers, bool)
 
 	mu      sync.Mutex
 	smart   map[string]*smartEntry
@@ -272,6 +272,7 @@ func parseLsblk(data []byte, ignore []string) ([]proto.Disk, error) {
 			Removable:  bool(b.RM),
 			FSType:     str(b.FSType),
 			PTType:     str(b.PTType),
+			Label:      str(b.Label),
 			Partitions: []proto.Partition{},
 		}
 		if d.Path == "" {
@@ -364,19 +365,27 @@ func diskUsage(b lsblkDevice) (usage, reason string, reasons []string) {
 	return proto.DiskFree, "", reasons
 }
 
-// releaseInactiveZFS: label ZFS di disk yang bukan anggota pool aktif
-// (members: nama perangkat kernel anggota pool yang sedang aktif) tidak
+// poolMembers adalah anggota pool ZFS yang sedang aktif.
+type poolMembers struct {
+	Devices map[string]bool // nama perangkat kernel (disk atau partisi)
+	Pools   map[string]bool // nama pool
+}
+
+// releaseInactiveZFS: label ZFS di disk yang bukan anggota pool aktif tidak
 // membuat disk "dipakai"; isinya data yang penghapusannya harus
-// dikonfirmasi. Alasan pakai lain tetap berlaku.
-func releaseInactiveZFS(d *proto.Disk, members map[string]bool) {
+// dikonfirmasi. Alasan pakai lain tetap berlaku. Gagal-tertutup: disk tetap
+// dipakai bila salah satu perangkatnya tercatat sebagai anggota, atau bila
+// label ZFS-nya (nama pool) sama dengan nama pool yang aktif, misalnya
+// anggota yang sedang terputus dan tercatat dengan path lain.
+func releaseInactiveZFS(d *proto.Disk, members poolMembers) {
 	if !slices.Contains(d.Reasons, proto.UsagePool) {
 		return
 	}
-	if members[d.Name] {
+	if members.Devices[d.Name] || (d.FSType == "zfs_member" && members.Pools[d.Label]) {
 		return
 	}
 	for _, p := range d.Partitions {
-		if members[p.Name] {
+		if members.Devices[p.Name] || (p.FSType == "zfs_member" && members.Pools[p.Label]) {
 			return
 		}
 	}
