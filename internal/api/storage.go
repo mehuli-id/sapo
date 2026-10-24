@@ -85,6 +85,16 @@ func (s *Server) handlePoolCreate(w http.ResponseWriter, r *http.Request) {
 // gagal, operasi dibatalkan), operasi tidak ikut batal bila browser menutup
 // koneksi, lalu hasil nyatanya dicatat.
 // after (boleh nil) dijalankan setelah operasi berhasil, sebelum jawaban.
+// poolCall menjalankan operasi pool setelah sinkronisasi akun dan shared
+// folder yang sedang berjalan selesai. Keduanya memakai kunci pool yang sama
+// di sapod, jadi tanpa ini operasi pool ditolak "busy" hanya karena
+// sinkronisasi latar belakang (misalnya saat sapo-api baru menyala).
+func (s *Server) poolCall(ctx context.Context, op string, params, out any) error {
+	s.syncMu.Lock()
+	defer s.syncMu.Unlock()
+	return s.agent.Call(ctx, op, params, out)
+}
+
 func (s *Server) destructive(w http.ResponseWriter, r *http.Request, user auth.User, action string, detail map[string]string, op string, params any, after func()) {
 	// Nilai dari pengguna (nama pool, nama disk) disimpan sebagai data JSON,
 	// jadi tidak bisa memalsukan baris lain.
@@ -101,7 +111,7 @@ func (s *Server) destructive(w http.ResponseWriter, r *http.Request, user auth.U
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), timeout)
 	defer cancel()
 	var out json.RawMessage
-	err := s.agent.Call(ctx, op, params, &out)
+	err := s.poolCall(ctx, op, params, &out)
 	if err != nil {
 		detail["error"] = errorCode(err)
 	}
@@ -174,7 +184,7 @@ func (s *Server) handlePoolScrub(w http.ResponseWriter, r *http.Request) {
 	}
 	sess, _ := r.Context().Value(sessionKey).(auth.Session)
 	params := proto.PoolScrubParams{Name: r.PathValue("name"), Action: req.Action}
-	err := s.agent.Call(r.Context(), proto.OpStoragePoolScrub, params, nil)
+	err := s.poolCall(r.Context(), proto.OpStoragePoolScrub, params, nil)
 	detail := map[string]string{"pool": params.Name, "action": params.Action}
 	if err != nil {
 		detail["error"] = errorCode(err)

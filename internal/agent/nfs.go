@@ -221,8 +221,13 @@ func (s *Shares) exportfs(ctx context.Context) error {
 }
 
 // nfsService menyalakan (start) atau mematikan (stop) server NFS, sekaligus
-// menyalakan atau tidak saat boot.
+// menyalakan atau tidak saat boot. Hanya dijalankan bila keadaannya berubah
+// (sejak sapod menyala), agar shares.apply tetap cepat.
 func (s *Shares) nfsService(ctx context.Context, action string) error {
+	if s.nfsState == action {
+		return nil
+	}
+	s.nfsState = ""
 	flags := []string{"enable", "--now"}
 	if action == "stop" {
 		flags = []string{"disable", "--now"}
@@ -234,6 +239,7 @@ func (s *Shares) nfsService(ctx context.Context, action string) error {
 	if res.ExitCode != 0 {
 		return fmt.Errorf("systemctl %s %s: %s", action, s.t.NFSService, firstLine(res.Stderr))
 	}
+	s.nfsState = action
 	return nil
 }
 
