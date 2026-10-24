@@ -61,6 +61,9 @@ type Shares struct {
 
 	jobsMu sync.Mutex
 	jobs   map[string]*aclJob
+	// nfsState: keadaan server NFS terakhir yang diterapkan ("start",
+	// "stop", atau "" = belum diketahui). Dilindungi kunci pool.
+	nfsState string
 }
 
 // aclJob adalah penerapan izin ke isi satu folder yang berjalan di latar
