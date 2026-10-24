@@ -29,7 +29,7 @@ KillMode=process
 # Yang ditulis menu hanya pengaturan jaringan dan konfigurasi Sapo; data
 # panel ditulis proses pembantu sebagai pemilik direktorinya.
 ProtectSystem=strict
-ReadWritePaths=/etc/network -/etc/sapo -/var/lib/sapo
+ReadWritePaths=/etc/network -/etc/sapo -/var/lib/sapo -/var/lib/sapod
 ProtectHome=yes
 PrivateTmp=yes
 ProtectKernelModules=yes

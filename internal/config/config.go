@@ -48,6 +48,10 @@ type Recovery struct {
 	// fisik (dari NetDir) memakai DHCP. File lama disimpan sebagai cadangan.
 	InterfacesFile string `yaml:"interfaces_file"`
 	NetDir         string `yaml:"net_dir"`
+	// Reset jaringan juga menghentikan sapod sebentar dan membuang perubahan
+	// jaringan yang menunggu konfirmasi (agar tidak menimpa hasil reset).
+	AgentService       string `yaml:"agent_service"`
+	NetworkPendingFile string `yaml:"network_pending_file"`
 	// ResetAPIKeys: kunci api.* di file konfigurasi admin yang dihapus saat
 	// reset jaringan (kembali ke nilai bawaan paket).
 	ResetAPIKeys []string `yaml:"reset_api_keys"`
@@ -100,6 +104,7 @@ type Network struct {
 	InterfacesFile string `yaml:"interfaces_file"`
 	ResolvConf     string `yaml:"resolv_conf"`
 	HostsFile      string `yaml:"hosts_file"`
+	HostnameFile   string `yaml:"hostname_file"`
 	NetDir         string `yaml:"net_dir"`
 	StateFile      string `yaml:"state_file"`
 	PendingFile    string `yaml:"pending_file"`
@@ -112,7 +117,7 @@ type Network struct {
 }
 
 func (n Network) validate() error {
-	for _, p := range []string{n.IP, n.Systemctl, n.Hostnamectl, n.InterfacesFile, n.ResolvConf, n.HostsFile, n.NetDir, n.StateFile, n.PendingFile} {
+	for _, p := range []string{n.IP, n.Systemctl, n.Hostnamectl, n.InterfacesFile, n.ResolvConf, n.HostsFile, n.HostnameFile, n.NetDir, n.StateFile, n.PendingFile} {
 		if !filepath.IsAbs(p) {
 			return fmt.Errorf("agent.network: %q harus path absolut", p)
 		}
@@ -297,7 +302,7 @@ func Default() Config {
 			},
 			Network: Network{
 				IP: "/usr/sbin/ip", Systemctl: "/usr/bin/systemctl", Hostnamectl: "/usr/bin/hostnamectl",
-				InterfacesFile: "/etc/network/interfaces", ResolvConf: "/etc/resolv.conf", HostsFile: "/etc/hosts",
+				InterfacesFile: "/etc/network/interfaces", ResolvConf: "/etc/resolv.conf", HostsFile: "/etc/hosts", HostnameFile: "/etc/hostname",
 				NetDir: "/sys/class/net", StateFile: "/var/lib/sapod/network.json", PendingFile: "/var/lib/sapod/network-pending.json",
 				NetworkService: "networking.service", AvahiService: "avahi-daemon.service",
 				ApplyDelaySeconds: 3, ConfirmSeconds: 120,
@@ -379,6 +384,7 @@ func Default() Config {
 		UI: UI{DefaultMode: "desktop"},
 		Recovery: Recovery{
 			Systemctl: "/usr/bin/systemctl", APIService: "sapo-api.service", NetworkService: "networking.service",
+			AgentService: "sapod.service", NetworkPendingFile: "/var/lib/sapod/network-pending.json",
 			InterfacesFile: "/etc/network/interfaces", NetDir: "/sys/class/net",
 			ResetAPIKeys:       []string{"listen", "allowed_networks", "denied_networks", "hostnames", "tls"},
 			TempPasswordLength: 16,
@@ -653,12 +659,12 @@ func (s Shares) validate() error {
 }
 
 func (r Recovery) validate() error {
-	for _, p := range []string{r.Systemctl, r.InterfacesFile, r.NetDir} {
+	for _, p := range []string{r.Systemctl, r.InterfacesFile, r.NetDir, r.NetworkPendingFile} {
 		if !filepath.IsAbs(p) {
 			return fmt.Errorf("recovery: %q harus path absolut", p)
 		}
 	}
-	for _, u := range []string{r.APIService, r.NetworkService} {
+	for _, u := range []string{r.APIService, r.NetworkService, r.AgentService} {
 		if !serviceName.MatchString(u) {
 			return fmt.Errorf("recovery: %q bukan nama unit systemd", u)
 		}

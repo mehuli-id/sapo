@@ -384,7 +384,10 @@ net="$(api GET /api/v1/network)"
 json "c=v['config']; i=[x for x in c['interfaces'] if x['name']=='$iface'][0]
 assert v['hostname']=='sapo-uji' and c['hostname']=='sapo-uji' and i['mode']=='static' and i['address']=='10.0.2.15/24', v
 assert '10.0.2.3' in v['dns'] and not v.get('pending'), v" <<<"$net" || fail "pengaturan jaringan tersimpan: $net"
-echo "jaringan: alamat tetap $iface 10.0.2.15/24 dan nama host sapo-uji dikonfirmasi"
+sleep 6 # nama host dibaca ulang sapo-api setiap beberapa detik
+res="$(curl -ksS -H 'Host: sapo-uji.local' -w ' %{http_code}' --max-time 5 "$HTTPS/api/v1/health")"
+[[ "$res" == *' 200' ]] || fail "panel harus bisa dibuka lewat nama host baru (sapo-uji.local): $res"
+echo "jaringan: alamat tetap $iface 10.0.2.15/24 dan nama host sapo-uji dikonfirmasi (sapo-uji.local diterima)"
 
 net_apply 10.0.2.99/24 >/dev/null
 sleep 15

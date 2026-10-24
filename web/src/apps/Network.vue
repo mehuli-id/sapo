@@ -47,14 +47,15 @@ async function load() {
 }
 onMounted(load)
 
-const allStatic = computed(() => form.interfaces.length > 0 && form.interfaces.every((i) => i.mode === "static"))
+// DNS diisi sendiri bila tidak ada antarmuka DHCP.
+const allStatic = computed(() => form.interfaces.some((i) => i.mode === "static") && form.interfaces.every((i) => i.mode !== "dhcp"))
 const link = (name: string) => status.value?.interfaces.find((l) => l.name === name)
 
 function config(): NetworkConfig {
   return {
     hostname: form.hostname.trim().toLowerCase(),
     interfaces: form.interfaces.map((i) =>
-      i.mode === "static" ? { name: i.name, mode: "static", address: i.address?.trim(), gateway: i.gateway?.trim() || undefined } : { name: i.name, mode: "dhcp" },
+      i.mode === "static" ? { name: i.name, mode: "static", address: i.address?.trim(), gateway: i.gateway?.trim() || undefined } : { name: i.name, mode: i.mode },
     ),
     dns: allStatic.value ? form.dns.split(/[\s,]+/).filter(Boolean) : [],
   }
@@ -106,6 +107,17 @@ function startConfirming() {
     if (!c) return
     remaining.value = Math.max(0, Math.round((Date.parse(c.confirm_by) - Date.now()) / 1000))
     if (remaining.value === 0) {
+      // Batas waktu sebenarnya dihitung sapod sejak pengaturan selesai
+      // dipasang; bila masih menunggu, batas yang baru dipakai.
+      try {
+        const s = await api.networkStatus()
+        if (s.pending && Date.parse(s.pending.confirm_by) > Date.now()) {
+          c.confirm_by = s.pending.confirm_by
+          return
+        }
+      } catch {
+        // tidak terjangkau: anggap sudah dikembalikan
+      }
       clearInterval(timer)
       change.value = null
       error.value = t("network.reverted")
@@ -199,7 +211,7 @@ async function cancel() {
           <p class="text-xs text-muted-foreground">{{ t("network.current") }}: {{ link(i.name)?.addresses.join(", ") || "—" }}</p>
           <div class="flex gap-2" role="radiogroup">
             <Button
-              v-for="m in ['dhcp', 'static'] as const"
+              v-for="m in ['dhcp', 'static', 'off'] as const"
               :key="m"
               type="button"
               size="sm"

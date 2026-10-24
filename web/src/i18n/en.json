@@ -551,7 +551,8 @@
     "current": "Current address",
     "mode": {
       "dhcp": "Automatic (DHCP)",
-      "static": "Fixed address"
+      "static": "Fixed address",
+      "off": "Not used"
     },
     "address": "IP address / prefix",
     "gateway": "Gateway (router)",

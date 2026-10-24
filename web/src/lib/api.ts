@@ -258,7 +258,8 @@ export interface ShareNFS {
 
 export interface NetworkInterfaceConfig {
   name: string
-  mode: "dhcp" | "static"
+  // off: tidak dipakai (misalnya port tanpa kabel)
+  mode: "dhcp" | "static" | "off"
   // IPv4 dengan prefiks, misalnya 192.168.1.10/24
   address?: string
   gateway?: string
