@@ -208,7 +208,9 @@ echo "SMB: izin baru berlaku untuk file yang sudah ada"
 
 # Pengguna yang dinonaktifkan tidak bisa masuk lewat SMB, dan sesinya yang
 # sedang terbuka ikut diputus.
-smbclient //127.0.0.1/keluarga -p "$SMB_PORT" -m SMB3 -U "ani%$UPASS" -c "ls; !sleep 15; ls" > "$WORK/sesi.txt" 2>&1 &
+# Perintah dikirim lewat stdin dengan jeda, agar sesi tetap terbuka saat ani
+# dinonaktifkan.
+{ echo ls; sleep 15; echo ls; } | smbclient //127.0.0.1/keluarga -p "$SMB_PORT" -m SMB3 -U "ani%$UPASS" > "$WORK/sesi.txt" 2>&1 &
 sesi=$!
 sleep 5
 res="$(api POST /api/v1/users/ani "{\"disabled\":true}")"
