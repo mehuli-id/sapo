@@ -319,7 +319,8 @@
     "share_delete_failed": "Folder gagal dihapus: {message}",
     "conflict": "Bentrok dengan keadaan sistem.",
     "system_sync_failed": "Perubahan tersimpan, tetapi belum bisa diterapkan ke sistem. Coba lagi sebentar.",
-    "password_invalid": "Password tidak boleh berisi karakter kendali (misalnya tab atau baris baru)."
+    "password_invalid": "Password tidak boleh berisi karakter kendali (misalnya tab atau baris baru).",
+    "nfs_invalid": "Pengaturan NFS tidak valid: pilih pengguna dan isi alamat IP atau jaringan klien (misalnya 192.168.1.0/24). Nama komputer dan jaringan yang terlalu luas tidak diterima."
   },
   "pool": {
     "title": "Pool penyimpanan",
@@ -500,7 +501,7 @@
     "nobodyShort": "belum ada"
   },
   "shares": {
-    "intro": "Folder bersama di pool, dibuka dari Windows, Mac, Linux, atau HP lewat SMB.",
+    "intro": "Folder bersama di pool, dibuka dari Windows, Mac, Linux, atau HP lewat SMB, dan dari Linux atau Mac lewat NFS.",
     "add": "Buat folder",
     "none": "Belum ada shared folder.",
     "noPool": "Buat pool dulu di Storage Manager.",
@@ -519,6 +520,20 @@
     "delete": "Hapus folder dan isinya",
     "aclPending": "Izin sedang diterapkan ke isi folder. Untuk folder besar ini bisa lama; sampai selesai, sebagian file mungkin belum bisa dibuka pengguna baru.",
     "aclError": "Izin belum berhasil diterapkan ke semua isi folder: {message}",
-    "syncPending": "Perubahan pengguna atau izin belum diterapkan ke sistem; Sapo terus mencoba ulang. Sementara itu folder ditutup bila akun tidak bisa dipastikan."
+    "syncPending": "Perubahan pengguna atau izin belum diterapkan ke sistem; Sapo terus mencoba ulang. Sementara itu folder ditutup bila akun tidak bisa dipastikan.",
+    "nfs": "NFS",
+    "nfsEdit": "Atur NFS",
+    "nfsOff": "NFS mati.",
+    "nfsOn": "NFS: {clients}, sebagai {user} ({access})",
+    "nfsNoAccess": "NFS belum aktif: {user} tidak punya izin di folder ini atau akunnya nonaktif. Beri izin dulu, atau pilih pengguna lain.",
+    "nfsError": "Ekspor NFS gagal: {message}",
+    "nfsHelp": "NFS dipakai komputer Linux dan Mac. NFS tidak meminta password, jadi akses dibatasi menurut alamat komputer, dan semua yang dilakukan dari komputer itu berlaku sebagai satu pengguna Sapo: izinnya sama dengan izin pengguna itu di folder ini.",
+    "nfsEnable": "Bagikan juga lewat NFS",
+    "nfsUser": "Berlaku sebagai pengguna",
+    "nfsClients": "Alamat komputer yang boleh",
+    "nfsClientsHelp": "Satu per baris: alamat IP (192.168.1.20) atau jaringan (192.168.1.0/24). Siapa pun di alamat itu bisa membuka folder tanpa password.",
+    "nfsPickUser": "Pilih pengguna",
+    "nfsSaved": "Pengaturan NFS {name} disimpan.",
+    "nfsMount": "Pasang dari Linux atau Mac (NFS versi 4):"
   }
 }

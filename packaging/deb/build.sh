@@ -73,6 +73,8 @@ install -D -m 0644 "$HERE/sysusers.conf" "$PKG$SYSUSERS_DIR/sapo.conf"
 # sapo-api (operasi console.panel_address, agent.console.issue_file).
 install -d -m 0755 "$PKG/etc/issue.d"
 ln -s "$CONSOLE_ISSUE" "$PKG/etc/issue.d/sapo.issue"
+# Server NFS hanya NFS versi 4 (ADR 0007).
+install -D -m 0644 "$HERE/nfs.conf" "$PKG/etc/nfs.conf.d/sapo.conf"
 
 # 5. Dokumentasi & lisensi.
 install -D -m 0644 "$HERE/copyright" "$PKG/usr/share/doc/sapo/copyright"
@@ -116,7 +118,7 @@ sed -e "s|@VERSION@|$VERSION|" -e "s|@ARCH@|$ARCH|" -e "s|@DEPENDS@|$DEPENDS|" \
     -e "s|@INSTALLED_SIZE@|$INSTALLED_SIZE|" -e "s|@MAINTAINER_EMAIL@|$MAINTAINER_EMAIL|" \
     "$HERE/control.in" > "$PKG/DEBIAN/control"
 for s in postinst prerm postrm; do install -m 0755 "$HERE/$s" "$PKG/DEBIAN/$s"; done
-echo "$SOURCES" > "$PKG/DEBIAN/conffiles"
+printf '%s\n' "$SOURCES" /etc/nfs.conf.d/sapo.conf > "$PKG/DEBIAN/conffiles"
 (cd "$PKG" && find . -path ./DEBIAN -prune -o -type f -print0 | sort -z | xargs -0 md5sum | sed 's| \./| |') > "$PKG/DEBIAN/md5sums"
 
 find "$PKG" -exec touch --no-dereference --date="@$SOURCE_DATE_EPOCH" {} +

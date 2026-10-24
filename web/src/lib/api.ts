@@ -243,6 +243,17 @@ export interface SharedFolder {
   // Izin sedang diterapkan ke isi folder / gagal diterapkan.
   acl_pending?: boolean
   acl_error?: string
+  // Ekspor NFS: semua akses dari klien berlaku sebagai pengguna nfs.user.
+  nfs?: ShareNFS
+  // Izin efektif pengguna NFS (kosong = tidak diekspor) dan galat ekspor.
+  nfs_access?: ShareAccess
+  nfs_error?: string
+}
+
+export interface ShareNFS {
+  user: string
+  // Alamat IP atau jaringan, misalnya 192.168.1.0/24.
+  clients: string[]
 }
 
 export type Localized = Record<string, string>
@@ -409,7 +420,10 @@ export const api = {
   syncStatus: () => get<{ ok: boolean; error: string; retrying: boolean }>("/api/v1/system/sync"),
   createShare: (req: { name: string; pool: string; description: string; permissions: Record<string, ShareAccess>; admin_password: string }) =>
     post<SharedFolder>("/api/v1/shares", req),
-  updateShare: (name: string, req: { description?: string; permissions?: Record<string, ShareAccess>; admin_password?: string }) =>
+  updateShare: (
+    name: string,
+    req: { description?: string; permissions?: Record<string, ShareAccess>; nfs?: ShareNFS | null; admin_password?: string },
+  ) =>
     post<{ ok: boolean; warning?: string }>(`/api/v1/shares/${encodeURIComponent(name)}`, req),
   deleteShare: (name: string, req: { confirm_name: string; admin_password: string }) =>
     post<{ ok: boolean }>(`/api/v1/shares/${encodeURIComponent(name)}/delete`, req),

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Shared folder (hanya admin): daftar folder, cara membukanya dari komputer
-// lain, izin per pengguna dan grup, dan hapus folder. Folder baru dibuat
-// lewat wizard (wizards/share-create.yaml).
+// lain, izin per pengguna dan grup, ekspor NFS, dan hapus folder. Folder
+// baru dibuat lewat wizard (wizards/share-create.yaml).
 import { onMounted, reactive, ref } from "vue"
 import { useI18n } from "vue-i18n"
 import { CircleCheck, Copy, FolderLock, LoaderCircle, Plus, RefreshCw, Trash2, TriangleAlert } from "@lucide/vue"
@@ -48,6 +48,11 @@ onMounted(load)
 const size = (b: number) => formatBytes(b, locale.value, 1000)
 const host = window.location.hostname
 const paths = (s: SharedFolder) => [`\\\\${host}\\${s.name}`, `smb://${host}/${s.name}`]
+// macOS butuh resvport (port istimewa) karena server NFS menolak port biasa.
+const nfsMounts = (s: SharedFolder) =>
+  s.path ? [`sudo mount -t nfs -o vers=4 ${host}:${s.path} /mnt/${s.name}`, `sudo mount -t nfs -o vers=4,resvport ${host}:${s.path} ~/${s.name}`] : []
+const nfsSummary = (s: SharedFolder) =>
+  t("shares.nfsOn", { clients: s.nfs!.clients.join(", "), user: s.nfs!.user, access: t(`permissions.${s.nfs_access}`) })
 async function copy(text: string) {
   try {
     await navigator.clipboard.writeText(text)
@@ -88,17 +93,31 @@ function wizardDone(values: Record<string, string>) {
 
 // --- Ubah izin dan hapus ---
 const open = ref("")
-const mode = ref<"" | "edit" | "delete">("")
+const mode = ref<"" | "edit" | "nfs" | "delete">("")
 const busy = ref(false)
 const error = ref("")
-const form = reactive({ permissions: {} as Record<string, ShareAccess>, adminPassword: "", confirmName: "" })
+const form = reactive({
+  permissions: {} as Record<string, ShareAccess>,
+  adminPassword: "",
+  confirmName: "",
+  nfsOn: false,
+  nfsUser: "",
+  nfsClients: "",
+})
 
-function start(s: SharedFolder, m: "edit" | "delete") {
+function start(s: SharedFolder, m: "edit" | "nfs" | "delete") {
   open.value = s.name
   mode.value = m
   error.value = ""
   notice.value = ""
-  Object.assign(form, { permissions: { ...s.permissions }, adminPassword: "", confirmName: "" })
+  Object.assign(form, {
+    permissions: { ...s.permissions },
+    adminPassword: "",
+    confirmName: "",
+    nfsOn: !!s.nfs,
+    nfsUser: s.nfs?.user ?? "",
+    nfsClients: (s.nfs?.clients ?? []).join("\n"),
+  })
 }
 async function run(fn: () => Promise<unknown>, done: string) {
   busy.value = true
@@ -116,6 +135,15 @@ async function run(fn: () => Promise<unknown>, done: string) {
 }
 const save = (s: SharedFolder) =>
   run(() => api.updateShare(s.name, { permissions: form.permissions, admin_password: form.adminPassword }), t("shares.saved", { name: s.name }))
+const saveNFS = (s: SharedFolder) =>
+  run(
+    () =>
+      api.updateShare(s.name, {
+        nfs: form.nfsOn ? { user: form.nfsUser, clients: form.nfsClients.split(/[\s,]+/).filter(Boolean) } : null,
+        admin_password: form.adminPassword,
+      }),
+    t("shares.nfsSaved", { name: s.name }),
+  )
 const remove = (s: SharedFolder) =>
   run(() => api.deleteShare(s.name, { confirm_name: form.confirmName, admin_password: form.adminPassword }), t("shares.deleted", { name: s.name }))
 </script>
@@ -165,10 +193,12 @@ const remove = (s: SharedFolder) =>
                 {{ t("shares.onPool", { pool: s.pool }) }} · {{ t("shares.used", { used: size(s.used_bytes), free: size(s.available_bytes) }) }}
               </p>
               <p class="text-xs">{{ t("shares.access") }}: {{ summary(s.permissions) }}</p>
+              <p class="text-xs">{{ s.nfs && s.nfs_access ? nfsSummary(s) : t("shares.nfsOff") }}</p>
             </div>
           </div>
           <div v-if="open !== s.name" class="flex gap-1">
             <Button size="sm" variant="outline" @click="start(s, 'edit')">{{ t("shares.editAccess") }}</Button>
+            <Button size="sm" variant="outline" @click="start(s, 'nfs')">{{ t("shares.nfs") }}</Button>
             <Button size="sm" variant="ghost" class="text-destructive hover:text-destructive" @click="start(s, 'delete')"><Trash2 /></Button>
           </div>
         </div>
@@ -187,6 +217,17 @@ const remove = (s: SharedFolder) =>
             <button type="button" class="text-muted-foreground hover:text-foreground" :aria-label="t('recovery.copy')" @click="copy(p)"><Copy class="size-3.5" /></button>
           </p>
         </div>
+        <p v-if="s.nfs && !s.nfs_access" class="flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-2.5 text-xs">
+          <TriangleAlert class="size-4 shrink-0 text-amber-600" />{{ t("shares.nfsNoAccess", { user: s.nfs.user }) }}
+        </p>
+        <p v-else-if="s.nfs_error" class="rounded-lg border border-destructive/40 bg-destructive/5 p-2.5 text-xs">{{ t("shares.nfsError", { message: s.nfs_error }) }}</p>
+        <div v-else-if="s.nfs && nfsMounts(s).length" class="space-y-1 rounded-lg bg-muted p-2.5 text-xs">
+          <p class="text-muted-foreground">{{ t("shares.nfsMount") }}</p>
+          <p v-for="p in nfsMounts(s)" :key="p" class="flex items-center justify-between gap-2">
+            <code class="font-mono break-all select-all">{{ p }}</code>
+            <button type="button" class="text-muted-foreground hover:text-foreground" :aria-label="t('recovery.copy')" @click="copy(p)"><Copy class="size-3.5" /></button>
+          </p>
+        </div>
 
         <form v-if="open === s.name && mode === 'edit'" class="space-y-3 border-t pt-3" @submit.prevent="save(s)">
           <PermissionEditor v-model="form.permissions" :users="users" :groups="groups" />
@@ -196,6 +237,47 @@ const remove = (s: SharedFolder) =>
           </div>
           <div class="flex gap-2">
             <Button type="submit" size="sm" :disabled="busy || !form.adminPassword"><LoaderCircle v-if="busy" class="animate-spin" />{{ t("users.save") }}</Button>
+            <Button type="button" size="sm" variant="ghost" @click="open = ''">{{ t("common.cancel") }}</Button>
+          </div>
+        </form>
+
+        <form v-else-if="open === s.name && mode === 'nfs'" class="space-y-3 border-t pt-3" @submit.prevent="saveNFS(s)">
+          <p class="text-sm text-muted-foreground">{{ t("shares.nfsHelp") }}</p>
+          <label class="flex items-center gap-2 text-sm">
+            <input v-model="form.nfsOn" type="checkbox" class="size-4 accent-primary" />{{ t("shares.nfsEnable") }}
+          </label>
+          <template v-if="form.nfsOn">
+            <div class="space-y-1.5">
+              <Label :for="`nu-${s.name}`">{{ t("shares.nfsUser") }}</Label>
+              <select
+                :id="`nu-${s.name}`"
+                v-model="form.nfsUser"
+                class="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+              >
+                <option value="" disabled>{{ t("shares.nfsPickUser") }}</option>
+                <option v-for="u in users" :key="u.username" :value="u.username">{{ u.username }}</option>
+              </select>
+            </div>
+            <div class="space-y-1.5">
+              <Label :for="`nc-${s.name}`">{{ t("shares.nfsClients") }}</Label>
+              <textarea
+                :id="`nc-${s.name}`"
+                v-model="form.nfsClients"
+                rows="3"
+                placeholder="192.168.1.0/24"
+                class="w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-sm shadow-xs focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+              />
+              <p class="text-xs text-muted-foreground">{{ t("shares.nfsClientsHelp") }}</p>
+            </div>
+          </template>
+          <div class="space-y-1.5">
+            <Label :for="`np-${s.name}`">{{ t("account.password") }}</Label>
+            <Input :id="`np-${s.name}`" v-model="form.adminPassword" type="password" autocomplete="current-password" />
+          </div>
+          <div class="flex gap-2">
+            <Button type="submit" size="sm" :disabled="busy || !form.adminPassword || (form.nfsOn && (!form.nfsUser || !form.nfsClients.trim()))">
+              <LoaderCircle v-if="busy" class="animate-spin" />{{ t("users.save") }}
+            </Button>
             <Button type="button" size="sm" variant="ghost" @click="open = ''">{{ t("common.cancel") }}</Button>
           </div>
         </form>

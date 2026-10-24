@@ -100,6 +100,12 @@ agent:
     server_string: Sapo NAS
     # SMB1 tidak pernah diaktifkan (tidak aman).
     min_protocol: SMB2
+    # NFS (v4 saja, lihat ADR 0007). File ekspor ditulis utuh oleh sapod;
+    # server NFS hanya berjalan selama ada folder yang diekspor.
+    exportfs: /usr/sbin/exportfs
+    systemctl: /usr/bin/systemctl
+    exports_file: /etc/exports.d/sapo.exports
+    nfs_service: nfs-server.service
 
 api:
   # Port panel. Siapa yang boleh membuka panel diatur oleh allowed_networks.

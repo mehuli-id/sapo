@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,6 +18,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/mehuli-id/sapo/internal/auth"
 	"github.com/mehuli-id/sapo/internal/proto"
 )
 
@@ -36,7 +38,24 @@ type Share struct {
 	Description string `json:"description,omitempty"`
 	// Permissions: "user:nama" / "group:nama" → "read" atau "write".
 	Permissions map[string]string `json:"permissions"`
-	CreatedAt   time.Time         `json:"created_at"`
+	// NFS: folder juga diekspor lewat NFS (nil = tidak).
+	NFS       *ShareNFS `json:"nfs,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// ShareNFS: klien di jaringan Clients boleh memasang folder lewat NFS, dan
+// semua aksesnya berlaku sebagai pengguna User (izin pengguna itu di
+// folder, termasuk lewat grup).
+type ShareNFS struct {
+	Clients []string `json:"clients"`
+	User    string   `json:"user"`
+}
+
+func (n *ShareNFS) clone() *ShareNFS {
+	if n == nil {
+		return nil
+	}
+	return &ShareNFS{Clients: slices.Clone(n.Clients), User: n.User}
 }
 
 type shareStore struct {
@@ -66,6 +85,7 @@ func (st *shareStore) list() []Share {
 	out := make([]Share, len(st.shares))
 	for i, sh := range st.shares {
 		sh.Permissions = cloneMap(sh.Permissions)
+		sh.NFS = sh.NFS.clone()
 		out[i] = sh
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
@@ -90,6 +110,7 @@ func (st *shareStore) mutate(fn func([]Share) ([]Share, error)) error {
 	cur := make([]Share, len(st.shares))
 	for i, sh := range st.shares {
 		sh.Permissions = cloneMap(sh.Permissions)
+		sh.NFS = sh.NFS.clone()
 		cur[i] = sh
 	}
 	next, err := fn(cur)
@@ -160,6 +181,10 @@ func (s *Server) syncSystem(ctx context.Context) (res proto.SharesApplyResult, e
 	defer cancel()
 
 	users, groups := s.store.Users(), s.store.Groups()
+	byName := map[string]auth.User{}
+	for _, u := range users {
+		byName[u.Username] = u
+	}
 	var acc proto.AccountsSyncParams
 	acc.Users, acc.Groups = []proto.AccountUser{}, []string{}
 	exists := map[string]bool{}
@@ -219,13 +244,58 @@ func (s *Server) syncSystem(ctx context.Context) (res proto.SharesApplyResult, e
 		}
 		slices.Sort(spec.Read)
 		slices.Sort(spec.Write)
+		if sh.NFS != nil && exists["user:"+sh.NFS.User] {
+			// Ekspor hanya untuk pengguna aktif yang punya akses ke folder.
+			if u, ok := byName[sh.NFS.User]; ok && !u.Disabled {
+				switch nfsAccess(sh, u, exists) {
+				case "write":
+					spec.NFS = &proto.NFSExport{Clients: slices.Clone(sh.NFS.Clients), User: u.Username}
+				case "read":
+					spec.NFS = &proto.NFSExport{Clients: slices.Clone(sh.NFS.Clients), User: u.Username, ReadOnly: true}
+				}
+			}
+		}
 		params.Shares = append(params.Shares, spec)
 	}
 	err = s.agent.Call(ctx, proto.OpSharesApply, params, &res)
+	if err == nil {
+		states := map[string]proto.ShareState{}
+		for _, st := range res.Shares {
+			states[st.Name] = st
+		}
+		s.syncStateMu.Lock()
+		s.syncShares = states
+		s.syncStateMu.Unlock()
+	}
 	if err == nil && failed {
 		err = errors.New("sebagian akun sistem gagal disinkronkan: " + failures)
 	}
 	return res, err
+}
+
+// nfsAccess: izin efektif pengguna u di folder ("write", "read", atau "")
+// dari izin langsung dan grup yang diikutinya. Hanya izin yang ikut
+// diterapkan (ada di exists) yang dihitung.
+func nfsAccess(sh Share, u auth.User, exists map[string]bool) string {
+	best := ""
+	consider := func(p string) {
+		if !exists[p] {
+			return
+		}
+		switch sh.Permissions[p] {
+		case "write":
+			best = "write"
+		case "read":
+			if best == "" {
+				best = "read"
+			}
+		}
+	}
+	consider("user:" + u.Username)
+	for _, g := range u.Groups {
+		consider("group:" + g)
+	}
+	return best
 }
 
 func clipText(s string, n int) string {
@@ -351,6 +421,71 @@ type shareView struct {
 	AvailableBytes uint64 `json:"available_bytes"`
 	ACLPending     bool   `json:"acl_pending,omitempty"`
 	ACLError       string `json:"acl_error,omitempty"`
+	// NFSAccess: izin efektif pengguna NFS di folder ("write", "read", atau
+	// kosong = tidak diekspor); NFSError: galat ekspor terakhir dari sapod.
+	NFSAccess string `json:"nfs_access,omitempty"`
+	NFSError  string `json:"nfs_error,omitempty"`
+}
+
+// shareStatus melengkapi tampilan folder dengan hasil sinkronisasi terakhir
+// dan izin efektif pengguna NFS.
+func (s *Server) shareStatus(v *shareView) {
+	s.syncStateMu.Lock()
+	st, ok := s.syncShares[v.Name]
+	s.syncStateMu.Unlock()
+	if ok {
+		v.Path, v.Error, v.NFSError = st.Path, st.Error, st.NFSError
+	}
+	if v.NFS == nil {
+		return
+	}
+	if u, ok := s.store.Get(v.NFS.User); ok && !u.Disabled {
+		all := map[string]bool{}
+		for p := range v.Permissions {
+			all[p] = true
+		}
+		v.NFSAccess = nfsAccess(v.Share, u, all)
+	}
+}
+
+// normalizeNFS memeriksa ekspor NFS dari panel: pengguna harus ada, klien
+// berupa alamat IP atau jaringan (nama host tidak diterima karena bisa
+// dipalsukan lewat DNS). Alamat tunggal menjadi /32 atau /128, jaringan
+// disamakan ke bentuk kanonis, dan duplikat dibuang. Jaringan yang terlalu
+// luas (lebih luas dari /8 untuk IPv4, /32 untuk IPv6) ditolak.
+func (s *Server) normalizeNFS(in *ShareNFS) (*ShareNFS, bool) {
+	if in == nil {
+		return nil, true
+	}
+	if _, ok := s.store.Get(in.User); !ok || len(in.Clients) == 0 || len(in.Clients) > proto.MaxNFSClients {
+		return nil, false
+	}
+	out := &ShareNFS{User: in.User, Clients: []string{}}
+	for _, c := range in.Clients {
+		c = strings.TrimSpace(c)
+		var p netip.Prefix
+		if a, err := netip.ParseAddr(c); err == nil {
+			p = netip.PrefixFrom(a, a.BitLen())
+		} else if p, err = netip.ParsePrefix(c); err != nil {
+			return nil, false
+		}
+		p = p.Masked()
+		a := p.Addr()
+		if a.Zone() != "" || a.Is4In6() || (a.Is4() && p.Bits() < 8) || (a.Is6() && p.Bits() < 32) {
+			return nil, false
+		}
+		if !slices.Contains(out.Clients, p.String()) {
+			out.Clients = append(out.Clients, p.String())
+		}
+	}
+	return out, true
+}
+
+func nfsText(n *ShareNFS) string {
+	if n == nil {
+		return "off"
+	}
+	return auditText(n.User + "@" + strings.Join(n.Clients, ","))
 }
 
 func (s *Server) handleShares(w http.ResponseWriter, r *http.Request) {
@@ -359,7 +494,9 @@ func (s *Server) handleShares(w http.ResponseWriter, r *http.Request) {
 	out := []shareView{}
 	for _, sh := range s.shares.list() {
 		u := usage[sh.Pool+"/"+sh.Name]
-		out = append(out, shareView{Share: sh, UsedBytes: u.UsedBytes, AvailableBytes: u.AvailableBytes, ACLPending: u.ACLPending, ACLError: u.ACLError})
+		v := shareView{Share: sh, UsedBytes: u.UsedBytes, AvailableBytes: u.AvailableBytes, ACLPending: u.ACLPending, ACLError: u.ACLError}
+		s.shareStatus(&v)
+		out = append(out, v)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -398,12 +535,14 @@ func (s *Server) handleShareCreate(w http.ResponseWriter, r *http.Request) {
 		Pool          string            `json:"pool"`
 		Description   string            `json:"description"`
 		Permissions   map[string]string `json:"permissions"`
+		NFS           *ShareNFS         `json:"nfs"`
 		AdminPassword string            `json:"admin_password"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
 	}
 	req.Name = strings.TrimSpace(strings.ToLower(req.Name))
+	nfs, nfsOK := s.normalizeNFS(req.NFS)
 	switch {
 	case !shareNameRe.MatchString(req.Name) || slices.Contains(reservedShareNames, req.Name):
 		writeErrorDetail(w, http.StatusBadRequest, "share_invalid", "nama shared folder tidak sesuai aturan", map[string]any{"field": "name"})
@@ -417,13 +556,16 @@ func (s *Server) handleShareCreate(w http.ResponseWriter, r *http.Request) {
 	case !s.validPermissions(req.Permissions):
 		writeErrorDetail(w, http.StatusBadRequest, "bad_request", "izin tidak valid", map[string]any{"field": "permissions"})
 		return
+	case !nfsOK:
+		writeErrorDetail(w, http.StatusBadRequest, "nfs_invalid", "ekspor NFS tidak valid", map[string]any{"field": "nfs"})
+		return
 	}
 	// Memberi akses ke data: butuh password admin.
 	admin, ok := s.reauthField(w, r, req.AdminPassword, "admin_password")
 	if !ok {
 		return
 	}
-	sh := Share{Name: req.Name, Pool: req.Pool, Description: req.Description, Permissions: cloneMap(req.Permissions), CreatedAt: s.now().UTC()}
+	sh := Share{Name: req.Name, Pool: req.Pool, Description: req.Description, Permissions: cloneMap(req.Permissions), NFS: nfs, CreatedAt: s.now().UTC()}
 	err := s.shares.mutate(func(cur []Share) ([]Share, error) {
 		if slices.ContainsFunc(cur, func(x Share) bool { return x.Name == sh.Name }) {
 			return nil, errShareExists
@@ -438,28 +580,37 @@ func (s *Server) handleShareCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "gagal menyimpan shared folder")
 		return
 	}
-	res, syncErr := s.syncSystem(r.Context())
+	_, syncErr := s.syncSystem(r.Context())
 	view := shareView{Share: sh}
-	for _, st := range res.Shares {
-		if st.Name == sh.Name {
-			view.Path, view.Error = st.Path, st.Error
-		}
-	}
+	s.shareStatus(&view)
 	if syncErr != nil {
 		view.Error = "system_sync_failed"
 	}
-	s.record(r, admin.Username, "shares.create", view.Error == "", map[string]string{"share": sh.Name, "pool": sh.Pool, "permissions": permText(sh.Permissions)})
+	s.record(r, admin.Username, "shares.create", view.Error == "", map[string]string{"share": sh.Name, "pool": sh.Pool, "permissions": permText(sh.Permissions), "nfs": nfsText(sh.NFS)})
 	writeJSON(w, http.StatusOK, view)
 }
 
 func (s *Server) handleShareUpdate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Description   *string            `json:"description"`
-		Permissions   *map[string]string `json:"permissions"`
-		AdminPassword string             `json:"admin_password"`
+		Description *string            `json:"description"`
+		Permissions *map[string]string `json:"permissions"`
+		// NFS: tidak ada = tidak berubah, null = ekspor NFS dimatikan.
+		NFS           json.RawMessage `json:"nfs"`
+		AdminPassword string          `json:"admin_password"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
+	}
+	nfsChanged := len(req.NFS) > 0
+	var nfs *ShareNFS
+	nfsOK := true
+	if nfsChanged && string(req.NFS) != "null" {
+		var in ShareNFS
+		if err := json.Unmarshal(req.NFS, &in); err != nil {
+			nfsOK = false
+		} else {
+			nfs, nfsOK = s.normalizeNFS(&in)
+		}
 	}
 	name := r.PathValue("name")
 	if _, ok := s.shares.get(name); !ok {
@@ -470,9 +621,14 @@ func (s *Server) handleShareUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "isi permintaan tidak valid")
 		return
 	}
+	if !nfsOK {
+		writeErrorDetail(w, http.StatusBadRequest, "nfs_invalid", "ekspor NFS tidak valid", map[string]any{"field": "nfs"})
+		return
+	}
 	sess, _, _ := s.currentSession(r)
 	actor := sess.Username
-	if req.Permissions != nil {
+	// Memberi akses (izin atau ekspor NFS): butuh password admin.
+	if req.Permissions != nil || nfsChanged {
 		admin, ok := s.reauthField(w, r, req.AdminPassword, "admin_password")
 		if !ok {
 			return
@@ -488,6 +644,9 @@ func (s *Server) handleShareUpdate(w http.ResponseWriter, r *http.Request) {
 				if req.Permissions != nil {
 					cur[i].Permissions = cloneMap(*req.Permissions)
 				}
+				if nfsChanged {
+					cur[i].NFS = nfs.clone()
+				}
 			}
 		}
 		return cur, nil
@@ -500,6 +659,9 @@ func (s *Server) handleShareUpdate(w http.ResponseWriter, r *http.Request) {
 	detail := map[string]string{"share": name}
 	if req.Permissions != nil {
 		detail["permissions"] = permText(*req.Permissions)
+	}
+	if nfsChanged {
+		detail["nfs"] = nfsText(nfs)
 	}
 	s.record(r, actor, "shares.update", warning == "", detail)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "warning": warning})
@@ -560,6 +722,10 @@ func (s *Server) purgePrincipal(p string) {
 	_ = s.shares.mutate(func(cur []Share) ([]Share, error) {
 		for i := range cur {
 			delete(cur[i].Permissions, p)
+			// Ekspor NFS pengguna yang dihapus ikut dimatikan.
+			if cur[i].NFS != nil && "user:"+cur[i].NFS.User == p {
+				cur[i].NFS = nil
+			}
 		}
 		return cur, nil
 	})

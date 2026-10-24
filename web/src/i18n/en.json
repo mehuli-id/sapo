@@ -319,7 +319,8 @@
     "share_delete_failed": "The folder couldn’t be deleted: {message}",
     "conflict": "Conflicts with the system state.",
     "system_sync_failed": "Saved, but not yet applied to the system. Try again shortly.",
-    "password_invalid": "The password can’t contain control characters (such as tab or newline)."
+    "password_invalid": "The password can’t contain control characters (such as tab or newline).",
+    "nfs_invalid": "Invalid NFS settings: pick a user and enter client IP addresses or networks (for example 192.168.1.0/24). Host names and overly wide networks aren’t accepted."
   },
   "pool": {
     "title": "Storage pools",
@@ -500,7 +501,7 @@
     "nobodyShort": "nobody"
   },
   "shares": {
-    "intro": "Shared folders on a pool, opened from Windows, Mac, Linux, or phones over SMB.",
+    "intro": "Shared folders on a pool, opened from Windows, Mac, Linux, or phones over SMB, and from Linux or Mac over NFS.",
     "add": "Create folder",
     "none": "No shared folders yet.",
     "noPool": "Create a pool first in Storage Manager.",
@@ -519,6 +520,20 @@
     "delete": "Delete folder and contents",
     "aclPending": "Applying permissions to the folder contents. This can take a while for large folders; until it finishes, new users may not open some files.",
     "aclError": "Permissions couldn’t be applied to all folder contents: {message}",
-    "syncPending": "User or permission changes aren’t applied to the system yet; Sapo keeps retrying. Meanwhile folders are closed if accounts can’t be verified."
+    "syncPending": "User or permission changes aren’t applied to the system yet; Sapo keeps retrying. Meanwhile folders are closed if accounts can’t be verified.",
+    "nfs": "NFS",
+    "nfsEdit": "NFS settings",
+    "nfsOff": "NFS is off.",
+    "nfsOn": "NFS: {clients}, as {user} ({access})",
+    "nfsNoAccess": "NFS isn’t active: {user} has no permission on this folder or the account is disabled. Grant access first, or pick another user.",
+    "nfsError": "NFS export failed: {message}",
+    "nfsHelp": "NFS is used by Linux and Mac computers. NFS doesn’t ask for a password, so access is limited by computer address, and everything done from that computer counts as one Sapo user: it has exactly that user’s permissions on this folder.",
+    "nfsEnable": "Also share over NFS",
+    "nfsUser": "Acts as user",
+    "nfsClients": "Allowed computer addresses",
+    "nfsClientsHelp": "One per line: an IP address (192.168.1.20) or a network (192.168.1.0/24). Anyone at those addresses can open the folder without a password.",
+    "nfsPickUser": "Pick a user",
+    "nfsSaved": "NFS settings for {name} saved.",
+    "nfsMount": "Mount from Linux or Mac (NFS version 4):"
   }
 }

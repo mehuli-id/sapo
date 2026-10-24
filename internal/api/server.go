@@ -85,7 +85,10 @@ type Server struct {
 	syncStateMu   sync.Mutex
 	syncLastErr   string
 	syncLastAt    time.Time
-	resyncDelay   time.Duration
+	// syncShares: hasil shares.apply terakhir per folder (galat folder dan
+	// ekspor NFS untuk panel).
+	syncShares  map[string]proto.ShareState
+	resyncDelay time.Duration
 	// smbLocks: satu perubahan password Samba per pengguna pada satu waktu.
 	smbMu    sync.Mutex
 	smbLocks map[string]*sync.Mutex

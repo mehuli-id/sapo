@@ -44,4 +44,4 @@ Pengguna dan grup Sapo (ADR 0003) baru ada di data panel. Untuk berbagi file lew
 - Untuk folder besar, penerapan izin ke isi folder bisa lama. Selama berjalan, pengguna yang baru diberi izin mungkin belum bisa membuka sebagian file lama; pencabutan izin langsung berlaku lewat Samba.
 - Nama akun dan grup yang biasa dibuat paket (docker, libvirt, postgres, …) dicadangkan agar paket yang dipasang kemudian tidak mengambil alih akun Sapo.
 - Pengguna yang belum pernah login sejak Samba terpasang belum punya password Samba sampai login sekali.
-- NFS menyusul dengan izin dari data yang sama.
+- NFS memakai izin dari data yang sama (ADR 0007).
