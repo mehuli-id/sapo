@@ -49,7 +49,7 @@ export interface Disk {
   partitions: Partition[]
   // Apakah disk boleh dipakai pool baru (dinilai sapod).
   usage: DiskUsage
-  usage_reason?: "mounted" | "swap" | "pool" | "raid" | "lvm" | "crypt"
+  usage_reason?: "mounted" | "swap" | "pool" | "raid" | "lvm" | "crypt" | "holder"
 }
 
 export type DiskUsage = "free" | "data" | "in_use"
@@ -117,6 +117,7 @@ export interface DiskRef {
   serial: string
   wwn: string
   size_bytes: number
+  usage: DiskUsage
   erase: boolean
 }
 
@@ -346,8 +347,10 @@ export const wizardActions: Record<string, (values: Record<string, string>, ctx:
     const disks = splitList(v.disks).map((name) => {
       const d = byName.get(name)
       if (!d) throw new ApiError(409, "disk_changed", name)
-      // Konfirmasi di wizard berlaku untuk semua disk yang dipilih.
-      return { name, serial: d.serial, wwn: d.wwn, size_bytes: d.size_bytes, erase: v.erase_ok === "yes" }
+      // Konfirmasi penghapusan hanya untuk disk yang tampil berisi data saat
+      // dipilih; disk lain dikirim tanpa izin hapus, sehingga sapod menolak
+      // bila ternyata kini berisi data.
+      return { name, serial: d.serial, wwn: d.wwn, size_bytes: d.size_bytes, usage: d.usage, erase: v.erase_ok === "yes" && d.usage === "data" }
     })
     return api.createPool({ name: v.name ?? "", layout: v.layout ?? "", disks, confirm_name: v.confirm_name ?? "", password: v.password ?? "" })
   },

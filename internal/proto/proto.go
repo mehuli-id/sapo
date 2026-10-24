@@ -160,6 +160,10 @@ const (
 	UsageRAID    = "raid" // anggota RAID mdadm
 	UsageLVM     = "lvm"
 	UsageCrypt   = "crypt" // volume terenkripsi yang sedang terbuka
+	// UsageHolder: dipegang perangkat lain yang tidak dikenali lebih rinci
+	// (device-mapper, multipath, bcache, …). Gagal-tertutup: lebih baik
+	// menolak disk daripada menghapus disk yang sedang dipakai.
+	UsageHolder = "holder"
 )
 
 // Partition adalah partisi atau perangkat turunan sebuah disk.
@@ -313,6 +317,9 @@ type DiskRef struct {
 	Serial    string `json:"serial"`
 	WWN       string `json:"wwn"`
 	SizeBytes uint64 `json:"size_bytes"`
+	// Usage: Disk.Usage yang dilihat pengguna. Bila berubah (misalnya disk
+	// kosong kini berisi data), sapod menolak dengan ErrDiskChanged.
+	Usage string `json:"usage"`
 	// Erase: pengguna sudah mengonfirmasi bahwa data di disk ini dihapus.
 	// Wajib untuk disk berstatus DiskHasData.
 	Erase bool `json:"erase"`

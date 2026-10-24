@@ -25,11 +25,15 @@ Membuat pool adalah operasi pertama `sapod` yang menghapus data. Kesalahan memil
   - nama pool: huruf kecil, maksimal 32 karakter, bukan nama cadangan ZFS, dan belum ada;
   - susunan dan jumlah disk sesuai konfigurasi;
   - setiap disk dibaca ulang dari `lsblk` (bukan cache), dan nomor seri, WWN, serta ukurannya harus sama dengan yang dilihat pengguna (`disk_changed`);
-  - disk yang dipakai ditolak (`disk_in_use`): sistem berkas terpasang (termasuk disk sistem), swap, anggota pool ZFS lain, RAID mdadm, LVM, atau volume terenkripsi yang terbuka;
+  - status pakai disk (`free`, `data`, `in_use`) juga harus sama dengan yang dilihat pengguna, jadi disk kosong yang tiba-tiba berisi data ditolak;
+  - disk yang dipakai ditolak (`disk_in_use`): sistem berkas terpasang (termasuk disk sistem), swap, anggota pool ZFS lain, RAID (mdadm, Intel, DDF), LVM, volume terenkripsi yang terbuka, atau turunan lain selain partisi (device-mapper, multipath, bcache). Penilaian ini gagal-tertutup;
+  - terakhir, setiap disk dan partisinya dibuka dengan `O_EXCL`. Kernel menolak (`EBUSY`) perangkat yang sedang dipegang, termasuk anggota btrfs multi-disk yang tidak terlihat terpasang di `lsblk`;
   - disk lepas-pasang ditolak kecuali `allow_removable` (`disk_removable`);
   - disk yang masih punya tabel partisi atau tanda tangan sistem berkas (`data`) hanya dipakai bila penghapusannya dikonfirmasi per disk (`erase`, `disk_has_data`).
-- **`zpool create -f`** hanya dipakai bila ada disk berisi data yang sudah dikonfirmasi, atau ukuran disk berbeda. Disk yang sedang dipakai sudah ditolak sebelumnya. Hanya satu operasi pool yang mengubah sistem berjalan pada satu waktu.
-- **Pool dibuat dengan nama perangkat `/dev/disk/by-id`** (WWN dulu), agar tidak bergantung pada urutan `sdX`.
+- **`zpool create -f`** hanya dipakai bila ada disk berisi data yang sudah dikonfirmasi, atau ukuran disk berbeda (zpool menolak ukuran berbeda tanpa `-f`). `-f` berlaku untuk seluruh pool, sehingga pemeriksaan `zpool` sendiri ikut mati. Karena itu `-f` baru dipakai setelah semua pemeriksaan `sapod` di atas, termasuk `O_EXCL`, lulus. Panel hanya mengirim izin hapus untuk disk yang tampil berisi data.
+- **Satu operasi pool pada satu waktu** (buat pool dan scrub). Operasi lain dijawab `busy`.
+- **Hasil `zpool create` dipastikan dari keadaan nyata.** Pembuatan pool punya batas waktu sendiri (`create_timeout_seconds`), tidak ikut dibatalkan bila panel menutup koneksi, lalu `sapod` memeriksa `zpool list`. Bila pool terbentuk, hasilnya berhasil walaupun `zpool` melapor gagal; bila tidak, `pool_create_failed` beserta pesannya.
+- **Pool dibuat dengan nama perangkat `/dev/disk/by-id`** (WWN dulu), agar tidak bergantung pada urutan `sdX`. Nama itu harus memuat WWN atau nomor seri yang sudah diperiksa. Disk bernomor seri yang tidak muncul di by-id ditolak; disk tanpa nomor seri dan WWN (disk virtual) memakai `/dev/<nama>`.
   - Pilihan bawaan: `ashift=12`, `compression=lz4`, `atime=off`, `xattr=sa`, `acltype=posixacl`.
   - Pool dipasang di `/srv/sapo/<nama>`.
   - Semua pilihan ini ada di `agent.storage.pools`.
@@ -59,5 +63,6 @@ Membuat pool adalah operasi pertama `sapod` yang menghapus data. Kesalahan memil
 ## Konsekuensi
 
 - ZFS butuh `zfs-dkms` (contrib, CDDL), jadi modul dikompilasi di mesin pengguna (ADR 0001). ISO dev memasangnya dan memeriksa modulnya saat build. Uji asap QEMU membuat pool mirror sungguhan di disk virtual lewat API, lalu menjalankan scrub.
-- Disk dari pool ZFS lain (misalnya NAS lama) belum bisa dipakai atau diimpor dari panel. Itu menunggu fitur impor pool.
+- Disk dari pool ZFS lain (misalnya NAS lama) atau RAID mdadm yang berhenti belum bisa dipakai atau diimpor dari panel. Itu menunggu fitur impor pool dan dukungan mdadm.
+- Disk tanpa nomor seri dan WWN (sebagian disk virtual dan adaptor USB murah) hanya dikenali dari nama, ukuran, dan status pakainya.
 - `storage.pools` bergantung pada format JSON OpenZFS 2.3 (Debian trixie). Bila formatnya berubah, daftar pool dan kapasitas tetap tampil dari `zpool list`.
