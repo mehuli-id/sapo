@@ -173,13 +173,15 @@ for _ in $(seq 1 60); do
   pools="$(api GET /api/v1/storage/pools)"
   json 'import sys
 p=v["pools"][0]; s=p.get("scan") or {}
-leaves=[c for t in p["vdevs"] for c in t.get("children",[])]
-sys.exit(0 if s.get("function")=="resilver" and s.get("state")=="finished" and len(leaves)==2 and p["health"]=="ONLINE" else 1)' <<<"$pools" && break
+kids=[c for t in p["vdevs"] for c in t.get("children",[])]
+# Disk lama baru dilepas (vdev replacing hilang) sesaat setelah resilver selesai.
+done=s.get("function")=="resilver" and s.get("state")=="finished" and p["health"]=="ONLINE"
+sys.exit(0 if done and len(kids)==2 and all(c["type"]=="disk" for c in kids) else 1)' <<<"$pools" && break
   sleep 2
 done
 disks_json="$(api GET /api/v1/storage/disks)"
 new_disk="$(json "print([x['name'] for x in v if x['serial']=='SAPOUJI3'][0])" <<<"$disks_json")"
-json "p=v['pools'][0]; leaves=sorted(c['disk'] for t in p['vdevs'] for c in t['children'])
+json "p=v['pools'][0]; leaves=sorted(c.get('disk','') for t in p['vdevs'] for c in t['children'])
 assert p['health']=='ONLINE' and p['scan']['function']=='resilver' and p['scan']['state']=='finished', p
 assert '$new_disk' in leaves and '$old_disk' not in leaves, leaves" <<<"$pools" || fail "resilver tidak selesai dengan benar: $pools"
 # Disk lama yang dilepas tidak lagi dianggap anggota pool.
