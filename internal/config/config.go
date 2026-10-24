@@ -72,6 +72,7 @@ type Agent struct {
 	Shares         Shares   `yaml:"shares"`
 	Network        Network  `yaml:"network"`
 	Stats          Stats    `yaml:"stats"`
+	Files          Files    `yaml:"files"`
 }
 
 // Accounts mengatur akun sistem untuk berbagi file. sapod hanya menyentuh
@@ -94,6 +95,22 @@ type Accounts struct {
 	IDMax        int    `yaml:"id_max"`
 	PrimaryGroup string `yaml:"primary_group"`
 	Shell        string `yaml:"shell"`
+}
+
+// Files mengatur File Station (ADR 0010).
+type Files struct {
+	// Isi direktori paling banyak yang ditampilkan.
+	MaxEntries int `yaml:"max_entries"`
+	// Batas waktu satu operasi dan penghapusan folder beserta isinya.
+	TimeoutSeconds       int `yaml:"timeout_seconds"`
+	DeleteTimeoutSeconds int `yaml:"delete_timeout_seconds"`
+}
+
+func (f Files) validate() error {
+	if f.MaxEntries < 100 || f.MaxEntries > 100000 || f.TimeoutSeconds < 5 || f.DeleteTimeoutSeconds < f.TimeoutSeconds || f.DeleteTimeoutSeconds > 280 {
+		return errors.New("agent.files: max_entries 100-100000, timeout_seconds minimal 5, delete_timeout_seconds antara timeout_seconds dan 280")
+	}
+	return nil
 }
 
 // Stats mengatur Resource Monitor (system.stats): sampel diambil setiap
@@ -317,6 +334,7 @@ func Default() Config {
 				NFSService: "nfs-server.service",
 			},
 			Stats: Stats{IntervalSeconds: 2, History: 300, IdleStopSeconds: 60},
+			Files: Files{MaxEntries: 5000, TimeoutSeconds: 30, DeleteTimeoutSeconds: 270},
 			Network: Network{
 				IP: "/usr/sbin/ip", Systemctl: "/usr/bin/systemctl", Hostnamectl: "/usr/bin/hostnamectl",
 				InterfacesFile: "/etc/network/interfaces", ResolvConf: "/etc/resolv.conf", HostsFile: "/etc/hosts", HostnameFile: "/etc/hostname",
@@ -518,6 +536,9 @@ func (c Config) Validate() error {
 		return err
 	}
 	if err := c.Agent.Accounts.validate(); err != nil {
+		return err
+	}
+	if err := c.Agent.Files.validate(); err != nil {
 		return err
 	}
 	if err := c.Agent.Stats.validate(); err != nil {

@@ -589,5 +589,46 @@
     "disk": "Disk · {name}",
     "read": "Read",
     "written": "Written"
+  },
+  "files": {
+    "intro": "Open the shared folders you’re allowed to use: download, upload, and organize files right in the browser.",
+    "noShares": "There are no shared folders you can open yet. Ask an administrator for access.",
+    "access": {
+      "read": "Read only",
+      "write": "Read & write"
+    },
+    "allShares": "All folders",
+    "location": "Location",
+    "newFolder": "New folder",
+    "upload": "Upload",
+    "folderName": "Folder name",
+    "create": "Create",
+    "name": "Name",
+    "size": "Size",
+    "modified": "Modified",
+    "download": "Download",
+    "rename": "Rename",
+    "delete": "Delete",
+    "readOnly": "You can only read this folder.",
+    "truncated": "This folder holds a great many files; only some are shown. Open it over SMB to see them all.",
+    "empty": "This folder is empty.",
+    "emptyDrop": "This folder is empty. Drag files here to upload.",
+    "special": "Symlink or special file: can’t be opened from File Station.",
+    "created": "Folder {name} created.",
+    "renamed": "Renamed to {name}.",
+    "deleted": "{name} deleted.",
+    "deleteFile": "Delete {name}? The file can’t be recovered.",
+    "deleteFolder": "Delete folder {name} and ALL its contents? This can’t be undone.",
+    "overwrite": "{name} already exists in this folder. Replace it with the new file?",
+    "errors": {
+      "permission_denied": "You don’t have permission to do that in this folder.",
+      "file_exists": "That name is already used in this folder.",
+      "not_empty": "The folder isn’t empty.",
+      "not_found": "File or folder not found (someone may have just changed it).",
+      "upload_failed": "The upload was interrupted. Try again.",
+      "timeout": "The operation took too long (very large folder). Part of it may already be deleted; try again.",
+      "invalid_params": "Invalid name or location.",
+      "network_error": "Lost the connection to the NAS."
+    }
   }
 }

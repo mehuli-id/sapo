@@ -589,5 +589,46 @@
     "disk": "Disk · {name}",
     "read": "Dibaca",
     "written": "Ditulis"
+  },
+  "files": {
+    "intro": "Buka shared folder yang boleh Anda pakai: unduh, unggah, dan atur file langsung dari browser.",
+    "noShares": "Belum ada shared folder yang boleh Anda buka. Minta administrator memberi izin.",
+    "access": {
+      "read": "Baca saja",
+      "write": "Baca & tulis"
+    },
+    "allShares": "Semua folder",
+    "location": "Lokasi",
+    "newFolder": "Folder baru",
+    "upload": "Unggah",
+    "folderName": "Nama folder",
+    "create": "Buat",
+    "name": "Nama",
+    "size": "Ukuran",
+    "modified": "Diubah",
+    "download": "Unduh",
+    "rename": "Ganti nama",
+    "delete": "Hapus",
+    "readOnly": "Folder ini hanya bisa dibaca oleh Anda.",
+    "truncated": "Folder ini berisi sangat banyak file; hanya sebagian yang ditampilkan. Buka lewat SMB untuk melihat semuanya.",
+    "empty": "Folder ini kosong.",
+    "emptyDrop": "Folder ini kosong. Seret file ke sini untuk mengunggah.",
+    "special": "Symlink atau file khusus: tidak bisa dibuka dari File Station.",
+    "created": "Folder {name} dibuat.",
+    "renamed": "Nama diganti menjadi {name}.",
+    "deleted": "{name} dihapus.",
+    "deleteFile": "Hapus {name}? File tidak bisa dikembalikan.",
+    "deleteFolder": "Hapus folder {name} beserta SEMUA isinya? Tidak bisa dikembalikan.",
+    "overwrite": "{name} sudah ada di folder ini. Timpa dengan file baru?",
+    "errors": {
+      "permission_denied": "Anda tidak punya izin untuk itu di folder ini.",
+      "file_exists": "Nama itu sudah dipakai di folder ini.",
+      "not_empty": "Folder tidak kosong.",
+      "not_found": "File atau folder tidak ditemukan (mungkin baru diubah orang lain).",
+      "upload_failed": "Unggahan terputus. Coba lagi.",
+      "timeout": "Operasi terlalu lama (folder sangat besar). Sebagian mungkin sudah dihapus; coba lagi.",
+      "invalid_params": "Nama atau lokasi tidak valid.",
+      "network_error": "Koneksi ke NAS terputus."
+    }
   }
 }

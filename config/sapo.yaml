@@ -107,6 +107,14 @@ agent:
     exports_file: /etc/exports.d/sapo.exports
     nfs_service: nfs-server.service
 
+  # File Station (ADR 0010): operasi file dijalankan sebagai akun pengguna.
+  # Penghapusan folder besar dibatasi delete_timeout_seconds (di bawah batas
+  # operasi sapod 300 detik).
+  files:
+    max_entries: 5000
+    timeout_seconds: 30
+    delete_timeout_seconds: 270
+
   # Resource Monitor: sampel CPU, memori, jaringan, dan disk diambil setiap
   # interval_seconds selama ada yang melihat (berhenti setelah
   # idle_stop_seconds), riwayat history sampel (300 × 2 detik = 10 menit).

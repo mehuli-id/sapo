@@ -253,3 +253,38 @@ func TestInternalErrorsNotLeaked(t *testing.T) {
 		t.Fatalf("nama operasi panjang harus dipotong: %d", len(err.Error()))
 	}
 }
+
+func TestCallFilePassesDescriptor(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "isi.txt")
+	if err := os.WriteFile(path, []byte("halo dari sapod"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	reg := NewRegistry()
+	reg.Register("uji.buka", func(context.Context, json.RawMessage) (any, error) {
+		f, err := os.Open(path)
+		if err != nil {
+			return nil, err
+		}
+		return FileResult{Result: map[string]int{"size": 15}, File: f}, nil
+	})
+	reg.Register("uji.biasa", func(context.Context, json.RawMessage) (any, error) { return map[string]bool{"ok": true}, nil })
+	c := startServer(t, reg)
+	var out struct{ Size int }
+	f, err := c.CallFile(context.Background(), "uji.buka", nil, &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	b, _ := io.ReadAll(f)
+	if string(b) != "halo dari sapod" || out.Size != 15 {
+		t.Fatalf("isi = %q, hasil = %+v", b, out)
+	}
+	// Operasi tanpa file: CallFile gagal, file tidak bocor.
+	if _, err := c.CallFile(context.Background(), "uji.biasa", nil, nil); err == nil {
+		t.Fatal("tanpa file harus gagal")
+	}
+	var pe *proto.Error
+	if _, err := c.CallFile(context.Background(), "tidak.ada", nil, nil); !errors.As(err, &pe) {
+		t.Fatalf("operasi tidak dikenal: %v", err)
+	}
+}

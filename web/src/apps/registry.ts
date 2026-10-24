@@ -76,6 +76,7 @@ const components: Record<string, Component> = {
   SharedFolders: defineAsyncComponent(() => import("./SharedFolders.vue")),
   Network: defineAsyncComponent(() => import("./Network.vue")),
   ResourceMonitor: defineAsyncComponent(() => import("./ResourceMonitor.vue")),
+  FileStation: defineAsyncComponent(() => import("./FileStation.vue")),
   About: defineAsyncComponent(() => import("./About.vue")),
   Planned: defineAsyncComponent(() => import("./Planned.vue")),
 }

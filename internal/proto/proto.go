@@ -99,6 +99,20 @@ const (
 	// OpConsolePanelAddress memperbarui alamat panel (dan sidik jari
 	// sertifikat) di layar login konsol NAS.
 	OpConsolePanelAddress = "console.panel_address"
+	// Operasi File Station (ADR 0010). Semua dijalankan sebagai akun Linux
+	// pengguna (proses pembantu), jadi izinnya ditegakkan kernel (ACL).
+	OpFilesList   = "files.list"
+	OpFilesMkdir  = "files.mkdir"
+	OpFilesRename = "files.rename"
+	OpFilesDelete = "files.delete"
+	// OpFilesOpenRead dan OpFilesOpenWrite mengembalikan file descriptor
+	// (SCM_RIGHTS) bersama jawaban; OpFilesCommit memberi nama akhir file
+	// unggahan, OpFilesAbort membuangnya.
+	OpFilesOpenRead  = "files.open_read"
+	OpFilesOpenWrite = "files.open_write"
+	OpFilesCommit    = "files.commit"
+	OpFilesAbort     = "files.abort"
+
 	// OpNetworkStatus membaca antarmuka jaringan, alamat, dan pengaturan
 	// jaringan yang dikelola Sapo.
 	OpNetworkStatus = "network.status"
@@ -595,4 +609,50 @@ type StatsRate struct {
 	Name string  `json:"name"`
 	In   float64 `json:"in"`
 	Out  float64 `json:"out"`
+}
+
+// FilesTarget menunjuk satu path di shared folder, atas nama satu pengguna.
+// Path relatif terhadap akar folder, dipisah "/", tanpa "." atau "..".
+type FilesTarget struct {
+	User  string `json:"user"`
+	Pool  string `json:"pool"`
+	Share string `json:"share"`
+	Path  string `json:"path"`
+}
+
+// FilesRenameParams: To adalah path baru di folder yang sama.
+type FilesRenameParams struct {
+	FilesTarget
+	To string `json:"to"`
+}
+
+// FilesCommitParams: Temp dari files.open_write; Path adalah nama akhir.
+type FilesCommitParams struct {
+	FilesTarget
+	Temp      string `json:"temp"`
+	Overwrite bool   `json:"overwrite"`
+}
+
+// FileEntry adalah satu isi direktori.
+type FileEntry struct {
+	Name string `json:"name"`
+	// Type: "dir", "file", "symlink", atau "other".
+	Type    string    `json:"type"`
+	Size    int64     `json:"size"`
+	ModTime time.Time `json:"mtime"`
+}
+
+// FilesListResult adalah hasil files.list.
+type FilesListResult struct {
+	Entries []FileEntry `json:"entries"`
+	// Truncated: direktori berisi lebih banyak dari batas yang ditampilkan.
+	Truncated bool `json:"truncated,omitempty"`
+}
+
+// FilesOpenResult menyertai file descriptor dari files.open_read/write.
+type FilesOpenResult struct {
+	Size    int64     `json:"size"`
+	ModTime time.Time `json:"mtime"`
+	// Temp: nama file sementara unggahan (files.open_write).
+	Temp string `json:"temp,omitempty"`
 }
