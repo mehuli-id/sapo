@@ -107,6 +107,14 @@ agent:
     exports_file: /etc/exports.d/sapo.exports
     nfs_service: nfs-server.service
 
+  # Resource Monitor: sampel CPU, memori, jaringan, dan disk diambil setiap
+  # interval_seconds selama ada yang melihat (berhenti setelah
+  # idle_stop_seconds), riwayat history sampel (300 × 2 detik = 10 menit).
+  stats:
+    interval_seconds: 2
+    history: 300
+    idle_stop_seconds: 60
+
   # Pengaturan jaringan dari panel (ADR 0009). /etc/network/interfaces
   # ditulis utuh oleh sapod. Setiap perubahan berlaku setelah jeda singkat
   # dan harus dikonfirmasi dari panel dalam confirm_seconds; bila tidak

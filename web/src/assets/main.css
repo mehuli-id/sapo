@@ -32,6 +32,10 @@
   --desktop-from: oklch(0.42 0.07 160);
   --desktop-to: oklch(0.24 0.04 200);
   --taskbar: oklch(1 0 0 / 0.78);
+  /* Warna seri grafik (Resource Monitor), urutan tetap; lolos uji buta
+     warna terhadap permukaan kartu terang dan gelap. */
+  --viz-1: #2a78d6;
+  --viz-2: #eb6834;
 }
 
 .dark {
@@ -56,6 +60,8 @@
   --desktop-from: oklch(0.3 0.05 165);
   --desktop-to: oklch(0.16 0.03 210);
   --taskbar: oklch(0.2 0 0 / 0.8);
+  --viz-1: #3987e5;
+  --viz-2: #d95926;
 }
 
 @theme inline {

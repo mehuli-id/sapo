@@ -574,5 +574,20 @@
       "failed": "Tidak ada perubahan jaringan yang menunggu konfirmasi (mungkin sudah dikonfirmasi, dibatalkan, atau waktunya habis).",
       "open": "Buka panel"
     }
+  },
+  "monitor": {
+    "intro": "Pemakaian sistem 10 menit terakhir, diperbarui setiap {seconds} detik selama jendela ini terbuka.",
+    "collecting": "Mengumpulkan data…",
+    "cpu": "CPU",
+    "cpuBusy": "Terpakai",
+    "cpuIOWait": "Menunggu disk",
+    "memory": "Memori ({total})",
+    "memoryUsed": "Terpakai",
+    "network": "Jaringan · {name}",
+    "received": "Diterima",
+    "sent": "Dikirim",
+    "disk": "Disk · {name}",
+    "read": "Dibaca",
+    "written": "Ditulis"
   }
 }

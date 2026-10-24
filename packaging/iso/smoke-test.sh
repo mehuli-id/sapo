@@ -121,6 +121,15 @@ res="$(api POST /api/v1/setup "{\"language\":\"id\",\"username\":\"penguji\",\"p
 [[ "$res" == *' 200' ]] || fail "setup: $res"
 echo "setup awal lewat API: ok"
 
+# Resource Monitor: sapod mulai mengambil sampel saat pertama dibaca.
+api GET /api/v1/system/stats >/dev/null
+sleep 5
+stats="$(api GET /api/v1/system/stats)"
+json 's=v["samples"]; assert len(s)>=1, v
+x=s[-1]; assert x["memory_total_bytes"]>0 and 0<=x["cpu_percent"]<=100 and x["net"] and x["disk"], x' <<<"$stats" \
+  || fail "Resource Monitor: $stats"
+echo "Resource Monitor: $(json 's=v["samples"][-1]; print(len(v["samples"]), "sampel, CPU", round(s["cpu_percent"]), "%, jaringan", [n["name"] for n in s["net"]], "disk", [d["name"] for d in s["disk"]])' <<<"$stats")"
+
 pools="$(api GET /api/v1/storage/pools)"
 [[ "$pools" == *' 200' ]] || fail "storage/pools: $pools"
 json 'assert v["available"], v.get("message"); assert v["pools"] == [], v' <<<"$pools" || fail "ZFS harus siap tanpa pool: $pools"

@@ -42,6 +42,14 @@ func main() {
 
 	reg := agent.NewRegistry()
 	reg.Register(proto.OpSystemInfo, agent.SystemInfoOp(agent.DefaultProcFS, version))
+	stc := cfg.Agent.Stats
+	stats := agent.NewStats(agent.StatsTools{
+		ProcStat: "/proc/stat", MemInfo: "/proc/meminfo", NetDev: "/proc/net/dev", DiskStats: "/proc/diskstats",
+		SysNet: "/sys/class/net", SysBlock: "/sys/block",
+		Interval: time.Duration(stc.IntervalSeconds) * time.Second, History: stc.History,
+		IdleStop: time.Duration(stc.IdleStopSeconds) * time.Second, IgnoreDevices: cfg.Agent.Storage.IgnoreDevices,
+	})
+	reg.Register(proto.OpSystemStats, stats.StatsOp())
 	reg.Register(proto.OpFeaturesList, agent.FeaturesListOp(cfg.Agent.FeaturesDir))
 	sc := cfg.Agent.Storage
 	storage := agent.NewStorage(agent.StorageTools{
