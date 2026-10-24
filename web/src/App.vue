@@ -12,6 +12,7 @@ import { api } from "@/lib/api"
 import { applyBranding } from "@/lib/theme"
 import HttpsNoticeView from "@/views/HttpsNoticeView.vue"
 import LoginView from "@/views/LoginView.vue"
+import NetworkConfirmView from "@/views/NetworkConfirmView.vue"
 import AccountSetupView from "@/views/AccountSetupView.vue"
 import SetupView from "@/views/SetupView.vue"
 
@@ -27,6 +28,8 @@ watch(
     if (now !== before) closeAll()
   },
 )
+// Tautan konfirmasi pengaturan jaringan (#network-confirm=<token>).
+const networkToken = /^#network-confirm=([0-9a-f]{64})$/.exec(window.location.hash)?.[1] ?? ""
 // Diisi bila panel dibuka lewat HTTP padahal HTTPS wajib.
 const httpsNotice = ref<HTTPSConfig | null>(null)
 
@@ -62,6 +65,7 @@ onMounted(async () => {
   <TooltipProvider>
     <div v-if="!ready" class="desktop-wallpaper h-full" />
     <HttpsNoticeView v-else-if="httpsNotice" :https="httpsNotice" />
+    <NetworkConfirmView v-else-if="networkToken" :token="networkToken" />
     <SetupView v-else-if="status?.setup_required" />
     <LoginView v-else-if="!status?.authenticated" />
     <AccountSetupView v-else-if="status.user?.pending?.length" />

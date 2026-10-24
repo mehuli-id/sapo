@@ -8,6 +8,8 @@
 # (tulis, baca, tanpa akses) dan lewat NFS (dipasang dari host dengan sudo),
 # satu disk diganti disk ketiga (resilver), lalu pool dihapus. Terakhir, menu
 # darurat di port serial (ADR 0008) me-reset password admin dan jaringan.
+# Sebelumnya pengaturan jaringan diubah dari panel (ADR 0009): satu
+# dikonfirmasi, satu dikembalikan otomatis karena panel tidak terjangkau.
 # HTTPS wajib (ADR 0004): HTTP hanya boleh menyajikan halaman petunjuk, dan
 # sidik jari yang diumumkan panel harus sama dengan sertifikat yang dipakai.
 # Pemakaian: packaging/iso/smoke-test.sh dist/sapo-dev_<versi>_amd64.iso
@@ -348,6 +350,52 @@ json "u={x['serial']:(x['usage'],x.get('usage_reason','')) for x in v}
 assert all(u[s]==('data','zfs_label') for s in ('SAPOUJI1','SAPOUJI2','SAPOUJI3')), u" <<<"$disks_json" \
   || fail "disk pool terhapus harus berstatus data/zfs_label: $disks_json"
 echo "pool dihapus; disknya tampil berisi data (label ZFS lama)"
+# Panel ditunggu sampai menjawab lagi (setelah jaringan atau panel
+# dinyalakan ulang).
+wait_panel() { # wait_panel DETIK
+  local deadline=$((SECONDS + $1))
+  until curl -kfsS --max-time 5 "$HTTPS/api/v1/health" 2>/dev/null | grep -q '"agent":true'; do
+    (( SECONDS <= deadline )) || return 1
+    sleep 3
+  done
+}
+
+# --- Pengaturan jaringan dari panel -----------------------------------------------
+# Alamat tetap yang sama dengan DHCP QEMU (10.0.2.15): dikonfirmasi dan
+# disimpan. Lalu alamat lain (10.0.2.99): panel tidak terjangkau lagi lewat
+# QEMU, jadi tidak ada konfirmasi dan sapod mengembalikan pengaturan lama.
+net="$(api GET /api/v1/network)"
+iface="$(json 'print([l["name"] for l in v["interfaces"] if "10.0.2.15/24" in l["addresses"]][0])' <<<"$net")" \
+  || fail "status jaringan: $net"
+net_apply() { # net_apply ALAMAT → token
+  local res
+  res="$(api POST /api/v1/network "{\"config\":{\"hostname\":\"sapo-uji\",\"interfaces\":[{\"name\":\"$iface\",\"mode\":\"static\",\"address\":\"$1\",\"gateway\":\"10.0.2.2\"}],\"dns\":[\"10.0.2.3\"]},\"admin_password\":\"$PASS\"}")"
+  [[ "$res" == *' 200' ]] || fail "terapkan jaringan $1: $res"
+  json 'print(v["token"])' <<<"$res"
+}
+token="$(net_apply 10.0.2.15/24)"
+for _ in $(seq 1 30); do
+  res="$(api POST /api/v1/network/confirm "{\"token\":\"$token\"}" || true)"
+  [[ "$res" == *' 200' ]] && break
+  sleep 3
+done
+[[ "$res" == *' 200' ]] || fail "konfirmasi jaringan: $res"
+net="$(api GET /api/v1/network)"
+json "c=v['config']; i=[x for x in c['interfaces'] if x['name']=='$iface'][0]
+assert v['hostname']=='sapo-uji' and c['hostname']=='sapo-uji' and i['mode']=='static' and i['address']=='10.0.2.15/24', v
+assert '10.0.2.3' in v['dns'] and not v.get('pending'), v" <<<"$net" || fail "pengaturan jaringan tersimpan: $net"
+echo "jaringan: alamat tetap $iface 10.0.2.15/24 dan nama host sapo-uji dikonfirmasi"
+
+net_apply 10.0.2.99/24 >/dev/null
+sleep 15
+curl -kfsS --max-time 5 "$HTTPS/api/v1/health" >/dev/null 2>&1 && fail "panel seharusnya tidak terjangkau di alamat lama setelah alamat diganti"
+wait_panel 240 || fail "pengaturan jaringan yang tidak dikonfirmasi tidak dikembalikan"
+net="$(api GET /api/v1/network)"
+json "c=v['config']; i=[x for x in c['interfaces'] if x['name']=='$iface'][0]
+assert i['address']=='10.0.2.15/24' and not v.get('pending'), v
+assert any('10.0.2.15/24' in l['addresses'] for l in v['interfaces']), v" <<<"$net" || fail "pengaturan lama harus kembali: $net"
+echo "jaringan: alamat 10.0.2.99 tidak dikonfirmasi, pengaturan lama kembali sendiri"
+
 # --- Menu darurat di konsol (port serial) ----------------------------------------
 # console_chat POLA KIRIM [POLA KIRIM ...]: tunggu POLA (regex) di keluaran
 # serial lalu kirim teks (\n = Enter). Mencetak grup pertama dari pola
@@ -376,14 +424,6 @@ PY
 console_chat '' '\n' '\(1-5\): ' '' >/dev/null || fail "menu darurat tidak tampil di konsol serial"
 temp="$(console_chat '' '\n' '\(1-5\): ' '1\n' 'penguji untuk melanjutkan: ' 'penguji\n' \
   '\n    ([a-z2-9]{4}(?:-[a-z2-9]{4}){3})\r?\n' '')" || fail "reset password admin lewat menu darurat"
-# Panel dinyalakan ulang oleh menu; ditunggu sampai menjawab lagi.
-wait_panel() { # wait_panel DETIK
-  local deadline=$((SECONDS + $1))
-  until curl -kfsS --max-time 5 "$HTTPS/api/v1/health" 2>/dev/null | grep -q '"agent":true'; do
-    (( SECONDS <= deadline )) || return 1
-    sleep 3
-  done
-}
 wait_panel 120 || fail "panel tidak kembali setelah reset password admin"
 old_jar="$JAR"
 res="$(api GET /api/v1/storage/pools)"

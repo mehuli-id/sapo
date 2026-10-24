@@ -107,6 +107,26 @@ agent:
     exports_file: /etc/exports.d/sapo.exports
     nfs_service: nfs-server.service
 
+  # Pengaturan jaringan dari panel (ADR 0009). /etc/network/interfaces
+  # ditulis utuh oleh sapod. Setiap perubahan berlaku setelah jeda singkat
+  # dan harus dikonfirmasi dari panel dalam confirm_seconds; bila tidak
+  # (misalnya panel tidak bisa dibuka di alamat baru), pengaturan lama
+  # dikembalikan otomatis.
+  network:
+    ip: /usr/sbin/ip
+    systemctl: /usr/bin/systemctl
+    hostnamectl: /usr/bin/hostnamectl
+    interfaces_file: /etc/network/interfaces
+    resolv_conf: /etc/resolv.conf
+    hosts_file: /etc/hosts
+    net_dir: /sys/class/net
+    state_file: /var/lib/sapod/network.json
+    pending_file: /var/lib/sapod/network-pending.json
+    network_service: networking.service
+    avahi_service: avahi-daemon.service
+    apply_delay_seconds: 3
+    confirm_seconds: 120
+
 api:
   # Port panel. Siapa yang boleh membuka panel diatur oleh allowed_networks.
   listen: ":5000"

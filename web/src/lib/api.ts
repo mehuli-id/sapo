@@ -256,6 +256,36 @@ export interface ShareNFS {
   clients: string[]
 }
 
+export interface NetworkInterfaceConfig {
+  name: string
+  mode: "dhcp" | "static"
+  // IPv4 dengan prefiks, misalnya 192.168.1.10/24
+  address?: string
+  gateway?: string
+}
+
+export interface NetworkConfig {
+  hostname: string
+  interfaces: NetworkInterfaceConfig[]
+  dns: string[]
+}
+
+export interface NetworkStatus {
+  hostname: string
+  // Pengaturan terakhir yang dikonfirmasi (kosong = belum diatur dari panel).
+  config?: NetworkConfig
+  interfaces: { name: string; mac: string; up: boolean; speed_mbps?: number; addresses: string[] }[]
+  gateway?: string
+  dns: string[]
+  pending?: { confirm_by: string; config: NetworkConfig }
+}
+
+export interface NetworkApplyResult {
+  token: string
+  applies_at: string
+  confirm_by: string
+}
+
 export type Localized = Record<string, string>
 
 export interface WizardField {
@@ -384,6 +414,10 @@ export const api = {
   diskSmart: (name: string) => get<Smart>(`/api/v1/storage/disks/${encodeURIComponent(name)}/smart`),
   pools: () => get<PoolsResult>("/api/v1/storage/pools"),
   createPool: (req: PoolCreateRequest) => post<Pool>("/api/v1/storage/pools", req),
+  networkStatus: () => get<NetworkStatus>("/api/v1/network"),
+  applyNetwork: (config: NetworkConfig, admin_password: string) => post<NetworkApplyResult>("/api/v1/network", { config, admin_password }),
+  confirmNetwork: (token: string) => post<{ ok: boolean }>("/api/v1/network/confirm", { token }),
+  cancelNetwork: (token: string) => post<{ ok: boolean }>("/api/v1/network/cancel", { token }),
   scrubPool: (name: string, action: "start" | "stop") =>
     post<{ ok: boolean }>(`/api/v1/storage/pools/${encodeURIComponent(name)}/scrub`, { action }),
   replacePoolDisk: (name: string, req: { old_guid: string; disk: DiskRef; password: string }) =>

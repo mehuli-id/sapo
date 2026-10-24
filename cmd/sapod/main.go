@@ -97,6 +97,21 @@ func main() {
 	reg.Register(proto.OpSharesApply, shares.ApplyOp())
 	reg.Register(proto.OpSharesDelete, shares.DeleteOp())
 	reg.Register(proto.OpSharesUsage, shares.UsageOp())
+	nc := cfg.Agent.Network
+	network := agent.NewNetwork(agent.NetworkTools{
+		IP: nc.IP, Systemctl: nc.Systemctl, Hostnamectl: nc.Hostnamectl,
+		InterfacesFile: nc.InterfacesFile, ResolvConf: nc.ResolvConf, HostsFile: nc.HostsFile, NetDir: nc.NetDir,
+		StateFile: nc.StateFile, PendingFile: nc.PendingFile, NetworkService: nc.NetworkService, AvahiService: nc.AvahiService,
+		ApplyDelay: time.Duration(nc.ApplyDelaySeconds) * time.Second, ConfirmWindow: time.Duration(nc.ConfirmSeconds) * time.Second,
+		Timeout: time.Minute, Log: log,
+	})
+	// Perubahan jaringan yang belum dikonfirmasi saat sapod berhenti
+	// dikembalikan (di latar belakang: jaringan bisa butuh waktu).
+	go network.Recover(context.Background())
+	reg.Register(proto.OpNetworkStatus, network.StatusOp())
+	reg.Register(proto.OpNetworkApply, network.ApplyOp())
+	reg.Register(proto.OpNetworkConfirm, network.ConfirmOp())
+	reg.Register(proto.OpNetworkCancel, network.CancelOp())
 	reg.Register(proto.OpConsolePanelAddress, agent.ConsolePanelAddressOp(agent.ConsoleTools{
 		IssueFile: cfg.Agent.Console.IssueFile,
 		Agetty:    cfg.Agent.Console.Agetty,

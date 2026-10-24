@@ -5,7 +5,10 @@
 // terdaftar; tidak ada operasi untuk menjalankan perintah bebas (ADR 0002).
 package proto
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 // MaxMessageBytes adalah batas ukuran satu pesan. Pesan yang lebih besar ditolak.
 const MaxMessageBytes = 1 << 20
@@ -93,6 +96,17 @@ const (
 	// OpConsolePanelAddress memperbarui alamat panel (dan sidik jari
 	// sertifikat) di layar login konsol NAS.
 	OpConsolePanelAddress = "console.panel_address"
+	// OpNetworkStatus membaca antarmuka jaringan, alamat, dan pengaturan
+	// jaringan yang dikelola Sapo.
+	OpNetworkStatus = "network.status"
+	// OpNetworkApply menerapkan pengaturan jaringan baru. Harus dikonfirmasi
+	// (OpNetworkConfirm) dalam batas waktu; bila tidak, pengaturan lama
+	// dikembalikan otomatis.
+	OpNetworkApply = "network.apply"
+	// OpNetworkConfirm menyimpan pengaturan yang baru diterapkan.
+	OpNetworkConfirm = "network.confirm"
+	// OpNetworkCancel langsung mengembalikan pengaturan lama.
+	OpNetworkCancel = "network.cancel"
 )
 
 // SystemInfo adalah hasil operasi system.info.
@@ -473,4 +487,70 @@ type ShareUsage struct {
 	// ACLPending: izin sedang diterapkan ke isi folder; ACLError: gagal.
 	ACLPending bool   `json:"acl_pending,omitempty"`
 	ACLError   string `json:"acl_error,omitempty"`
+}
+
+// NetworkConfig adalah pengaturan jaringan yang dikelola Sapo.
+type NetworkConfig struct {
+	Hostname   string             `json:"hostname"`
+	Interfaces []NetworkInterface `json:"interfaces"`
+	// DNS: server DNS bila semua antarmuka berupa alamat tetap (dengan DHCP,
+	// DNS dari router).
+	DNS []string `json:"dns"`
+}
+
+// NetworkInterface adalah pengaturan satu antarmuka fisik. IPv6 selalu
+// otomatis (SLAAC).
+type NetworkInterface struct {
+	Name string `json:"name"`
+	// Mode: "dhcp" atau "static".
+	Mode string `json:"mode"`
+	// Address: IPv4 dengan prefiks, misalnya "192.168.1.10/24" (static).
+	Address string `json:"address,omitempty"`
+	Gateway string `json:"gateway,omitempty"`
+}
+
+// NetworkStatus adalah hasil network.status.
+type NetworkStatus struct {
+	Hostname string `json:"hostname"`
+	// Config: pengaturan yang terakhir dikonfirmasi; nil bila file jaringan
+	// tidak (lagi) dibuat Sapo, misalnya setelah reset dari menu darurat.
+	Config     *NetworkConfig `json:"config,omitempty"`
+	Interfaces []NetworkLink  `json:"interfaces"`
+	Gateway    string         `json:"gateway,omitempty"`
+	DNS        []string       `json:"dns"`
+	// Pending: perubahan yang menunggu konfirmasi.
+	Pending *NetworkPending `json:"pending,omitempty"`
+}
+
+// NetworkLink adalah keadaan nyata satu antarmuka fisik.
+type NetworkLink struct {
+	Name      string   `json:"name"`
+	MAC       string   `json:"mac"`
+	Up        bool     `json:"up"`
+	SpeedMbps int      `json:"speed_mbps,omitempty"`
+	Addresses []string `json:"addresses"`
+}
+
+// NetworkPending: perubahan yang belum dikonfirmasi.
+type NetworkPending struct {
+	ConfirmBy time.Time     `json:"confirm_by"`
+	Config    NetworkConfig `json:"config"`
+}
+
+// NetworkApplyParams adalah parameter network.apply.
+type NetworkApplyParams struct {
+	Config NetworkConfig `json:"config"`
+}
+
+// NetworkApplyResult: Token dipakai untuk konfirmasi atau pembatalan,
+// AppliesAt adalah saat pengaturan baru mulai berlaku.
+type NetworkApplyResult struct {
+	Token     string    `json:"token"`
+	AppliesAt time.Time `json:"applies_at"`
+	ConfirmBy time.Time `json:"confirm_by"`
+}
+
+// NetworkTokenParams adalah parameter network.confirm dan network.cancel.
+type NetworkTokenParams struct {
+	Token string `json:"token"`
 }
