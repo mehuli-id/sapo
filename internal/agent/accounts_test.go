@@ -260,7 +260,7 @@ func TestAccountsDisableFailureIsRetried(t *testing.T) {
 		t.Fatalf("nonaktif tidak dicoba ulang: %q", b)
 	}
 	// Akun yang belum ada di Samba: -d gagal "Failed to find entry" = wajar.
-	_ = os.WriteFile(smb, []byte("#!/bin/sh\necho 'Failed to find entry for user budi.' >&2\nexit 1\n"), 0o755)
+	_ = os.WriteFile(smb, []byte("#!/bin/sh\necho 'Failed to find user budi in passdb backend.' >&2\nexit 1\n"), 0o755)
 	res, err = syncAccounts(t, a, proto.AccountsSyncParams{Users: []proto.AccountUser{{Name: "ani", Disabled: true}, {Name: "budi", Disabled: true}}})
 	if err != nil || len(res.Failures) != 0 {
 		t.Fatalf("akun tanpa entri Samba: %+v %v", res, err)
