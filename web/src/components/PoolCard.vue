@@ -54,7 +54,10 @@ const leaves = computed(() => {
 // Selama resilver, disk lain tidak diganti dulu (data sedang dibangun ulang).
 const resilvering = computed(() => scan.value?.function === "resilver" && running.value)
 const errors = (v: Vdev) => v.read_errors + v.write_errors + v.checksum_errors
-const vdevBad = (v: Vdev) => v.state !== "ONLINE" || errors(v) > 0
+// Spare yang siap (AVAIL) atau sedang dipakai (INUSE) bukan masalah.
+const vdevBad = (v: Vdev) => !["ONLINE", "AVAIL", "INUSE"].includes(v.state) || errors(v) > 0
+// Grup kelas perangkat (log, special, cache, spare) diberi keterangan.
+const classGroups = ["special", "dedup", "logs", "cache", "spares"]
 </script>
 
 <template>
@@ -99,7 +102,10 @@ const vdevBad = (v: Vdev) => v.state !== "ONLINE" || errors(v) > 0
       <h4 class="text-xs font-semibold tracking-wide text-muted-foreground uppercase">{{ t("pool.members") }}</h4>
       <ul class="divide-y rounded-lg border text-xs">
         <li v-for="{ vdev, group } in leaves" :key="`${group}/${vdev.name}`" :class="cn('flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 px-2.5 py-1.5', vdevBad(vdev) && 'bg-destructive/5')">
-          <span class="font-mono">{{ vdev.disk || vdev.name }}</span>
+          <span>
+            <span class="font-mono">{{ vdev.disk || vdev.name }}</span>
+            <span v-if="classGroups.includes(group)" class="text-muted-foreground"> · {{ t(`pool.class.${group}`) }}</span>
+          </span>
           <span class="flex items-center gap-2">
             <span :class="vdevBad(vdev) ? 'font-medium text-destructive' : 'text-muted-foreground'">
               {{ t(`pool.vdevState.${vdev.state}`) !== `pool.vdevState.${vdev.state}` ? t(`pool.vdevState.${vdev.state}`) : vdev.state }}

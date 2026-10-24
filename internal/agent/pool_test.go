@@ -109,7 +109,7 @@ func newTestPools(t *testing.T, z zpoolFake) (*Pools, string) {
 			t.Fatal(err)
 		}
 	}
-	for serial, name := range map[string]string{"SYS0": "vda", "POOL1": "vdb", "POOL2": "vdc", "NEW1": "vdd", "OLD1": "vde", "BIG1": "vdf", "SWAP1": "vdg", "LVM1": "vdh", "DM1": "vdj", "OLDZ": "vdk"} {
+	for serial, name := range map[string]string{"SYS0": "vda", "POOL1": "vdb", "POOL2": "vdc", "NEW1": "vdd", "OLD1": "vde", "BIG1": "vdf", "SWAP1": "vdg", "LVM1": "vdh", "DM1": "vdj", "OLDZ": "vdk", "LOST1": "vdl", "SPARE1": "vdm"} {
 		if err := os.WriteFile(filepath.Join(devDir, name), nil, 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -147,7 +147,7 @@ func TestDiskUsage(t *testing.T) {
 		"vdb": "in_use/pool", "vdc": "in_use/pool",
 		"vdd": "free/", "vdf": "free/",
 		"vde": "data/", // ext4 yang tidak terpasang: boleh dipakai bila penghapusan dikonfirmasi
-		"vdg": "in_use/swap", "vdh": "in_use/lvm",
+		"vdg": "in_use/swap", "vdh": "in_use/lvm", "vdl": "in_use/pool", "vdm": "in_use/pool",
 		"sdi": "free/", "vdj": "in_use/holder", "vdk": "in_use/pool",
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -179,7 +179,8 @@ func TestPoolsListParsesStatus(t *testing.T) {
 	if tank.Name != "tank" || tank.Health != "ONLINE" || tank.SizeBytes != 4294967296 || tank.Layout != proto.LayoutMirror {
 		t.Fatalf("tank = %+v", tank)
 	}
-	if len(tank.Vdevs) != 1 || len(tank.Vdevs[0].Children) != 2 {
+	// Pohon utama (mirror-0) lalu grup spare dari luar pohon vdevs.
+	if len(tank.Vdevs) != 2 || len(tank.Vdevs[0].Children) != 2 || tank.Vdevs[1].Type != "spares" || tank.Vdevs[1].Children[0].Disk != "vdm" {
 		t.Fatalf("vdev tank = %+v", tank.Vdevs)
 	}
 	vdb, vdc := tank.Vdevs[0].Children[0], tank.Vdevs[0].Children[1]
@@ -485,7 +486,10 @@ func TestInactiveZFSLabelIsData(t *testing.T) {
 	// vdb dan vdc anggota pool aktif (tank); vdk berlabel pool lama.
 	p, _ := newTestPools(t, zpoolFake{status: "zpool-status.json"})
 	got := usage(p)
-	if got["vdb"] != "in_use/pool" || got["vdc"] != "in_use/pool" || got["vdk"] != "data/zfs_label" || got["vda"] != "in_use/mounted" {
+	// vdm: spare tank (di luar pohon vdevs). vdl: berlabel tank tetapi tidak
+	// tercatat di path mana pun (anggota yang terputus): tetap dipakai.
+	if got["vdb"] != "in_use/pool" || got["vdc"] != "in_use/pool" || got["vdk"] != "data/zfs_label" || got["vda"] != "in_use/mounted" ||
+		got["vdm"] != "in_use/pool" || got["vdl"] != "in_use/pool" {
 		t.Fatalf("usage = %v", got)
 	}
 	// Daftar anggota tidak terbaca: gagal-tertutup.
@@ -513,7 +517,7 @@ func TestPoolReplace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(call, "replace -f -o ashift=12 -- tank 7 ") || !strings.HasSuffix(call, "/virtio-OLD1") {
+	if !strings.HasPrefix(call, "replace -f -- tank 7 ") || !strings.HasSuffix(call, "/virtio-OLD1") {
 		t.Fatalf("zpool = %q", call)
 	}
 	// Disk berlabel pool lama boleh dipakai setelah dikonfirmasi.
@@ -521,6 +525,10 @@ func TestPoolReplace(t *testing.T) {
 	old.Usage = proto.DiskHasData
 	if call, err := replace(z, "6", old); err != nil || call == "" {
 		t.Fatalf("label lama: %q %v", call, err)
+	}
+	// Disk spare (di luar pohon vdevs) juga bisa diganti.
+	if call, err := replace(z, "11", ref("vdd", "NEW1", gib4, false)); err != nil || !strings.Contains(call, "tank 11 ") {
+		t.Fatalf("spare: %q %v", call, err)
 	}
 	var oe *OpError
 	for name, tc := range map[string]struct {
@@ -533,6 +541,7 @@ func TestPoolReplace(t *testing.T) {
 		"disk anggota pool":  {"7", ref("vdb", "POOL1", gib4, true), proto.ErrDiskInUse},
 		"data tanpa konfirm": {"7", ref("vde", "OLD1", gib4, false), proto.ErrDiskHasData},
 		"GUID bukan angka":   {"7;rm", ref("vdd", "NEW1", gib4, false), proto.ErrInvalidParams},
+		"GUID nol":           {"0", ref("vdd", "NEW1", gib4, false), proto.ErrInvalidParams},
 	} {
 		call, err := replace(z, tc.guid, tc.disk)
 		if !errors.As(err, &oe) || oe.Code != tc.code || call != "" {

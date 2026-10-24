@@ -6,6 +6,7 @@
        "vdevs":{
         "vdc":{"name":"vdc","vdev_type":"disk","guid":7,"path":"/dev/vdc1","class":"normal","state":"ONLINE","read_errors":0,"write_errors":0,"checksum_errors":2,"slow_ios":0},
         "vdb":{"name":"vdb","vdev_type":"disk","guid":6,"path":"/dev/vdb1","class":"normal","state":"ONLINE","read_errors":0,"write_errors":0,"checksum_errors":0,"slow_ios":0}}}}}},
+   "spares":{"vdm":{"name":"vdm","vdev_type":"disk","guid":11,"path":"/dev/vdm1","class":"spare","state":"AVAIL"}},
    "scan_stats":{"function":"SCRUB","state":"FINISHED","start_time":1792800000,"end_time":1792800060,"to_examine":1048576,"examined":1048576,"skipped":0,"processed":0,"errors":0,"bytes_per_scan":0,"pass_start":1792800000,"scrub_pause":0,"scrub_spent_paused":0,"issued_bytes_per_scan":1048576,"issued":1048576},
    "error_count":0},
   "backup":{"name":"backup","state":"DEGRADED","pool_guid":456,"txg":99,"spa_version":5000,"zpl_version":5,

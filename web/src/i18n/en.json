@@ -313,7 +313,9 @@
       "FAULTED": "Faulted",
       "OFFLINE": "Offline",
       "UNAVAIL": "Missing",
-      "REMOVED": "Removed"
+      "REMOVED": "Removed",
+      "AVAIL": "Spare, ready",
+      "INUSE": "Spare, in use"
     },
     "errors": "read errors {r}, write {w}, checksum {c}",
     "scan": {
@@ -373,6 +375,13 @@
     "replaced": "The disk is being replaced. ZFS is rebuilding data onto the new disk (resilver); the pool stays usable meanwhile.",
     "destroy": "Delete pool",
     "destroyTitle": "Delete pool {pool}",
-    "destroyed": "Pool {name} has been deleted."
+    "destroyed": "Pool {name} has been deleted.",
+    "class": {
+      "special": "special",
+      "dedup": "dedup",
+      "logs": "log (SLOG)",
+      "cache": "cache (L2ARC)",
+      "spares": "spare"
+    }
   }
 }
