@@ -30,6 +30,8 @@ type fakeAgent struct {
 	// errs memberi error per operasi; params mencatat parameter terakhir.
 	errs   map[string]error
 	params map[string]any
+	// files: path file yang dikembalikan CallFile per operasi.
+	files map[string]string
 }
 
 // setErrs, called, dan forget: akses berkunci (Call juga dipanggil dari
@@ -51,6 +53,20 @@ func (f *fakeAgent) forget(op string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	delete(f.params, op)
+}
+
+// CallFile: hasil seperti Call, file dari files[op] (dibuat oleh test).
+func (f *fakeAgent) CallFile(ctx context.Context, op string, params any, out any) (*os.File, error) {
+	if err := f.Call(ctx, op, params, out); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	path, ok := f.files[op]
+	f.mu.Unlock()
+	if !ok {
+		return nil, &proto.Error{Code: proto.ErrUnknownOp, Message: op}
+	}
+	return os.OpenFile(path, os.O_RDWR, 0)
 }
 
 func (f *fakeAgent) Call(_ context.Context, op string, params any, out any) error {

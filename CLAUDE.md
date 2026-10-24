@@ -41,6 +41,7 @@ Sudah: kerangka, login + wizard setup awal + 2FA, paket `.deb`, tiga ronde revie
 Menu darurat di konsol NAS (ADR 0008): `sapo-console` (root, hanya keyboard/layar fisik, `sapo-console@tty1`) untuk reset password admin, reset jaringan, restart, matikan; uji asap ISO memakainya lewat port serial.
 Pengaturan jaringan dari panel (ADR 0009): nama host, DHCP/alamat tetap, DNS; `/etc/network/interfaces` ditulis utuh oleh `sapod`; setiap perubahan wajib dikonfirmasi (token) atau dikembalikan otomatis; uji asap ISO menguji keduanya.
 Resource Monitor: `system.stats` di `sapod` (sampel /proc hanya selama ada yang membaca), grafik CPU, memori, jaringan, disk di panel.
-Berikutnya (urutan disepakati): File Station, Control Panel, App Center, Sapo Drive; lalu:
+File Station (ADR 0010): operasi file dijalankan `sapod fs-helper` sebagai akun Linux pengguna (izin ditegakkan kernel), path lewat `openat2` di bawah akar folder, isi file lewat file descriptor (SCM_RIGHTS) ke `sapo-api`.
+Berikutnya (urutan disepakati): Control Panel, App Center, Sapo Drive; lalu:
 1. Snapshot ZFS terjadwal untuk shared folder (dengan pemulihan file).
 2. Installer ke disk (ISO sekarang hanya berjalan dari RAM).

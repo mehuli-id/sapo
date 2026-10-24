@@ -312,6 +312,55 @@ export interface SystemStats {
   samples: StatsSample[]
 }
 
+export interface FileShare {
+  name: string
+  description?: string
+  access: ShareAccess
+}
+
+export interface FileEntry {
+  name: string
+  type: "dir" | "file" | "symlink" | "other"
+  size: number
+  mtime: string
+}
+
+export interface FileList {
+  entries: FileEntry[]
+  truncated?: boolean
+}
+
+const fileQuery = (share: string, path: string) => `share=${encodeURIComponent(share)}&path=${encodeURIComponent(path)}`
+
+// downloadURL: dibuka langsung oleh browser (lampiran), tidak lewat fetch.
+export const fileDownloadURL = (share: string, path: string) => `/api/v1/files/download?${fileQuery(share, path)}`
+
+// uploadFile mengunggah satu file lewat XMLHttpRequest (ada kemajuan).
+export function uploadFile(share: string, dir: string, file: File, overwrite: boolean, onProgress: (loaded: number) => void): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open("POST", `/api/v1/files/upload?${fileQuery(share, dir)}&name=${encodeURIComponent(file.name)}${overwrite ? "&overwrite=1" : ""}`)
+    xhr.setRequestHeader("X-Sapo-Request", "1")
+    xhr.setRequestHeader("Content-Type", "application/octet-stream")
+    xhr.upload.onprogress = (e) => onProgress(e.loaded)
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) return resolve()
+      let code = "http_error"
+      let message = xhr.statusText
+      try {
+        const data = JSON.parse(xhr.responseText)
+        code = data?.error?.code ?? code
+        message = data?.error?.message ?? message
+      } catch {
+        // bukan JSON
+      }
+      reject(new ApiError(xhr.status, code, message, {}))
+    }
+    xhr.onerror = () => reject(new ApiError(0, "network_error", "network error", {}))
+    xhr.send(file)
+  })
+}
+
 export type Localized = Record<string, string>
 
 export interface WizardField {
@@ -441,6 +490,11 @@ export const api = {
   pools: () => get<PoolsResult>("/api/v1/storage/pools"),
   createPool: (req: PoolCreateRequest) => post<Pool>("/api/v1/storage/pools", req),
   networkStatus: () => get<NetworkStatus>("/api/v1/network"),
+  fileShares: () => get<FileShare[]>("/api/v1/files/shares"),
+  listFiles: (share: string, path: string) => get<FileList>(`/api/v1/files/list?${fileQuery(share, path)}`),
+  mkdir: (share: string, path: string) => post<{ ok: boolean }>("/api/v1/files/mkdir", { share, path }),
+  renameFile: (share: string, path: string, to: string) => post<{ ok: boolean }>("/api/v1/files/rename", { share, path, to }),
+  deleteFile: (share: string, path: string) => post<{ ok: boolean }>("/api/v1/files/delete", { share, path }),
   systemStats: (after = 0) => get<SystemStats>(`/api/v1/system/stats?after=${after}`),
   applyNetwork: (config: NetworkConfig, admin_password: string) => post<NetworkApplyResult>("/api/v1/network", { config, admin_password }),
   confirmNetwork: (token: string) => post<{ ok: boolean }>("/api/v1/network/confirm", { token }),

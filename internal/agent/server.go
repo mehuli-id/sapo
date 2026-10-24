@@ -20,11 +20,20 @@ import (
 	"time"
 
 	"github.com/mehuli-id/sapo/internal/proto"
+	"golang.org/x/sys/unix"
 )
 
 // Handler menjalankan satu operasi. params sudah dibatasi ukurannya; handler
 // wajib mendekode ke struct bertipe dan memvalidasinya sendiri.
 type Handler func(ctx context.Context, params json.RawMessage) (any, error)
+
+// FileResult adalah hasil operasi beserta satu file descriptor yang
+// diteruskan ke klien lewat SCM_RIGHTS (misalnya file yang diunduh di File
+// Station, dibuka atas nama pengguna). File ditutup setelah dikirim.
+type FileResult struct {
+	Result any
+	File   *os.File
+}
 
 // Registry memetakan nama operasi ke handler-nya.
 type Registry struct {
@@ -207,18 +216,40 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		if !sc.Scan() {
 			return
 		}
-		resp := s.dispatch(ctx, sc.Bytes())
+		resp, file := s.dispatch(ctx, sc.Bytes())
 		_ = conn.SetWriteDeadline(time.Now().Add(writeTimeout))
+		if file != nil {
+			err := sendWithFile(conn, resp, file)
+			file.Close()
+			if err != nil {
+				return
+			}
+			continue
+		}
 		if err := enc.Encode(resp); err != nil {
 			return
 		}
 	}
 }
 
-func (s *Server) dispatch(ctx context.Context, line []byte) proto.Response {
+// sendWithFile mengirim jawaban dan file descriptor dalam satu pesan.
+func sendWithFile(conn net.Conn, resp proto.Response, f *os.File) error {
+	uc, ok := conn.(*net.UnixConn)
+	if !ok {
+		return errors.New("file descriptor hanya bisa dikirim lewat unix socket")
+	}
+	line, err := json.Marshal(resp)
+	if err != nil {
+		return err
+	}
+	_, _, err = uc.WriteMsgUnix(append(line, '\n'), unix.UnixRights(int(f.Fd())), nil)
+	return err
+}
+
+func (s *Server) dispatch(ctx context.Context, line []byte) (proto.Response, *os.File) {
 	var req proto.Request
 	if err := json.Unmarshal(line, &req); err != nil {
-		return fail(0, proto.ErrBadRequest, "permintaan bukan JSON yang valid")
+		return fail(0, proto.ErrBadRequest, "permintaan bukan JSON yang valid"), nil
 	}
 	h, ok := s.Registry.lookup(req.Op)
 	if !ok {
@@ -226,7 +257,7 @@ func (s *Server) dispatch(ctx context.Context, line []byte) proto.Response {
 		if len(op) > maxEchoedOp {
 			op = op[:maxEchoedOp] + "…"
 		}
-		return fail(req.ID, proto.ErrUnknownOp, "operasi tidak dikenal: "+op)
+		return fail(req.ID, proto.ErrUnknownOp, "operasi tidak dikenal: "+op), nil
 	}
 	opCtx := ctx
 	if s.OpTimeout > 0 {
@@ -242,22 +273,29 @@ func (s *Server) dispatch(ctx context.Context, line []byte) proto.Response {
 			if s.Log != nil {
 				s.Log.Info("operasi", "op", req.Op, "durasi", time.Since(start), "ok", false, "kode", oe.Code)
 			}
-			return fail(req.ID, oe.Code, oe.Message)
+			return fail(req.ID, oe.Code, oe.Message), nil
 		}
 		// Detail error internal hanya ke log sapod, tidak ke klien.
 		if s.Log != nil {
 			s.Log.Error("operasi gagal", "op", req.Op, "durasi", time.Since(start), "err", err)
 		}
-		return fail(req.ID, proto.ErrInternal, "kesalahan internal")
+		return fail(req.ID, proto.ErrInternal, "kesalahan internal"), nil
+	}
+	var file *os.File
+	if fr, ok := result.(FileResult); ok {
+		result, file = fr.Result, fr.File
 	}
 	if s.Log != nil {
 		s.Log.Info("operasi", "op", req.Op, "durasi", time.Since(start), "ok", true)
 	}
 	raw, err := json.Marshal(result)
 	if err != nil {
-		return fail(req.ID, proto.ErrInternal, "gagal menyusun hasil")
+		if file != nil {
+			file.Close()
+		}
+		return fail(req.ID, proto.ErrInternal, "gagal menyusun hasil"), nil
 	}
-	return proto.Response{ID: req.ID, OK: true, Result: raw}
+	return proto.Response{ID: req.ID, OK: true, Result: raw}, file
 }
 
 func fail(id uint64, code, msg string) proto.Response {

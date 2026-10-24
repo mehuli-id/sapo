@@ -292,6 +292,47 @@ res="$(nfs_set null)"
 if out="$(nfs_mount)"; then nfs_umount; fail "NFS yang dimatikan tidak boleh bisa dipasang"; fi
 echo "NFS: klien di luar jaringan dan NFS yang dimatikan ditolak"
 
+# --- File Station (ADR 0010) ------------------------------------------------------
+# Lewat panel sebagai budi (tulis) dan ani (baca); izin ditegakkan kernel
+# karena sapod menjalankan operasi file sebagai akun pengguna.
+admin_jar="$JAR"
+login_as() { # login_as NAMA → JAR baru untuk pengguna itu
+  JAR="$WORK/cookies-$1"
+  res="$(api POST /api/v1/auth/login "{\"username\":\"$1\",\"password\":\"$UPASS\"}")"
+  [[ "$res" == *' 200' ]] || fail "login $1: $res"
+}
+login_as budi
+res="$(api GET /api/v1/files/shares)"
+json 'assert [s["name"] for s in v if s["access"]=="write"]==["keluarga"], v' <<<"$res" || fail "File Station, folder budi: $res"
+res="$(api GET '/api/v1/files/list?share=keluarga&path=')"
+json 'assert "halo.txt" in [e["name"] for e in v["entries"]], v' <<<"$res" || fail "File Station, daftar: $res"
+curl -ksS -b "$JAR" --max-time 30 -o "$WORK/unduh.txt" "$HTTPS/api/v1/files/download?share=keluarga&path=halo.txt"
+cmp -s "$WORK/halo.txt" "$WORK/unduh.txt" || fail "File Station: unduhan halo.txt tidak sama"
+echo "dari panel" > "$WORK/panel.txt"
+res="$(curl -ksS -b "$JAR" -X POST -H 'X-Sapo-Request: 1' --data-binary "@$WORK/panel.txt" -w ' %{http_code}' --max-time 30 \
+  "$HTTPS/api/v1/files/upload?share=keluarga&path=&name=panel.txt")"
+[[ "$res" == *' 200' ]] || fail "File Station, unggah: $res"
+res="$(api POST /api/v1/files/mkdir '{"share":"keluarga","path":"arsip"}')"
+[[ "$res" == *' 200' ]] || fail "File Station, buat folder: $res"
+res="$(api POST /api/v1/files/rename '{"share":"keluarga","path":"panel.txt","to":"arsip/panel.txt"}')"
+[[ "$res" == *' 200' ]] || fail "File Station, pindah: $res"
+# File dari panel milik akun budi dan mewarisi izin folder: cici (baca)
+# membukanya lewat SMB.
+rm -f "$WORK/salinan.txt"
+out="$(smb cici "get arsip/panel.txt $WORK/salinan.txt")"
+cmp -s "$WORK/panel.txt" "$WORK/salinan.txt" || fail "file dari File Station harus terbaca cici lewat SMB: $out"
+login_as ani
+res="$(curl -ksS -b "$JAR" -X POST -H 'X-Sapo-Request: 1' --data-binary "@$WORK/panel.txt" -w ' %{http_code}' --max-time 30 \
+  "$HTTPS/api/v1/files/upload?share=keluarga&path=&name=ani.txt")"
+[[ "$res" == *'"permission_denied"'*' 403' ]] || fail "File Station: ani (baca) tidak boleh mengunggah: $res"
+login_as budi
+res="$(api POST /api/v1/files/delete '{"share":"keluarga","path":"arsip"}')"
+[[ "$res" == *' 200' ]] || fail "File Station, hapus folder: $res"
+res="$(api GET '/api/v1/files/list?share=keluarga&path=')"
+json 'assert "arsip" not in [e["name"] for e in v["entries"]], v' <<<"$res" || fail "File Station: arsip harus terhapus: $res"
+JAR="$admin_jar"
+echo "File Station: daftar, unduh, unggah, folder baru, pindah, hapus sebagai budi; ani (baca) ditolak; file terbaca lewat SMB"
+
 # Pengguna yang dinonaktifkan tidak bisa masuk lewat SMB, dan sesinya yang
 # sedang terbuka ikut diputus.
 # Perintah dikirim lewat stdin dengan jeda, agar sesi tetap terbuka saat ani

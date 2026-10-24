@@ -21,6 +21,11 @@ import (
 var version = "0.0.0-dev"
 
 func main() {
+	// Proses pembantu File Station (dijalankan sapod sendiri sebagai akun
+	// pengguna): satu operasi file, tanpa konfigurasi.
+	if len(os.Args) > 1 && os.Args[1] == "fs-helper" {
+		os.Exit(agent.FSHelperMain(os.Stdin, os.Stdout))
+	}
 	cfgPath := flag.String("config", config.DefaultPath, "lokasi sapo.yaml milik admin")
 	defaultsPath := flag.String("defaults", "", "lokasi nilai bawaan paket (misalnya "+config.DefaultsPath+")")
 	socket := flag.String("socket", "", "timpa agent.socket (untuk pengembangan)")
@@ -102,6 +107,25 @@ func main() {
 		IDMin: ac.IDMin, IDMax: ac.IDMax,
 	})
 	shares.SetAccounts(accounts)
+	self, err := os.Executable()
+	if err != nil {
+		log.Error("lokasi sapod", "err", err)
+		os.Exit(1)
+	}
+	fc := cfg.Agent.Files
+	files := agent.NewFiles(agent.FilesTools{
+		Helper: self, MountBase: pc.MountBase, GroupFile: ac.GroupFile, MaxEntries: fc.MaxEntries,
+		Timeout: time.Duration(fc.TimeoutSeconds) * time.Second, DeleteTimeout: time.Duration(fc.DeleteTimeoutSeconds) * time.Second,
+		IDMin: ac.IDMin, IDMax: ac.IDMax,
+	}, shares, accounts.Managed)
+	reg.Register(proto.OpFilesList, files.ListOp())
+	reg.Register(proto.OpFilesMkdir, files.MkdirOp())
+	reg.Register(proto.OpFilesRename, files.RenameOp())
+	reg.Register(proto.OpFilesDelete, files.DeleteOp())
+	reg.Register(proto.OpFilesOpenRead, files.OpenReadOp())
+	reg.Register(proto.OpFilesOpenWrite, files.OpenWriteOp())
+	reg.Register(proto.OpFilesCommit, files.CommitOp())
+	reg.Register(proto.OpFilesAbort, files.AbortOp())
 	reg.Register(proto.OpSharesApply, shares.ApplyOp())
 	reg.Register(proto.OpSharesDelete, shares.DeleteOp())
 	reg.Register(proto.OpSharesUsage, shares.UsageOp())

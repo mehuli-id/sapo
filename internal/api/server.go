@@ -34,6 +34,8 @@ import (
 // oleh agent.Client; di test diganti tiruan).
 type AgentCaller interface {
 	Call(ctx context.Context, op string, params any, out any) error
+	// CallFile: operasi yang mengembalikan file descriptor (File Station).
+	CallFile(ctx context.Context, op string, params any, out any) (*os.File, error)
 }
 
 // Options adalah dependensi server.
@@ -234,6 +236,14 @@ func New(o Options) (*Server, error) {
 	s.mux.Handle("POST /api/v1/storage/pools/{name}/scrub", s.requireAdmin(http.HandlerFunc(s.handlePoolScrub)))
 	s.mux.Handle("POST /api/v1/storage/pools/{name}/replace", s.requireAdmin(http.HandlerFunc(s.handlePoolReplace)))
 	s.mux.Handle("POST /api/v1/storage/pools/{name}/destroy", s.requireAdmin(http.HandlerFunc(s.handlePoolDestroy)))
+	// File Station: semua pengguna, hanya folder yang boleh mereka buka.
+	s.mux.Handle("GET /api/v1/files/shares", s.requireAuth(http.HandlerFunc(s.handleFileShares)))
+	s.mux.Handle("GET /api/v1/files/list", s.requireAuth(http.HandlerFunc(s.handleFileList)))
+	s.mux.Handle("GET /api/v1/files/download", s.requireAuth(http.HandlerFunc(s.handleFileDownload)))
+	s.mux.Handle("POST /api/v1/files/upload", s.requireAuth(http.HandlerFunc(s.handleFileUpload)))
+	s.mux.Handle("POST /api/v1/files/mkdir", s.requireAuth(s.handleFileChange(proto.OpFilesMkdir, "files.mkdir")))
+	s.mux.Handle("POST /api/v1/files/rename", s.requireAuth(s.handleFileChange(proto.OpFilesRename, "files.rename")))
+	s.mux.Handle("POST /api/v1/files/delete", s.requireAuth(s.handleFileChange(proto.OpFilesDelete, "files.delete")))
 	s.mux.Handle("GET /api/v1/network", s.requireAdmin(s.proxyRead(proto.OpNetworkStatus)))
 	s.mux.Handle("POST /api/v1/network", s.requireAdmin(http.HandlerFunc(s.handleNetworkApply)))
 	// Konfirmasi dan pembatalan cukup dengan token dari network.apply (256
