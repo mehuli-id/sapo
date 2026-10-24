@@ -107,8 +107,8 @@ type Files struct {
 }
 
 func (f Files) validate() error {
-	if f.MaxEntries < 100 || f.MaxEntries > 100000 || f.TimeoutSeconds < 5 || f.DeleteTimeoutSeconds < f.TimeoutSeconds || f.DeleteTimeoutSeconds > 280 {
-		return errors.New("agent.files: max_entries 100-100000, timeout_seconds minimal 5, delete_timeout_seconds antara timeout_seconds dan 280")
+	if f.MaxEntries < 100 || f.MaxEntries > 20000 || f.TimeoutSeconds < 5 || f.DeleteTimeoutSeconds < f.TimeoutSeconds || f.DeleteTimeoutSeconds > 280 {
+		return errors.New("agent.files: max_entries 100-20000, timeout_seconds minimal 5, delete_timeout_seconds antara timeout_seconds dan 280")
 	}
 	return nil
 }

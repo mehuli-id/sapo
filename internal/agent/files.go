@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unicode/utf8"
@@ -48,11 +49,21 @@ type Files struct {
 	managed func(name string) (uid, gid int, ok bool)
 	// run menjalankan proses pembantu (diganti di test).
 	run func(ctx context.Context, cred fsCred, req fsRequest, wantFile bool) (fsReply, *os.File, error)
+
+	// slots membatasi operasi file bersamaan (agar tidak menghabiskan
+	// koneksi sapod untuk operasi lain); deleting: satu penghapusan per
+	// pengguna.
+	slots      chan struct{}
+	deletingMu sync.Mutex
+	deleting   map[string]bool
 }
+
+// maxFileOps: operasi file bersamaan paling banyak (dari semua pengguna).
+const maxFileOps = 8
 
 // NewFiles menyiapkan File Station. managed wajib (hanya akun Sapo).
 func NewFiles(t FilesTools, shares *Shares, managed func(string) (int, int, bool)) *Files {
-	f := &Files{t: t, shares: shares, managed: managed}
+	f := &Files{t: t, shares: shares, managed: managed, slots: make(chan struct{}, maxFileOps), deleting: map[string]bool{}}
 	f.run = f.runHelper
 	return f
 }
@@ -92,10 +103,10 @@ const (
 // daftar dan tidak bisa dipakai sebagai nama biasa.
 const uploadTempPrefix = ".sapo-upload-"
 
-// cleanFilePath memeriksa path relatif dari panel: dipisah "/", tanpa
+// CleanFilePath memeriksa path relatif dari panel: dipisah "/", tanpa
 // komponen kosong, ".", "..", atau ".zfs" (snapshot), tanpa NUL dan
 // karakter kendali, setiap nama paling panjang 255 byte. "" = akar folder.
-func cleanFilePath(p string) (string, error) {
+func CleanFilePath(p string) (string, error) {
 	if p == "" {
 		return "", nil
 	}
@@ -118,7 +129,7 @@ func (f *Files) prepare(ctx context.Context, t proto.FilesTarget) (fsCred, strin
 	if !accountNamePattern.MatchString(t.User) || !poolNamePattern.MatchString(t.Pool) || !shareNamePattern.MatchString(t.Share) {
 		return fsCred{}, "", "", invalid("pengguna atau folder tidak valid")
 	}
-	path, err := cleanFilePath(t.Path)
+	path, err := CleanFilePath(t.Path)
 	if err != nil {
 		return fsCred{}, "", "", invalid(err.Error())
 	}
@@ -163,6 +174,26 @@ func (f *Files) call(ctx context.Context, t proto.FilesTarget, req fsRequest, ti
 	cred, root, path, err := f.prepare(ctx, t)
 	if err != nil {
 		return nil, nil, err
+	}
+	select {
+	case f.slots <- struct{}{}:
+		defer func() { <-f.slots }()
+	default:
+		return nil, nil, &OpError{Code: proto.ErrBusy, Message: "terlalu banyak operasi file berjalan; coba lagi sebentar"}
+	}
+	if req.Op == "delete" {
+		f.deletingMu.Lock()
+		if f.deleting[t.User] {
+			f.deletingMu.Unlock()
+			return nil, nil, &OpError{Code: proto.ErrBusy, Message: "penghapusan sebelumnya masih berjalan"}
+		}
+		f.deleting[t.User] = true
+		f.deletingMu.Unlock()
+		defer func() {
+			f.deletingMu.Lock()
+			delete(f.deleting, t.User)
+			f.deletingMu.Unlock()
+		}()
 	}
 	req.Root, req.Path = root, path
 	ctx, cancel := context.WithTimeout(ctx, timeout)
@@ -290,7 +321,7 @@ func (f *Files) RenameOp() Handler {
 		if err := f.target(raw, &p); err != nil {
 			return nil, err
 		}
-		to, err := cleanFilePath(p.To)
+		to, err := CleanFilePath(p.To)
 		if err != nil || to == "" || p.Path == "" {
 			return nil, &OpError{Code: proto.ErrInvalidParams, Message: "nama baru tidak valid"}
 		}
