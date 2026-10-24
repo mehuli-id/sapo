@@ -31,15 +31,15 @@ func TestStats(t *testing.T) {
 		Interval: time.Hour, History: 2, IdleStop: time.Hour, IgnoreDevices: []string{"zram*"},
 	})
 	s.now = func() time.Time { return now }
-	get := func(since time.Time) proto.SystemStats {
-		raw, _ := json.Marshal(proto.StatsParams{Since: since})
+	get := func(after uint64) proto.SystemStats {
+		raw, _ := json.Marshal(proto.StatsParams{After: after})
 		out, err := s.StatsOp()(context.Background(), raw)
 		if err != nil {
 			t.Fatal(err)
 		}
 		return out.(proto.SystemStats)
 	}
-	if st := get(time.Time{}); len(st.Samples) != 0 {
+	if st := get(0); len(st.Samples) != 0 {
 		t.Fatalf("sampel pertama hanya titik awal: %+v", st)
 	}
 	// 2 detik kemudian: CPU 40% sibuk (20% menunggu disk), eth0 1000 B/s
@@ -49,7 +49,7 @@ func TestStats(t *testing.T) {
 	s.mu.Lock()
 	s.sampleLocked()
 	s.mu.Unlock()
-	st := get(time.Time{})
+	st := get(0)
 	if len(st.Samples) != 1 {
 		t.Fatalf("sampel = %+v", st)
 	}
@@ -70,11 +70,33 @@ func TestStats(t *testing.T) {
 		s.sampleLocked()
 		s.mu.Unlock()
 	}
-	if st := get(time.Time{}); len(st.Samples) != 2 {
-		t.Fatalf("riwayat = %d", len(st.Samples))
+	st = get(0)
+	if len(st.Samples) != 2 || st.Samples[1].Seq != 4 {
+		t.Fatalf("riwayat = %+v", st.Samples)
 	}
-	if st := get(now.Add(-time.Second)); len(st.Samples) != 1 {
-		t.Fatalf("sampel sejak = %d", len(st.Samples))
+	if st := get(3); len(st.Samples) != 1 {
+		t.Fatalf("sampel setelah nomor 3 = %d", len(st.Samples))
+	}
+	// iowait yang mundur tidak menjadi lonjakan 100%.
+	write(400, 1200, 50, 3000, 2000, 2, 4)
+	now = now.Add(2 * time.Second)
+	s.mu.Lock()
+	s.sampleLocked()
+	s.mu.Unlock()
+	if last := get(4).Samples[0]; last.IOWaitPercent != 0 || last.CPUPercent > 100 {
+		t.Fatalf("iowait mundur = %+v", last)
+	}
+	// Jawaban dibatasi; sisanya diambil dengan nomor terakhir.
+	s.t.History = 500
+	for i := 0; i < proto.MaxStatsSamples+10; i++ {
+		now = now.Add(2 * time.Second)
+		s.mu.Lock()
+		s.sampleLocked()
+		s.mu.Unlock()
+	}
+	first := get(0).Samples
+	if len(first) != proto.MaxStatsSamples || len(get(first[len(first)-1].Seq).Samples) == 0 {
+		t.Fatalf("halaman = %d", len(first))
 	}
 }
 

@@ -17,23 +17,30 @@ const interval = ref(2)
 const error = ref("")
 const MAX = 300
 
+// Sampel diambil per halaman dengan nomor urut terakhir (tidak bergantung
+// pada jam). Permintaan berikutnya baru dijadwalkan setelah yang ini selesai.
 async function poll() {
   try {
-    const last = samples.value[samples.value.length - 1]
-    const res = await api.systemStats(last?.time)
-    interval.value = res.interval_seconds
-    samples.value = [...samples.value, ...res.samples].slice(-MAX)
+    for (;;) {
+      const last = samples.value[samples.value.length - 1]
+      const res = await api.systemStats(last?.seq ?? 0)
+      interval.value = res.interval_seconds
+      samples.value = [...samples.value, ...res.samples].slice(-MAX)
+      if (res.samples.length < 120) break
+    }
     error.value = ""
   } catch (e) {
     error.value = e instanceof ApiError && e.code === "agent_unavailable" ? t("shell.agentDown") : t("common.error")
   }
+  if (!stopped) timer = window.setTimeout(poll, interval.value * 1000)
 }
 let timer: number | undefined
-onMounted(() => {
-  poll()
-  timer = window.setInterval(poll, 2000)
+let stopped = false
+onMounted(poll)
+onUnmounted(() => {
+  stopped = true
+  window.clearTimeout(timer)
 })
-onUnmounted(() => window.clearInterval(timer))
 
 const times = computed(() => samples.value.map((s) => Date.parse(s.time)))
 const pct = (v: number) => `${Math.round(v)}%`

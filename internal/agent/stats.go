@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -41,6 +42,7 @@ type Stats struct {
 	running  bool
 	lastRead time.Time
 	samples  []proto.StatsSample
+	seq      uint64
 	prev     *rawStats
 	now      func() time.Time
 }
@@ -82,7 +84,7 @@ func (s *Stats) StatsOp() Handler {
 		}
 		out := proto.SystemStats{IntervalSeconds: s.t.Interval.Seconds(), CPUCores: runtime.NumCPU(), Samples: []proto.StatsSample{}}
 		for _, smp := range s.samples {
-			if smp.Time.After(req.Since) {
+			if smp.Seq > req.After && len(out.Samples) < proto.MaxStatsSamples {
 				out.Samples = append(out.Samples, smp)
 			}
 		}
@@ -112,11 +114,14 @@ func (s *Stats) sampleLocked() {
 	if p := s.prev; p != nil {
 		secs := cur.at.Sub(p.at).Seconds()
 		if secs > 0 {
-			smp := proto.StatsSample{Time: cur.at.UTC(), MemoryUsedBytes: cur.memUsed, MemoryTotalBytes: cur.memTotal,
+			s.seq++
+			smp := proto.StatsSample{Seq: s.seq, Time: cur.at.UTC(), MemoryUsedBytes: cur.memUsed, MemoryTotalBytes: cur.memTotal,
 				Net: rates(p.net, cur.net, secs, 1), Disk: rates(p.disk, cur.disk, secs, 512)}
-			if dt := float64(cur.cpuTotal - p.cpuTotal); cur.cpuTotal > p.cpuTotal {
-				smp.CPUPercent = clampPct(100 * (dt - float64(cur.cpuIdle-p.cpuIdle)) / dt)
-				smp.IOWaitPercent = clampPct(100 * float64(cur.cpuIOWait-p.cpuIOWait) / dt)
+			// iowait (dan idle) di /proc/stat kadang mundur: selisih negatif
+			// dianggap 0, bukan dibungkus menjadi angka raksasa.
+			if dt := float64(delta(p.cpuTotal, cur.cpuTotal)); dt > 0 {
+				smp.CPUPercent = clampPct(100 * (dt - float64(delta(p.cpuIdle, cur.cpuIdle))) / dt)
+				smp.IOWaitPercent = clampPct(100 * float64(delta(p.cpuIOWait, cur.cpuIOWait)) / dt)
 			}
 			s.samples = append(s.samples, smp)
 			if len(s.samples) > s.t.History {
@@ -125,6 +130,13 @@ func (s *Stats) sampleLocked() {
 		}
 	}
 	s.prev = &cur
+}
+
+func delta(prev, cur uint64) uint64 {
+	if cur < prev {
+		return 0
+	}
+	return cur - prev
 }
 
 func clampPct(v float64) float64 {
@@ -140,7 +152,8 @@ func rates(prev, cur map[string][2]uint64, secs float64, unit float64) []proto.S
 		if !ok || c[0] < p[0] || c[1] < p[1] {
 			continue
 		}
-		out = append(out, proto.StatsRate{Name: name, In: float64(c[0]-p[0]) * unit / secs, Out: float64(c[1]-p[1]) * unit / secs})
+		// Dibulatkan per byte: jawaban tetap kecil walau disk banyak.
+		out = append(out, proto.StatsRate{Name: name, In: math.Round(float64(c[0]-p[0]) * unit / secs), Out: math.Round(float64(c[1]-p[1]) * unit / secs)})
 	}
 	slices.SortFunc(out, func(a, b proto.StatsRate) int { return strings.Compare(a.Name, b.Name) })
 	return out
