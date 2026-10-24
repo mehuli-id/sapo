@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/mehuli-id/sapo/internal/proto"
@@ -31,14 +32,16 @@ import (
 // ulang, sehingga akun baru tidak mewarisi file dan ACL akun yang dihapus.
 type AccountTools struct {
 	Useradd, Userdel, Groupadd, Groupdel, Gpasswd string
-	Smbpasswd, Pkill                              string
-	PasswdFile, GroupFile                         string
-	StateFile                                     string
-	IDMin, IDMax                                  int
-	PrimaryGroup                                  string
-	Shell                                         string
-	Timeout                                       time.Duration
-	Log                                           *slog.Logger
+	Smbpasswd, Smbstatus                          string
+	// ProcDir: /proc (diganti di test).
+	ProcDir               string
+	PasswdFile, GroupFile string
+	StateFile             string
+	IDMin, IDMax          int
+	PrimaryGroup          string
+	Shell                 string
+	Timeout               time.Duration
+	Log                   *slog.Logger
 }
 
 // Accounts melayani accounts.sync dan smb.set_password. Hanya satu
@@ -46,10 +49,17 @@ type AccountTools struct {
 type Accounts struct {
 	t  AccountTools
 	mu sync.Mutex
+	// kill menghentikan proses (diganti di test).
+	kill func(pid int) error
 }
 
 // NewAccounts menyiapkan operasi akun.
-func NewAccounts(t AccountTools) *Accounts { return &Accounts{t: t} }
+func NewAccounts(t AccountTools) *Accounts {
+	if t.ProcDir == "" {
+		t.ProcDir = "/proc"
+	}
+	return &Accounts{t: t, kill: func(pid int) error { return syscall.Kill(pid, syscall.SIGKILL) }}
+}
 
 // accountNamePattern: nama akun dan grup yang diterima (sama dengan aturan
 // Sapo; tidak diawali tanda hubung atau angka).
@@ -290,15 +300,19 @@ func (a *Accounts) sync(ctx context.Context, req proto.AccountsSyncParams) (prot
 	pg, ok := groups[a.t.PrimaryGroup]
 	switch {
 	case !ok:
-		id, err := a.allocID(&st, users, groups)
-		if err != nil {
-			return out, err
+		// ID dicatat sebelum groupadd: bila sapod berhenti di tengah, grup
+		// tetap dikenali sebagai buatan Sapo pada percobaan berikutnya.
+		id := st.Primary
+		if id == 0 {
+			if id, err = a.allocID(&st, users, groups); err != nil {
+				return out, err
+			}
+			st.Primary = id
+			if err := a.saveState(st); err != nil {
+				return out, err
+			}
 		}
 		if err := a.run(ctx, a.t.Groupadd, []string{"--gid", strconv.Itoa(id)}, a.t.PrimaryGroup); err != nil {
-			return out, err
-		}
-		st.Primary = id
-		if err := a.saveState(st); err != nil {
 			return out, err
 		}
 		pg = groupEntry{Name: a.t.PrimaryGroup, GID: id}
@@ -328,16 +342,21 @@ func (a *Accounts) sync(ctx context.Context, req proto.AccountsSyncParams) (prot
 			// Nama sudah dipakai grup lain: tidak pernah diambil alih.
 			out.Conflicts = append(out.Conflicts, "group:"+g)
 		default:
-			id, err := a.allocID(&st, users, groups)
-			if err != nil {
-				fail("group:"+g, err)
-				continue
+			id, rec := st.Groups[g]
+			if !rec {
+				if id, err = a.allocID(&st, users, groups); err != nil {
+					fail("group:"+g, err)
+					continue
+				}
+				st.Groups[g] = id
+				if err := a.saveState(st); err != nil {
+					return out, err
+				}
 			}
 			if err := a.run(ctx, a.t.Groupadd, []string{"--gid", strconv.Itoa(id)}, g); err != nil {
 				fail("group:"+g, err)
 				continue
 			}
-			st.Groups[g] = id
 			groups[g] = groupEntry{Name: g, GID: id}
 			wantGroups[g] = true
 			out.CreatedGroups = append(out.CreatedGroups, g)
@@ -354,17 +373,23 @@ func (a *Accounts) sync(ctx context.Context, req proto.AccountsSyncParams) (prot
 		case exists:
 			out.Conflicts = append(out.Conflicts, "user:"+u.Name)
 		default:
-			id, err := a.allocID(&st, users, groups)
-			if err != nil {
-				fail("user:"+u.Name, err)
-				continue
+			rec, ok := st.Users[u.Name]
+			id := rec.UID
+			if !ok {
+				if id, err = a.allocID(&st, users, groups); err != nil {
+					fail("user:"+u.Name, err)
+					continue
+				}
+				st.Users[u.Name] = stateAccount{UID: id}
+				if err := a.saveState(st); err != nil {
+					return out, err
+				}
 			}
 			flags := []string{"--uid", strconv.Itoa(id), "--no-create-home", "--home-dir", "/nonexistent", "--shell", a.t.Shell, "--gid", strconv.Itoa(pg.GID), "--no-user-group"}
 			if err := a.run(ctx, a.t.Useradd, flags, u.Name); err != nil {
 				fail("user:"+u.Name, err)
 				continue
 			}
-			st.Users[u.Name] = stateAccount{UID: id}
 			users[u.Name] = passwdEntry{Name: u.Name, UID: id, GID: pg.GID}
 			wantUsers[u.Name] = true
 			out.CreatedUsers = append(out.CreatedUsers, u.Name)
@@ -397,6 +422,16 @@ func (a *Accounts) sync(ctx context.Context, req proto.AccountsSyncParams) (prot
 		if !slices.Equal(want, have) {
 			if err := a.run(ctx, a.t.Gpasswd, []string{"--members", strings.Join(want, ",")}, g); err != nil {
 				fail("group:"+g, err)
+				continue
+			}
+			// Proses lama tetap membawa keanggotaan grup lama: sesi anggota
+			// yang dikeluarkan diputus agar izin grup langsung dicabut.
+			for _, m := range have {
+				if !slices.Contains(want, m) {
+					if e, ok := users[m]; ok {
+						a.endSessions(ctx, m, e.UID)
+					}
+				}
 			}
 		}
 	}
@@ -408,7 +443,7 @@ func (a *Accounts) sync(ctx context.Context, req proto.AccountsSyncParams) (prot
 			continue
 		}
 		if managedUser(name) {
-			a.endSessions(ctx, users[name].UID)
+			a.endSessions(ctx, name, users[name].UID)
 			a.smb(ctx, "-x", name)
 			if err := a.run(ctx, a.t.Userdel, nil, name); err != nil {
 				fail("user:"+name, err)
@@ -442,16 +477,18 @@ func (a *Accounts) sync(ctx context.Context, req proto.AccountsSyncParams) (prot
 		if s.SMBDisabled != nil && *s.SMBDisabled == u.Disabled {
 			continue
 		}
+		// Akun yang belum punya password Samba tidak bisa masuk lewat SMB;
+		// statusnya diterapkan saat password Samba dibuat (SMBPasswordOp).
+		flag := "-e"
 		if u.Disabled {
-			// Akun yang belum punya password Samba gagal di -d, tetapi memang
-			// belum bisa masuk; status nonaktif diterapkan lagi saat password
-			// Samba dibuat (SMBPasswordOp).
-			_ = a.smb(ctx, "-d", u.Name)
-			a.endSessions(ctx, s.UID)
-		} else if err := a.smb(ctx, "-e", u.Name); err != nil && s.SMBDisabled != nil && *s.SMBDisabled {
-			// Akun yang belum punya password Samba gagal di sini (wajar).
+			flag = "-d"
+		}
+		if err := a.smb(ctx, flag, u.Name); err != nil && !smbNoEntry(err) {
 			fail("user:"+u.Name, err)
 			continue
+		}
+		if u.Disabled {
+			a.endSessions(ctx, u.Name, s.UID)
 		}
 		disabled := u.Disabled
 		s.SMBDisabled = &disabled
@@ -467,13 +504,83 @@ func (a *Accounts) sync(ctx context.Context, req proto.AccountsSyncParams) (prot
 	return out, nil
 }
 
-// endSessions menghentikan semua proses milik UID (sesi SMB berjalan sebagai
-// pengguna itu), agar pencabutan akses langsung berlaku.
-func (a *Accounts) endSessions(ctx context.Context, uid int) {
+// endSessions memutus sesi SMB pengguna agar pencabutan akses langsung
+// berlaku: proses smbd yang melayani pengguna itu (dari smbstatus) dan
+// semua proses yang berjalan dengan UID-nya (real, efektif, tersimpan, atau
+// sistem berkas). Hanya UID akun Sapo yang pernah dihentikan.
+func (a *Accounts) endSessions(ctx context.Context, name string, uid int) {
 	if !a.inRange(uid) {
 		return
 	}
-	_, _ = runTool(ctx, a.t.Timeout, a.t.Pkill, []string{"-KILL", "--euid", strconv.Itoa(uid)})
+	pids := map[int]bool{}
+	for _, pid := range a.smbSessionPIDs(ctx, name) {
+		// Hanya proses smbd (bukan PID lain yang kebetulan sama).
+		if comm, err := os.ReadFile(filepath.Join(a.t.ProcDir, strconv.Itoa(pid), "comm")); err == nil && strings.TrimSpace(string(comm)) == "smbd" {
+			pids[pid] = true
+		}
+	}
+	entries, _ := os.ReadDir(a.t.ProcDir)
+	for _, e := range entries {
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil || pid <= 1 {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(a.t.ProcDir, e.Name(), "status"))
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			if f, ok := strings.CutPrefix(line, "Uid:"); ok && slices.Contains(strings.Fields(f), strconv.Itoa(uid)) {
+				pids[pid] = true
+			}
+		}
+	}
+	for pid := range pids {
+		_ = a.kill(pid)
+	}
+	if len(pids) > 0 && a.t.Log != nil {
+		a.t.Log.Info("sesi pengguna diputus", "user", name, "proses", len(pids))
+	}
+}
+
+// smbSessionPIDs membaca proses smbd milik sesi pengguna (smbstatus --json).
+func (a *Accounts) smbSessionPIDs(ctx context.Context, name string) []int {
+	if _, err := os.Stat(a.t.Smbstatus); err != nil {
+		return nil
+	}
+	res, err := runTool(ctx, a.t.Timeout, a.t.Smbstatus, []string{"--processes", "--json"})
+	if err != nil || res.ExitCode != 0 {
+		return nil
+	}
+	var st struct {
+		Sessions map[string]struct {
+			Username string `json:"username"`
+			ServerID struct {
+				PID flexUint `json:"pid"`
+			} `json:"server_id"`
+		} `json:"sessions"`
+	}
+	if json.Unmarshal(res.Stdout, &st) != nil {
+		return nil
+	}
+	var out []int
+	for _, sess := range st.Sessions {
+		// Nama di Samba bisa berawalan nama mesin (MESIN\nama).
+		user := sess.Username
+		if i := strings.LastIndexByte(user, '\\'); i >= 0 {
+			user = user[i+1:]
+		}
+		if strings.EqualFold(user, name) && sess.ServerID.PID > 1 {
+			out = append(out, int(sess.ServerID.PID))
+		}
+	}
+	return out
+}
+
+// smbNoEntry: smbpasswd gagal karena akun belum ada di basis data Samba.
+func smbNoEntry(err error) bool {
+	m := strings.ToLower(err.Error())
+	return strings.Contains(m, "failed to find entry") || strings.Contains(m, "does not exist")
 }
 
 // smb menjalankan smbpasswd dengan satu opsi untuk akun (bila Samba
@@ -530,6 +637,8 @@ func (a *Accounts) SMBPasswordOp() Handler {
 		// nonaktif yang tercatat diterapkan ulang.
 		if s.SMBDisabled != nil && *s.SMBDisabled {
 			if err := a.run(ctx, a.t.Smbpasswd, []string{"-d"}, req.Name); err != nil {
+				// Gagal menonaktifkan: akun Samba dihapus (gagal-tertutup).
+				_ = a.run(ctx, a.t.Smbpasswd, []string{"-x"}, req.Name)
 				return nil, err
 			}
 		}

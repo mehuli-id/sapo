@@ -222,7 +222,9 @@ func (s *Shares) ensureDataset(ctx context.Context, sp proto.ShareSpec) (string,
 	}
 	props, err = s.zfsProps(ctx, ds, "mountpoint", "mounted", sharePropName, sharePropACL)
 	if errors.Is(err, errNoDataset) {
-		res, runErr := s.p.st.run(ctx, s.t.Zfs, []string{"create", "-o", sharePropName + "=" + sp.Name}, ds)
+		// devices/setuid off: berkas perangkat dan setuid di folder bersama
+		// tidak pernah berlaku.
+		res, runErr := s.p.st.run(ctx, s.t.Zfs, []string{"create", "-o", sharePropName + "=" + sp.Name, "-o", "devices=off", "-o", "setuid=off"}, ds)
 		if runErr != nil {
 			return "", "", runErr
 		}
@@ -348,23 +350,37 @@ func (s *Shares) startACLJob(ds, path string, acl shareACL, applied string) {
 	hash := aclHash(acl)
 	s.jobsMu.Lock()
 	defer s.jobsMu.Unlock()
-	if j := s.jobs[ds]; j != nil {
-		if j.hash == hash && (!j.done || j.err == "") {
-			return
-		}
-		j.cancel()
-	}
+	prev := s.jobs[ds]
+	// Yang tercatat di dataset adalah sumber kebenaran; catatan di memori
+	// hanya menandai pekerjaan yang sedang berjalan.
 	if applied == hash {
+		if prev != nil {
+			prev.cancel()
+		}
 		delete(s.jobs, ds)
+		return
+	}
+	if prev != nil && prev.hash == hash && !prev.done {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 24*time.Hour)
 	job := &aclJob{hash: hash, cancel: cancel, finished: make(chan struct{})}
 	s.jobs[ds] = job
+	if prev != nil {
+		prev.cancel()
+	}
 	go func() {
 		defer close(job.finished)
 		defer cancel()
-		err := s.aclTree(ctx, path, acl)
+		// Pekerjaan lama harus benar-benar berhenti dulu, agar tidak menulis
+		// ACL lama setelah ACL baru.
+		if prev != nil {
+			<-prev.finished
+		}
+		err := ctx.Err()
+		if err == nil {
+			err = s.aclTree(ctx, path, acl)
+		}
 		if err == nil {
 			res, runErr := runTool(ctx, s.p.st.t.Timeout, s.t.Zfs, []string{"set", sharePropACL + "=" + hash}, ds)
 			switch {
@@ -603,12 +619,21 @@ func (s *Shares) DeleteOp() Handler {
 		if err != nil {
 			return nil, err
 		}
+		// Dataset anak (misalnya volume atau sistem berkas yang dipasang di
+		// tempat lain) tidak ikut terhapus diam-diam.
+		res, err := s.p.st.run(ctx, s.t.Zfs, []string{"list", "-H", "-r", "-t", "filesystem,volume", "-o", "name"}, ds)
+		if err != nil {
+			return nil, err
+		}
+		if res.ExitCode != 0 || strings.TrimSpace(string(res.Stdout)) != ds {
+			return nil, &OpError{Code: proto.ErrConflict, Message: "shared folder " + ds + " berisi dataset lain"}
+		}
 		s.stopACLJob(ds)
 		// Koneksi SMB yang masih membuka folder ditutup dulu, lalu folder
 		// dilepas. Bila masih dipakai, tidak ada yang dihapus (zfs destroy -r
 		// menghapus snapshot sebelum melepas folder).
 		_, _ = s.p.st.run(ctx, s.t.Smbcontrol, []string{"smbd", "close-share"}, req.Name)
-		res, err := s.p.st.run(ctx, s.t.Zfs, []string{"unmount"}, ds)
+		res, err = s.p.st.run(ctx, s.t.Zfs, []string{"unmount"}, ds)
 		if err != nil {
 			return nil, err
 		}

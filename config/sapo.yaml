@@ -76,8 +76,9 @@ agent:
     groupdel: /usr/sbin/groupdel
     gpasswd: /usr/bin/gpasswd
     smbpasswd: /usr/bin/smbpasswd
-    # Memutus sesi SMB pengguna yang dinonaktifkan atau dihapus.
-    pkill: /usr/bin/pkill
+    # Mencari sesi SMB pengguna yang dinonaktifkan, dihapus, atau
+    # dikeluarkan dari grup, untuk diputus.
+    smbstatus: /usr/bin/smbstatus
     passwd_file: /etc/passwd
     group_file: /etc/group
     # Catatan akun dan grup buatan sapod. ID tidak pernah dipakai ulang,

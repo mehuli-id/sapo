@@ -206,12 +206,18 @@ out="$(smb cici "get halo.txt $WORK/salinan.txt")"
 cmp -s "$WORK/halo.txt" "$WORK/salinan.txt" || fail "cici (baca, izin baru) harus bisa membaca file lama: $out"
 echo "SMB: izin baru berlaku untuk file yang sudah ada"
 
-# Pengguna yang dinonaktifkan tidak bisa masuk lewat SMB.
+# Pengguna yang dinonaktifkan tidak bisa masuk lewat SMB, dan sesinya yang
+# sedang terbuka ikut diputus.
+smbclient //127.0.0.1/keluarga -p "$SMB_PORT" -m SMB3 -U "ani%$UPASS" -c "ls; !sleep 15; ls" > "$WORK/sesi.txt" 2>&1 &
+sesi=$!
+sleep 5
 res="$(api POST /api/v1/users/ani "{\"disabled\":true}")"
 [[ "$res" == *' 200' ]] || fail "nonaktifkan ani: $res"
+wait "$sesi" || true
+[[ "$(grep -c 'halo.txt' "$WORK/sesi.txt")" == 1 ]] || fail "sesi ani yang terbuka harus diputus: $(cat "$WORK/sesi.txt")"
 out="$(smb ani "ls")"
 [[ "$out" == *"NT_STATUS"* && "$out" != *"halo.txt"* ]] || fail "ani nonaktif harus ditolak: $out"
-echo "SMB: pengguna nonaktif ditolak"
+echo "SMB: pengguna nonaktif ditolak dan sesinya diputus"
 
 # Hapus folder: nama salah ditolak, lalu folder dan isinya hilang.
 res="$(api POST /api/v1/shares/keluarga/delete "{\"confirm_name\":\"kel\",\"admin_password\":\"$PASS\"}")"

@@ -79,7 +79,7 @@ func main() {
 	ac := cfg.Agent.Accounts
 	accounts := agent.NewAccounts(agent.AccountTools{
 		Useradd: ac.Useradd, Userdel: ac.Userdel, Groupadd: ac.Groupadd, Groupdel: ac.Groupdel, Gpasswd: ac.Gpasswd,
-		Smbpasswd: ac.Smbpasswd, Pkill: ac.Pkill, PasswdFile: ac.PasswdFile, GroupFile: ac.GroupFile, StateFile: ac.StateFile,
+		Smbpasswd: ac.Smbpasswd, Smbstatus: ac.Smbstatus, PasswdFile: ac.PasswdFile, GroupFile: ac.GroupFile, StateFile: ac.StateFile,
 		IDMin: ac.IDMin, IDMax: ac.IDMax, PrimaryGroup: ac.PrimaryGroup, Shell: ac.Shell,
 		Timeout: time.Duration(sc.CommandTimeoutSeconds) * time.Second, Log: log,
 	})
