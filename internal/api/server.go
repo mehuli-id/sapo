@@ -256,6 +256,9 @@ func New(o Options) (*Server, error) {
 	s.mux.Handle("GET /api/v1/settings/time", s.requireAdmin(s.proxyRead(proto.OpTimeStatus)))
 	s.mux.Handle("GET /api/v1/settings/timezones", s.requireAdmin(s.proxyRead(proto.OpTimeZones)))
 	s.mux.Handle("POST /api/v1/settings/time", s.requireAdmin(http.HandlerFunc(s.handleTimeSet)))
+	s.mux.Handle("GET /api/v1/updates", s.requireAdmin(s.proxyRead(proto.OpUpdatesStatus)))
+	s.mux.Handle("POST /api/v1/updates/check", s.requireAdmin(http.HandlerFunc(s.handleUpdatesCheck)))
+	s.mux.Handle("POST /api/v1/updates/install", s.requireAdmin(http.HandlerFunc(s.handleUpdatesInstall)))
 	s.mux.Handle("GET /api/v1/network", s.requireAdmin(s.proxyRead(proto.OpNetworkStatus)))
 	s.mux.Handle("POST /api/v1/network", s.requireAdmin(http.HandlerFunc(s.handleNetworkApply)))
 	// Konfirmasi dan pembatalan cukup dengan token dari network.apply (256
@@ -558,7 +561,7 @@ func (s *Server) agentError(w http.ResponseWriter, op string, err error) {
 			status = http.StatusConflict
 		case proto.ErrConflict:
 			status = http.StatusConflict
-		case "pool_create_failed", "pool_scrub_failed", "pool_replace_failed", "pool_destroy_failed", "share_delete_failed":
+		case "pool_create_failed", "pool_scrub_failed", "pool_replace_failed", "pool_destroy_failed", "share_delete_failed", "updates_failed":
 			status = http.StatusUnprocessableEntity
 		}
 		writeError(w, status, pe.Code, pe.Message)

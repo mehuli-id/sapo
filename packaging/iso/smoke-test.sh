@@ -464,6 +464,29 @@ assert i['address']=='10.0.2.15/24' and not v.get('pending'), v
 assert any('10.0.2.15/24' in l['addresses'] for l in v['interfaces']), v" <<<"$net" || fail "pengaturan lama harus kembali: $net"
 echo "jaringan: alamat 10.0.2.99 tidak dikonfirmasi, pengaturan lama kembali sendiri"
 
+# --- Pembaruan sistem (ADR 0011) ---------------------------------------------------
+# Periksa selalu (apt-get update di VM sungguhan). Pasang hanya bila daftarnya
+# kecil dan tidak menyentuh kernel, ZFS, atau Sapo sendiri (paket Sapo dari
+# repo bisa berbeda dengan yang sedang diuji), agar uji asap tidak lama.
+res="$(curl -ksS -b "$JAR" -X POST -H 'X-Sapo-Request: 1' -w ' %{http_code}' --max-time 300 "$HTTPS/api/v1/updates/check")"
+[[ "$res" == *' 200' ]] || fail "periksa pembaruan: $res"
+pkgs="$(json 'print(" ".join(p["name"] for p in v["packages"]))' <<<"$res")"
+count="$(json 'print(len(v["packages"]))' <<<"$res")"
+echo "pembaruan: $count paket bisa diperbarui"
+if (( count <= 15 )) && ! grep -qE '(^| )(linux-|zfs|sapo( |$))' <<<"$pkgs"; then
+  res="$(api POST /api/v1/updates/install "{\"admin_password\":\"$PASS\"}")"
+  [[ "$res" == *' 200' ]] || fail "pasang pembaruan: $res"
+  for _ in $(seq 1 200); do
+    st="$(api GET /api/v1/updates || true)"
+    json 'import sys; sys.exit(0 if not v["running"] and (v.get("last") or {}).get("finished_at") else 1)' <<<"$st" 2>/dev/null && break
+    sleep 3
+  done
+  json 'assert v["last"]["ok"], v' <<<"$st" || fail "pemasangan pembaruan: $st"
+  echo "pembaruan: dipasang lewat unit sapo-updates ($(json 'print(v["log"][-1])' <<<"$st"))"
+else
+  echo "pembaruan: pemasangan dilewati di uji asap (daftar besar atau menyentuh kernel/ZFS/Sapo): $pkgs" | cut -c1-300
+fi
+
 # --- Menu darurat di konsol (port serial) ----------------------------------------
 # console_chat POLA KIRIM [POLA KIRIM ...]: tunggu POLA (regex) di keluaran
 # serial lalu kirim teks (\n = Enter). Mencetak grup pertama dari pola

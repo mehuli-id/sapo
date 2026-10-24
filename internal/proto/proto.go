@@ -105,6 +105,14 @@ const (
 	OpTimeZones  = "time.zones"
 	OpTimeSet    = "time.set"
 
+	// Pembaruan sistem (ADR 0011): OpUpdatesCheck menjalankan apt-get update
+	// dan mendaftar paket yang bisa diperbarui; OpUpdatesInstall memasangnya
+	// di unit systemd terpisah (tetap berjalan bila sapod di-restart);
+	// OpUpdatesStatus membaca keadaan dan log pemasangan.
+	OpUpdatesCheck   = "updates.check"
+	OpUpdatesInstall = "updates.install"
+	OpUpdatesStatus  = "updates.status"
+
 	// Operasi File Station (ADR 0010). Semua dijalankan sebagai akun Linux
 	// pengguna (proses pembantu), jadi izinnya ditegakkan kernel (ACL).
 	OpFilesList   = "files.list"
@@ -680,4 +688,35 @@ type TimeStatus struct {
 type TimeSetParams struct {
 	Timezone string `json:"timezone"`
 	NTP      bool   `json:"ntp"`
+}
+
+// UpdatePackage adalah satu paket yang bisa diperbarui.
+type UpdatePackage struct {
+	Name string `json:"name"`
+	From string `json:"from,omitempty"`
+	To   string `json:"to"`
+}
+
+// UpdatesCheckResult adalah hasil updates.check.
+type UpdatesCheckResult struct {
+	CheckedAt time.Time       `json:"checked_at"`
+	Packages  []UpdatePackage `json:"packages"`
+}
+
+// UpdatesStatus adalah hasil updates.status.
+type UpdatesStatus struct {
+	// Running: pemasangan sedang berjalan.
+	Running bool `json:"running"`
+	// Last: hasil pemasangan terakhir (nil bila belum pernah).
+	Last *UpdateRun `json:"last,omitempty"`
+	// Log: baris terakhir log pemasangan.
+	Log []string `json:"log"`
+}
+
+// UpdateRun adalah hasil satu pemasangan pembaruan.
+type UpdateRun struct {
+	StartedAt  time.Time `json:"started_at"`
+	FinishedAt time.Time `json:"finished_at,omitempty"`
+	OK         bool      `json:"ok"`
+	ExitCode   int       `json:"exit_code"`
 }

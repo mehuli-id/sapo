@@ -325,7 +325,8 @@
     "system_sync_failed": "Saved, but not yet applied to the system. Try again shortly.",
     "password_invalid": "The password can’t contain control characters (such as tab or newline).",
     "nfs_invalid": "Invalid NFS settings: pick a user and enter client IP addresses or networks (for example 192.168.1.0/24). Host names and overly wide networks aren’t accepted.",
-    "invalid_params": "Invalid input: {message}"
+    "invalid_params": "Invalid input: {message}",
+    "updates_failed": "Update failed: {message}"
   },
   "pool": {
     "title": "Storage pools",
@@ -653,6 +654,17 @@
     "ntpOff": "Automatic clock synchronization is off.",
     "timeSaved": "Time settings saved.",
     "confirmOff": "Turn off {name}? Every computer using folders through this service will be disconnected.",
-    "turnOff": "Turn off"
+    "turnOff": "Turn off",
+    "updates": "System updates",
+    "updatesHelp": "Updates Debian and Sapo packages from the official repositories. Packages are never removed, and settings changed by the admin are kept.",
+    "checkUpdates": "Check for updates",
+    "upToDate": "The system is up to date.",
+    "available": "{count} packages can be updated:",
+    "sapoUpdate": "Sapo itself is being updated: the panel stops briefly and reconnects on its own.",
+    "install": "Install updates",
+    "installing": "Installing updates… You can close this window; installation keeps running.",
+    "installed": "Updates last installed {when}.",
+    "installFailed": "The last update installation failed (code {code}). See the log.",
+    "updateLog": "Installation log"
   }
 }
