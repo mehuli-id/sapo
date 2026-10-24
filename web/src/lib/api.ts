@@ -406,6 +406,7 @@ export const api = {
     post<{ ok: boolean }>(`/api/v1/groups/${encodeURIComponent(name)}`, req),
   deleteGroup: (name: string) => post<{ ok: boolean }>(`/api/v1/groups/${encodeURIComponent(name)}/delete`),
   shares: () => get<SharedFolder[]>("/api/v1/shares"),
+  syncStatus: () => get<{ ok: boolean; error: string; retrying: boolean }>("/api/v1/system/sync"),
   createShare: (req: { name: string; pool: string; description: string; permissions: Record<string, ShareAccess>; admin_password: string }) =>
     post<SharedFolder>("/api/v1/shares", req),
   updateShare: (name: string, req: { description?: string; permissions?: Record<string, ShareAccess>; admin_password?: string }) =>

@@ -518,6 +518,7 @@
     "typeName": "Ketik nama folder",
     "delete": "Hapus folder dan isinya",
     "aclPending": "Izin sedang diterapkan ke isi folder. Untuk folder besar ini bisa lama; sampai selesai, sebagian file mungkin belum bisa dibuka pengguna baru.",
-    "aclError": "Izin belum berhasil diterapkan ke semua isi folder: {message}"
+    "aclError": "Izin belum berhasil diterapkan ke semua isi folder: {message}",
+    "syncPending": "Perubahan pengguna atau izin belum diterapkan ke sistem; Sapo terus mencoba ulang. Sementara itu folder ditutup bila akun tidak bisa dipastikan."
   }
 }
