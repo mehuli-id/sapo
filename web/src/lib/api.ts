@@ -295,6 +295,8 @@ export interface StatsRate {
 }
 
 export interface StatsSample {
+  // nomor urut, dipakai untuk meminta sampel berikutnya
+  seq: number
   time: string
   cpu_percent: number
   iowait_percent: number
@@ -439,7 +441,7 @@ export const api = {
   pools: () => get<PoolsResult>("/api/v1/storage/pools"),
   createPool: (req: PoolCreateRequest) => post<Pool>("/api/v1/storage/pools", req),
   networkStatus: () => get<NetworkStatus>("/api/v1/network"),
-  systemStats: (since?: string) => get<SystemStats>(`/api/v1/system/stats${since ? `?since=${encodeURIComponent(since)}` : ""}`),
+  systemStats: (after = 0) => get<SystemStats>(`/api/v1/system/stats?after=${after}`),
   applyNetwork: (config: NetworkConfig, admin_password: string) => post<NetworkApplyResult>("/api/v1/network", { config, admin_password }),
   confirmNetwork: (token: string) => post<{ ok: boolean }>("/api/v1/network/confirm", { token }),
   cancelNetwork: (token: string) => post<{ ok: boolean }>("/api/v1/network/cancel", { token }),

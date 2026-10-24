@@ -18,6 +18,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -485,17 +486,17 @@ func (s *Server) proxyRead(op string) http.HandlerFunc {
 	}
 }
 
-// handleStats: riwayat pemakaian sistem; ?since=<RFC 3339> hanya sampel
-// yang lebih baru.
+// handleStats: riwayat pemakaian sistem; ?after=<nomor> hanya sampel yang
+// lebih baru.
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	var params proto.StatsParams
-	if v := r.URL.Query().Get("since"); v != "" {
-		t, err := time.Parse(time.RFC3339Nano, v)
+	if v := r.URL.Query().Get("after"); v != "" {
+		n, err := strconv.ParseUint(v, 10, 64)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", "since tidak valid")
+			writeError(w, http.StatusBadRequest, "bad_request", "after tidak valid")
 			return
 		}
-		params.Since = t
+		params.After = n
 	}
 	var out json.RawMessage
 	if err := s.agent.Call(r.Context(), proto.OpSystemStats, params, &out); err != nil {

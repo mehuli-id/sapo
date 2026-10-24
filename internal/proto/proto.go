@@ -558,10 +558,15 @@ type NetworkTokenParams struct {
 	Token string `json:"token"`
 }
 
-// StatsParams: hanya sampel setelah Since (kosong = semua riwayat).
+// StatsParams: hanya sampel dengan nomor urut setelah After (0 = dari
+// awal riwayat). Paling banyak MaxStatsSamples per jawaban; ambil lagi
+// dengan After = nomor terakhir sampai kurang dari itu.
 type StatsParams struct {
-	Since time.Time `json:"since,omitempty"`
+	After uint64 `json:"after,omitempty"`
 }
+
+// MaxStatsSamples membatasi sampel per jawaban (batas ukuran pesan sapod).
+const MaxStatsSamples = 120
 
 // SystemStats adalah hasil system.stats: sampel urut dari yang terlama.
 type SystemStats struct {
@@ -572,6 +577,8 @@ type SystemStats struct {
 
 // StatsSample adalah pemakaian sistem rata-rata selama satu selang.
 type StatsSample struct {
+	// Seq: nomor urut sampel (tidak bergantung pada jam, yang bisa mundur).
+	Seq        uint64    `json:"seq"`
 	Time       time.Time `json:"time"`
 	CPUPercent float64   `json:"cpu_percent"`
 	// IOWaitPercent: waktu CPU menunggu disk.

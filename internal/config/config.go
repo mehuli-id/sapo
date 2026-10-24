@@ -105,8 +105,8 @@ type Stats struct {
 }
 
 func (s Stats) validate() error {
-	if s.IntervalSeconds < 1 || s.IntervalSeconds > 60 || s.History < 10 || s.History > 3600 || s.IdleStopSeconds < 10 {
-		return errors.New("agent.stats: interval_seconds 1-60, history 10-3600, idle_stop_seconds minimal 10")
+	if s.IntervalSeconds < 1 || s.IntervalSeconds > 60 || s.History < 10 || s.History > 1800 || s.IdleStopSeconds < 10 || s.IdleStopSeconds > 3600 {
+		return errors.New("agent.stats: interval_seconds 1-60, history 10-1800, idle_stop_seconds 10-3600")
 	}
 	return nil
 }
