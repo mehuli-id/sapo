@@ -128,9 +128,10 @@ func main() {
 	}, shares, accounts.Managed)
 	uc := cfg.Agent.Updates
 	updates := agent.NewUpdates(agent.UpdatesTools{
-		AptGet: uc.AptGet, SystemdRun: uc.SystemdRun, Systemctl: cfg.Agent.Shares.Systemctl, Self: self,
+		AptGet: uc.AptGet, Dpkg: uc.Dpkg, SystemdRun: uc.SystemdRun, Systemctl: cfg.Agent.Shares.Systemctl, Self: self,
 		Unit: uc.Unit, LogFile: uc.LogFile, ResultFile: uc.ResultFile,
-		CheckTimeout: time.Duration(uc.CheckTimeoutSeconds) * time.Second,
+		CheckTimeout:   time.Duration(uc.CheckTimeoutSeconds) * time.Second,
+		InstallTimeout: time.Duration(uc.InstallTimeoutSeconds) * time.Second,
 	})
 	reg.Register(proto.OpUpdatesCheck, updates.CheckOp())
 	reg.Register(proto.OpUpdatesInstall, updates.InstallOp())

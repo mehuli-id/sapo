@@ -37,8 +37,8 @@ func TestUpdatesOps(t *testing.T) {
 	active := false
 	var calls []string
 	u := NewUpdates(UpdatesTools{AptGet: "/usr/bin/apt-get", SystemdRun: "/usr/bin/systemd-run", Systemctl: "/usr/bin/systemctl",
-		Self: "/usr/lib/sapo/sapod", Unit: "sapo-updates.service", LogFile: filepath.Join(dir, "updates.log"),
-		ResultFile: filepath.Join(dir, "result.json"), CheckTimeout: time.Minute})
+		Dpkg: "/usr/bin/dpkg", Self: "/usr/lib/sapo/sapod", Unit: "sapo-updates.service", LogFile: filepath.Join(dir, "updates.log"),
+		ResultFile: filepath.Join(dir, "result.json"), CheckTimeout: time.Minute, InstallTimeout: time.Hour})
 	u.run = func(_ context.Context, prog string, args ...string) (toolResult, error) {
 		calls = append(calls, filepath.Base(prog)+" "+strings.Join(args, " "))
 		switch {
@@ -67,7 +67,7 @@ func TestUpdatesOps(t *testing.T) {
 		t.Fatal(err)
 	}
 	last := calls[len(calls)-1]
-	if !strings.HasPrefix(last, "systemd-run --unit=sapo-updates.service") || !strings.HasSuffix(last, "-- /usr/lib/sapo/sapod apt-run /usr/bin/apt-get "+filepath.Join(dir, "updates.log")+" "+filepath.Join(dir, "result.json")) {
+	if !strings.HasPrefix(last, "systemd-run --unit=sapo-updates.service") || !strings.HasSuffix(last, "-- /usr/lib/sapo/sapod apt-run /usr/bin/apt-get /usr/bin/dpkg "+filepath.Join(dir, "updates.log")+" "+filepath.Join(dir, "result.json")) {
 		t.Fatalf("systemd-run = %s", last)
 	}
 	// Sedang berjalan: periksa dan pasang ditolak.
@@ -83,8 +83,14 @@ func TestUpdatesOps(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(dir, "result.json"), []byte(`{"started_at":"2026-10-25T01:00:00Z","ok":true,"exit_code":0}`), 0o600)
 	res, _ = u.StatusOp()(context.Background(), nil)
 	st := res.(proto.UpdatesStatus)
-	if !st.Running || st.Last == nil || !st.Last.OK || len(st.Log) != 3 || strings.ContainsRune(st.Log[1], 0x1b) {
+	if !st.Running || st.Last == nil || !st.Last.OK || len(st.Log) != 3 || strings.ContainsRune(st.Log[1], 0x1b) || st.Last.Interrupted {
 		t.Fatalf("status = %+v", st)
+	}
+	// Unit berhenti tanpa hasil akhir: terputus.
+	active = false
+	res, _ = u.StatusOp()(context.Background(), nil)
+	if st := res.(proto.UpdatesStatus); st.Last == nil || !st.Last.Interrupted {
+		t.Fatalf("pemasangan terputus = %+v", st.Last)
 	}
 }
 
@@ -92,8 +98,10 @@ func TestAptRunMain(t *testing.T) {
 	dir := t.TempDir()
 	apt := filepath.Join(dir, "apt-get")
 	_ = os.WriteFile(apt, []byte("#!/bin/sh\necho \"apt $*\"\n[ \"$DEBIAN_FRONTEND\" = noninteractive ] || exit 9\ncase \"$*\" in *upgrade*) exit 100 ;; esac\n"), 0o755)
+	dpkg := filepath.Join(dir, "dpkg")
+	_ = os.WriteFile(dpkg, []byte("#!/bin/sh\necho \"dpkg $*\"\n"), 0o755)
 	log, result := filepath.Join(dir, "log"), filepath.Join(dir, "result.json")
-	if code := AptRunMain([]string{apt, log, result}); code != 1 {
+	if code := AptRunMain([]string{apt, dpkg, log, result}); code != 1 {
 		t.Fatalf("kode = %d", code)
 	}
 	var r proto.UpdateRun
@@ -102,10 +110,10 @@ func TestAptRunMain(t *testing.T) {
 	if r.OK || r.ExitCode != 100 || r.FinishedAt.IsZero() {
 		t.Fatalf("hasil = %+v", r)
 	}
-	if b, _ := os.ReadFile(log); !strings.Contains(string(b), "apt -q update") || !strings.Contains(string(b), "selesai: kode 100") {
+	if b, _ := os.ReadFile(log); !strings.Contains(string(b), "dpkg --force-confdef --force-confold --configure -a") || !strings.Contains(string(b), "update") || !strings.Contains(string(b), "selesai: kode 100") {
 		t.Fatalf("log:\n%s", b)
 	}
-	if code := AptRunMain([]string{"apt-get", log, result}); code != 2 {
+	if code := AptRunMain([]string{"apt-get", dpkg, log, result}); code != 2 {
 		t.Fatal("path relatif harus ditolak")
 	}
 }

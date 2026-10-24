@@ -102,22 +102,25 @@ type Accounts struct {
 // Updates mengatur pembaruan sistem (ADR 0011).
 type Updates struct {
 	AptGet     string `yaml:"apt_get"`
+	Dpkg       string `yaml:"dpkg"`
 	SystemdRun string `yaml:"systemd_run"`
 	Unit       string `yaml:"unit"`
 	LogFile    string `yaml:"log_file"`
 	ResultFile string `yaml:"result_file"`
 	// Batas waktu memeriksa pembaruan (apt-get update + simulasi).
 	CheckTimeoutSeconds int `yaml:"check_timeout_seconds"`
+	// Pemasangan dihentikan systemd bila lebih lama dari ini.
+	InstallTimeoutSeconds int `yaml:"install_timeout_seconds"`
 }
 
 func (u Updates) validate() error {
-	for _, p := range []string{u.AptGet, u.SystemdRun, u.LogFile, u.ResultFile} {
+	for _, p := range []string{u.AptGet, u.Dpkg, u.SystemdRun, u.LogFile, u.ResultFile} {
 		if !filepath.IsAbs(p) {
 			return fmt.Errorf("agent.updates: %q harus path absolut", p)
 		}
 	}
-	if !serviceName.MatchString(u.Unit) || u.CheckTimeoutSeconds < 30 || u.CheckTimeoutSeconds > 280 {
-		return errors.New("agent.updates: unit harus nama unit .service, check_timeout_seconds 30-280")
+	if !serviceName.MatchString(u.Unit) || u.CheckTimeoutSeconds < 30 || u.CheckTimeoutSeconds > 280 || u.InstallTimeoutSeconds < 600 {
+		return errors.New("agent.updates: unit harus nama unit .service, check_timeout_seconds 30-280, install_timeout_seconds minimal 600")
 	}
 	return nil
 }
@@ -366,8 +369,9 @@ func Default() Config {
 			},
 			Stats: Stats{IntervalSeconds: 2, History: 300, IdleStopSeconds: 60},
 			Time:  Time{Timedatectl: "/usr/bin/timedatectl"},
-			Updates: Updates{AptGet: "/usr/bin/apt-get", SystemdRun: "/usr/bin/systemd-run", Unit: "sapo-updates.service",
-				LogFile: "/var/lib/sapod/updates.log", ResultFile: "/var/lib/sapod/updates-result.json", CheckTimeoutSeconds: 240},
+			Updates: Updates{AptGet: "/usr/bin/apt-get", Dpkg: "/usr/bin/dpkg", SystemdRun: "/usr/bin/systemd-run", Unit: "sapo-updates.service",
+				LogFile: "/var/lib/sapod/updates.log", ResultFile: "/var/lib/sapod/updates-result.json", CheckTimeoutSeconds: 240,
+				InstallTimeoutSeconds: 3 * 3600},
 			Files: Files{MaxEntries: 5000, TimeoutSeconds: 30, DeleteTimeoutSeconds: 270},
 			Network: Network{
 				IP: "/usr/sbin/ip", Systemctl: "/usr/bin/systemctl", Hostnamectl: "/usr/bin/hostnamectl",

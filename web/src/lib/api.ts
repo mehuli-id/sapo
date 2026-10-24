@@ -493,7 +493,11 @@ export const api = {
   services: () => get<{ smb: boolean; nfs: boolean }>("/api/v1/settings/services"),
   setServices: (req: { smb?: boolean; nfs?: boolean }) => post<{ smb: boolean; nfs: boolean; warning?: string }>("/api/v1/settings/services", req),
   updatesStatus: () =>
-    get<{ running: boolean; last?: { started_at: string; finished_at?: string; ok: boolean; exit_code: number }; log: string[] }>("/api/v1/updates"),
+    get<{
+      running: boolean
+      last?: { started_at: string; finished_at?: string; ok: boolean; exit_code: number; interrupted?: boolean }
+      log: string[]
+    }>("/api/v1/updates"),
   checkUpdates: () => post<{ checked_at: string; packages: { name: string; from?: string; to: string }[] }>("/api/v1/updates/check"),
   installUpdates: (admin_password: string) => post<{ ok: boolean }>("/api/v1/updates/install", { admin_password }),
   timeStatus: () => get<{ timezone: string; now: string; ntp: boolean; synchronized: boolean }>("/api/v1/settings/time"),

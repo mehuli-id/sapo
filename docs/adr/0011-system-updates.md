@@ -12,9 +12,11 @@ NAS harus mendapat perbaikan keamanan Debian dan versi Sapo baru tanpa terminal 
 - **Periksa** (`updates.check`): `apt-get update`, lalu simulasi `apt-get -s upgrade --with-new-pkgs` untuk daftar paket (nama, versi lama, versi baru). Admin, tanpa password (tidak mengubah paket).
 - **Pasang** (`updates.install`): butuh password admin dan tercatat di log audit. `sapod` menjalankan dirinya sendiri (`sapod apt-run`) lewat `systemd-run` di **unit sementara tersendiri** (`agent.updates.unit`, bawaan `sapo-updates.service`). Unit itu bukan bagian cgroup `sapod`, jadi tidak ikut dihentikan saat paket Sapo diperbarui dan `sapod` di-restart. Hanya satu pemasangan atau pemeriksaan berjalan pada satu waktu.
   - `apt-get upgrade --with-new-pkgs`: paket baru yang dibutuhkan boleh dipasang, **tidak pernah menghapus paket** (bukan `dist-upgrade`). Pemutakhiran rilis Debian di luar cakupan ini.
-  - Non-interaktif (`DEBIAN_FRONTEND=noninteractive`), file konfigurasi yang diubah admin dipertahankan (`--force-confdef --force-confold`).
+  - Pemasangan dpkg sebelumnya yang terputus dilanjutkan dulu (`dpkg --configure -a`), agar tidak pernah butuh terminal.
+  - Non-interaktif (`DEBIAN_FRONTEND=noninteractive`), file konfigurasi yang diubah admin dipertahankan (`--force-confdef --force-confold`, `UCF_FORCE_CONFFOLD`), needrestart hanya mendaftar layanan.
+  - Menunggu kunci apt sampai 2 menit (misalnya apt-daily berjalan); unit dihentikan systemd setelah `install_timeout_seconds` (bawaan 3 jam).
   - Semua argumen apt tetap di kode; dari panel hanya perintah "periksa" dan "pasang".
-- **Status** (`updates.status`): unit masih aktif atau tidak, hasil terakhir (`result_file`, ditulis `apt-run` di awal dan akhir), dan 40 baris terakhir log (`log_file`, karakter kendali dibuang). Panel terus menanyakan status selama pemasangan, termasuk saat `sapo-api` sedang dinyalakan ulang.
+- **Status** (`updates.status`): unit masih aktif atau tidak, hasil terakhir (`result_file`, ditulis `apt-run` di awal dan akhir), dan 40 baris terakhir log (`log_file`, karakter kendali dibuang). Panel terus menanyakan status selama pemasangan, termasuk saat `sapo-api` sedang dinyalakan ulang. Unit yang berhenti tanpa hasil akhir dilaporkan "terputus".
 
 ## Alasan
 
@@ -25,4 +27,5 @@ NAS harus mendapat perbaikan keamanan Debian dan versi Sapo baru tanpa terminal 
 
 - Pembaruan kernel atau ZFS butuh restart NAS agar berlaku; panel belum memberi tahu (menyusul).
 - Pembaruan otomatis terjadwal belum ada.
+- Log audit mencatat permintaan pemasangan; hasilnya ada di status dan log pemasangan, belum di log audit.
 - Uji asap ISO selalu memeriksa pembaruan, tetapi hanya memasangnya bila daftarnya kecil dan tidak menyentuh kernel, ZFS, atau Sapo.
