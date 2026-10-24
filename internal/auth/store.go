@@ -198,10 +198,17 @@ func (s *Store) SetTOTP(username, secret string, step int64) error {
 	})
 }
 
-// SetPasswordHash mengganti hash password (misalnya setelah parameter
-// Argon2 di konfigurasi dinaikkan).
-func (s *Store) SetPasswordHash(username, hash string) error {
+// ErrPasswordChanged: hash password sudah berbeda dari yang diharapkan.
+var ErrPasswordChanged = errors.New("password sudah diganti")
+
+// ReplacePasswordHash mengganti hash password hanya bila hash yang tersimpan
+// masih old (compare-and-set), misalnya hash ulang setelah parameter Argon2
+// dinaikkan: tidak boleh menimpa password yang baru di-reset.
+func (s *Store) ReplacePasswordHash(username, old, hash string) error {
 	return s.updateUser(username, func(u *User) error {
+		if u.PasswordHash != old {
+			return ErrPasswordChanged
+		}
 		u.PasswordHash = hash
 		return nil
 	})

@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -36,12 +36,33 @@ func testAccounts(t *testing.T) (*Accounts, string) {
 		}
 		return p
 	}
-	return NewAccounts(AccountTools{
+	// /proc tiruan: proses 4242 (smbd, sesi "ani" menurut smbstatus) dan 5001
+	// (berjalan dengan UID 20001 milik akun lama).
+	proc := filepath.Join(dir, "proc")
+	for pid, f := range map[string][2]string{
+		"4242": {"smbd", "Uid:\t0\t0\t0\t0\n"},
+		"5001": {"smbd", "Uid:\t20001\t20001\t20001\t20001\n"},
+		"6000": {"bash", "Uid:\t1000\t1000\t1000\t1000\n"},
+	} {
+		_ = os.MkdirAll(filepath.Join(proc, pid), 0o755)
+		_ = os.WriteFile(filepath.Join(proc, pid, "comm"), []byte(f[0]+"\n"), 0o644)
+		_ = os.WriteFile(filepath.Join(proc, pid, "status"), []byte("Name:\t"+f[0]+"\n"+f[1]), 0o644)
+	}
+	smbstatus := filepath.Join(dir, "smbstatus")
+	_ = os.WriteFile(smbstatus, []byte("#!/bin/sh\nprintf '%s\\n' '{\"sessions\":{\"1\":{\"username\":\"SAPO\\\\ani\",\"server_id\":{\"pid\":\"4242\"}}}}'\n"), 0o755)
+	a := NewAccounts(AccountTools{
 		Useradd: tool("useradd"), Userdel: tool("userdel"), Groupadd: tool("groupadd"), Groupdel: tool("groupdel"),
-		Gpasswd: tool("gpasswd"), Smbpasswd: tool("smbpasswd"), Pkill: tool("pkill"),
+		Gpasswd: tool("gpasswd"), Smbpasswd: tool("smbpasswd"), Smbstatus: smbstatus, ProcDir: proc,
 		PasswdFile: filepath.Join(dir, "passwd"), GroupFile: filepath.Join(dir, "group"), StateFile: filepath.Join(dir, "state.json"),
 		IDMin: 20000, IDMax: 29999, PrimaryGroup: "sapo-users", Shell: "/usr/sbin/nologin", Timeout: 5 * time.Second,
-	}), dir
+	})
+	a.kill = func(pid int) error {
+		f, _ := os.OpenFile(filepath.Join(dir, "calls.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		defer f.Close()
+		fmt.Fprintf(f, "kill %d\n", pid)
+		return nil
+	}
+	return a, dir
 }
 
 func syncAccounts(t *testing.T, a *Accounts, p proto.AccountsSyncParams) (proto.AccountsSyncResult, error) {
@@ -101,9 +122,10 @@ func TestAccountsSync(t *testing.T) {
 	if !strings.Contains(string(calls), "smbpasswd -d -- ani") || !strings.Contains(string(calls), "smbpasswd -e -- budi") {
 		t.Fatalf("status Samba tidak disinkronkan:\n%s", calls)
 	}
-	// Sesi akun yang dihapus (lama, UID 20001) dan yang dinonaktifkan diputus.
-	if !strings.Contains(string(calls), "pkill -KILL --euid 20001 --") || !strings.Contains(string(calls), "pkill -KILL --euid "+strconv.Itoa(users["ani"].UID)) {
-		t.Fatalf("sesi tidak diputus:\n%s", calls)
+	// Sesi akun yang dihapus (lama: proses ber-UID 20001) dan yang
+	// dinonaktifkan (ani: sesi smbd dari smbstatus) diputus; proses lain tidak.
+	if !strings.Contains(string(calls), "kill 5001") || !strings.Contains(string(calls), "kill 4242") || strings.Contains(string(calls), "kill 6000") {
+		t.Fatalf("sesi tidak diputus dengan benar:\n%s", calls)
 	}
 
 	// ID baru dimulai dari catatan (tidak memakai ulang ID akun lama).
@@ -215,5 +237,32 @@ func TestAccountsRefuseForeignPrimaryGroup(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "calls.log")); err == nil {
 		t.Fatal("tidak boleh ada perubahan")
+	}
+}
+
+func TestAccountsDisableFailureIsRetried(t *testing.T) {
+	a, dir := testAccounts(t)
+	p := proto.AccountsSyncParams{Users: []proto.AccountUser{{Name: "ani", Disabled: true}}}
+	// smbpasswd -d gagal sementara (bukan karena akun belum ada di Samba).
+	smb := filepath.Join(dir, "smbpasswd")
+	os.Remove(smb)
+	_ = os.WriteFile(smb, []byte("#!/bin/sh\necho 'tdb terkunci' >&2\nexit 1\n"), 0o755)
+	res, err := syncAccounts(t, a, p)
+	if err != nil || len(res.Failures) != 1 || !strings.HasPrefix(res.Failures[0], "user:ani") {
+		t.Fatalf("hasil = %+v %v", res, err)
+	}
+	// Status tidak dicatat, jadi dicoba lagi pada sinkronisasi berikutnya.
+	_ = os.WriteFile(smb, []byte("#!/bin/sh\necho \"$*\" >> '"+filepath.Join(dir, "smb.log")+"'\n"), 0o755)
+	if _, err := syncAccounts(t, a, p); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "smb.log")); !strings.Contains(string(b), "-d -- ani") {
+		t.Fatalf("nonaktif tidak dicoba ulang: %q", b)
+	}
+	// Akun yang belum ada di Samba: -d gagal "Failed to find entry" = wajar.
+	_ = os.WriteFile(smb, []byte("#!/bin/sh\necho 'Failed to find entry for user budi.' >&2\nexit 1\n"), 0o755)
+	res, err = syncAccounts(t, a, proto.AccountsSyncParams{Users: []proto.AccountUser{{Name: "ani", Disabled: true}, {Name: "budi", Disabled: true}}})
+	if err != nil || len(res.Failures) != 0 {
+		t.Fatalf("akun tanpa entri Samba: %+v %v", res, err)
 	}
 }

@@ -20,6 +20,11 @@ func applyACLTree(ctx context.Context, root string, acl shareACL) error {
 	if err != nil {
 		return fmt.Errorf("membuka %s: %w", root, err)
 	}
+	var rootSt unix.Stat_t
+	if err := unix.Fstat(fd, &rootSt); err != nil {
+		unix.Close(fd)
+		return err
+	}
 	dirACL := encodeACL(acl.entries(true))
 	fileRW := encodeACL(acl.entries(true))
 	fileNoExec := encodeACL(acl.entries(false))
@@ -62,10 +67,23 @@ func applyACLTree(ctx context.Context, root string, acl shareACL) error {
 			if ctx.Err() != nil {
 				return
 			}
+			// Jenis dibaca dulu tanpa membuka: berkas perangkat (misalnya
+			// hasil salinan cadangan sistem) tidak pernah dibuka, dan sistem
+			// berkas lain yang dipasang di dalam folder tidak dimasuki.
+			var pre unix.Stat_t
+			if err := unix.Fstatat(fd, name, &pre, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+				if !errors.Is(err, unix.ENOENT) {
+					note(err)
+				}
+				continue
+			}
+			kind := pre.Mode & unix.S_IFMT
+			if (kind != unix.S_IFDIR && kind != unix.S_IFREG) || pre.Dev != rootSt.Dev {
+				continue
+			}
 			child, err := unix.Openat(fd, name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_NOCTTY|unix.O_CLOEXEC, 0)
 			if err != nil {
-				// Symlink (ELOOP) sengaja tidak diikuti; yang lain dicatat.
-				if !errors.Is(err, unix.ELOOP) && !errors.Is(err, unix.ENOENT) && !errors.Is(err, unix.ENXIO) {
+				if !errors.Is(err, unix.ELOOP) && !errors.Is(err, unix.ENOENT) {
 					note(err)
 				}
 				continue
@@ -74,6 +92,11 @@ func applyACLTree(ctx context.Context, root string, acl shareACL) error {
 			if err := unix.Fstat(child, &st); err != nil {
 				unix.Close(child)
 				note(err)
+				continue
+			}
+			// Ditukar di antara stat dan open: dilewati.
+			if st.Ino != pre.Ino || st.Dev != pre.Dev {
+				unix.Close(child)
 				continue
 			}
 			switch st.Mode & unix.S_IFMT {

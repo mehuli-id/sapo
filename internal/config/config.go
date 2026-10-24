@@ -55,7 +55,7 @@ type Accounts struct {
 	Groupdel   string `yaml:"groupdel"`
 	Gpasswd    string `yaml:"gpasswd"`
 	Smbpasswd  string `yaml:"smbpasswd"`
-	Pkill      string `yaml:"pkill"`
+	Smbstatus  string `yaml:"smbstatus"`
 	PasswdFile string `yaml:"passwd_file"`
 	// StateFile: catatan sapod tentang akun dan grup buatannya (hanya
 	// yang tercatat yang pernah diubah atau dihapus).
@@ -218,7 +218,7 @@ func Default() Config {
 			Console:        Console{IssueFile: "/run/sapo/console.issue", Agetty: "/usr/sbin/agetty"},
 			Accounts: Accounts{
 				Useradd: "/usr/sbin/useradd", Userdel: "/usr/sbin/userdel", Groupadd: "/usr/sbin/groupadd",
-				Groupdel: "/usr/sbin/groupdel", Gpasswd: "/usr/bin/gpasswd", Smbpasswd: "/usr/bin/smbpasswd", Pkill: "/usr/bin/pkill",
+				Groupdel: "/usr/sbin/groupdel", Gpasswd: "/usr/bin/gpasswd", Smbpasswd: "/usr/bin/smbpasswd", Smbstatus: "/usr/bin/smbstatus",
 				PasswdFile: "/etc/passwd", GroupFile: "/etc/group", StateFile: "/var/lib/sapod/accounts.json",
 				IDMin: 20000, IDMax: 29999, PrimaryGroup: "sapo-users", Shell: "/usr/sbin/nologin",
 			},
@@ -518,7 +518,7 @@ func (p Pools) validate() error {
 }
 
 func (a Accounts) validate() error {
-	for _, p := range []string{a.Useradd, a.Userdel, a.Groupadd, a.Groupdel, a.Gpasswd, a.Smbpasswd, a.Pkill, a.PasswdFile, a.GroupFile, a.StateFile, a.Shell} {
+	for _, p := range []string{a.Useradd, a.Userdel, a.Groupadd, a.Groupdel, a.Gpasswd, a.Smbpasswd, a.Smbstatus, a.PasswdFile, a.GroupFile, a.StateFile, a.Shell} {
 		if !filepath.IsAbs(p) {
 			return fmt.Errorf("agent.accounts: %q harus path absolut", p)
 		}

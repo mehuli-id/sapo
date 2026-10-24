@@ -46,6 +46,7 @@ get)
   if [ "$ds" = tank ]; then printf 'mountpoint\t%s\n' "`+root+`/tank"; exit 0; fi
   [ -d "`+root+`/$ds" ] || { echo "cannot open '$ds': dataset does not exist" >&2; exit 1; }
   printf 'type\tfilesystem\nmountpoint\t%s\nmounted\tyes\nsapo:share\t%s\nsapo:acl\t%s\n' "`+root+`/$ds" "$(prop share)" "$(prop acl)" ;;
+list) [ -d "`+root+`/$ds" ] && echo "$ds" ;;
 create) mkdir -p "`+root+`/$ds"; echo "${3#sapo:share=}" > "`+props+`/$key.share" ;;
 set) echo "${2#sapo:acl=}" > "`+props+`/$key.acl" ;;
 destroy) rm -rf "`+root+`/$ds"; rm -f "`+props+`/$key".* ;;

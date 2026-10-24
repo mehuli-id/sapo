@@ -156,3 +156,23 @@ func TestSMBPasswordSkipsStaleOrDisabled(t *testing.T) {
 		}
 	}
 }
+
+func TestSyncFailsClosedWhenAccountsFail(t *testing.T) {
+	agent := shareAgent()
+	h := newHarness(t, agent)
+	h.runSetup()
+	h.createUser("budi", "user", false)
+	h.do(http.MethodPost, "/api/v1/shares", map[string]any{"name": "data", "pool": "tank", "permissions": map[string]string{"user:budi": "write"}, "admin_password": adminPassword})
+	// Akun tidak bisa disinkronkan (misalnya catatan akun rusak): semua
+	// folder dikirim tanpa izin.
+	agent.mu.Lock()
+	agent.errs = map[string]error{proto.OpAccountsSync: &proto.Error{Code: proto.ErrConflict, Message: "catatan rusak"}}
+	agent.mu.Unlock()
+	if _, err := h.s.syncSystem(context.Background()); err == nil {
+		t.Fatal("sinkronisasi harus gagal")
+	}
+	apply, _ := agent.param(proto.OpSharesApply).(proto.SharesApplyParams)
+	if len(apply.Shares) != 1 || len(apply.Shares[0].Read)+len(apply.Shares[0].Write) != 0 {
+		t.Fatalf("shares.apply = %+v", apply)
+	}
+}

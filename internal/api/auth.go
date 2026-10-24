@@ -338,11 +338,11 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	s.setup.mu.Unlock()
 	s.record(r, admin.Username, "setup.complete", true, map[string]string{"language": req.Language})
 	// Akun sistem dan password Samba admin pertama (tidak menunda jawaban).
-	go func(name, password string) {
+	go func(name, password, hash string) {
 		if _, err := s.syncSystem(context.Background()); err == nil {
-			s.setSMBPassword(context.Background(), name, password, "")
+			s.setSMBPassword(context.Background(), name, password, hash)
 		}
-	}(admin.Username, req.Password)
+	}(admin.Username, req.Password, admin.PasswordHash)
 
 	tok, err := s.sessions.Create(admin.Username, admin.Role)
 	if err != nil {
@@ -529,10 +529,17 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	s.totpLimiter.Reset(totpKey)
 
 	// Hash ulang bila parameter Argon2 di konfigurasi sudah dinaikkan.
+	// verifiedHash: hash yang benar-benar cocok dengan password ini (untuk
+	// sinkronisasi password Samba; bila admin me-reset password di tengah
+	// login, password lama tidak dipasang lagi).
+	verifiedHash := user.PasswordHash
 	if auth.NeedsRehash(user.PasswordHash, s.argon) {
 		s.withHashSlot(r.Context(), func() {
 			if h, err := auth.HashPassword(req.Password, s.argon); err == nil {
-				_ = s.store.SetPasswordHash(user.Username, h)
+				// Hanya bila password belum diganti di antara pemeriksaan.
+				if s.store.ReplacePasswordHash(user.Username, user.PasswordHash, h) == nil {
+					verifiedHash = h
+				}
 			}
 		})
 	}
@@ -547,14 +554,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if usedRecovery {
 		// Dicatat terpisah: pemakaian kode cadangan perlu diketahui admin.
 		s.record(r, user.Username, "auth.login", true, map[string]string{"method": "recovery_code", "recovery_codes_left": strconv.Itoa(recoveryLeft)})
-		go s.setSMBPassword(context.Background(), user.Username, req.Password, s.currentHash(user.Username))
+		go s.setSMBPassword(context.Background(), user.Username, req.Password, verifiedHash)
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": map[string]any{"username": user.Username, "role": user.Role}, "recovery_codes_left": recoveryLeft})
 		return
 	}
 	s.record(r, user.Username, "auth.login", true, nil)
 	// Password Samba disamakan dengan password panel (misalnya akun lama
 	// sebelum Samba terpasang); tidak menunda jawaban login.
-	go s.setSMBPassword(context.Background(), user.Username, req.Password, s.currentHash(user.Username))
+	go s.setSMBPassword(context.Background(), user.Username, req.Password, verifiedHash)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": map[string]any{"username": user.Username, "role": user.Role}})
 }
 

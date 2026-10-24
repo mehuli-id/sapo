@@ -163,6 +163,16 @@ func (s *Server) syncSystem(ctx context.Context) (proto.SharesApplyResult, error
 	}
 	var accRes proto.AccountsSyncResult
 	if err := s.agent.Call(ctx, proto.OpAccountsSync, acc, &accRes); err != nil {
+		// Akun tidak bisa dipastikan: semua izin folder dicabut (gagal-
+		// tertutup), agar pencabutan izin di panel tetap berlaku.
+		var pe *proto.Error
+		if errors.As(err, &pe) {
+			closed := proto.SharesApplyParams{Shares: []proto.ShareSpec{}}
+			for _, sh := range s.shares.list() {
+				closed.Shares = append(closed.Shares, proto.ShareSpec{Name: sh.Name, Pool: sh.Pool, Description: sh.Description, Read: []string{}, Write: []string{}})
+			}
+			_ = s.agent.Call(ctx, proto.OpSharesApply, closed, nil)
+		}
 		return proto.SharesApplyResult{}, err
 	}
 	// Akun yang gagal dibuat tidak mendapat izin folder; sisanya diterapkan.
@@ -280,11 +290,6 @@ func (s *Server) smbLock(username string) *sync.Mutex {
 		s.smbLocks[username] = mu
 	}
 	return mu
-}
-
-func (s *Server) currentHash(username string) string {
-	u, _ := s.store.Get(username)
-	return u.PasswordHash
 }
 
 // scheduleResync mencoba ulang sinkronisasi di latar belakang sampai
