@@ -203,9 +203,7 @@ func TestSharesDelete(t *testing.T) {
 		t.Fatal("dataset harus terhapus")
 	}
 	calls, _ := os.ReadFile(log)
-	if !strings.Contains(string(calls), "smbcontrol smbd close-share -- data\nzfs unmount -- tank/data\nzfs destroy -r -- tank/data") {
-		t.Fatalf("panggilan:\n%s", calls)
-	}
+	inOrder(t, string(calls), "smbcontrol smbd close-share -- data", "zfs unmount -- tank/data", "zfs destroy -r -- tank/data")
 }
 
 func waitFor(t *testing.T, ok func() bool) {
