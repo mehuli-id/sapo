@@ -580,16 +580,25 @@ func (a *Accounts) smbSessionPIDs(ctx context.Context, name string) []int {
 // smbNoEntry: smbpasswd gagal karena akun belum ada di basis data Samba.
 func smbNoEntry(err error) bool {
 	m := strings.ToLower(err.Error())
-	return strings.Contains(m, "failed to find entry") || strings.Contains(m, "does not exist")
+	return strings.Contains(m, "failed to find entry") || strings.Contains(m, "does not exist") || strings.Contains(m, "not found")
 }
 
 // smb menjalankan smbpasswd dengan satu opsi untuk akun (bila Samba
-// terpasang).
+// terpasang). Pesan error memuat seluruh keluaran (pesan "akun belum ada"
+// tidak selalu di baris pertama).
 func (a *Accounts) smb(ctx context.Context, flag, name string) error {
 	if _, err := os.Stat(a.t.Smbpasswd); err != nil {
 		return nil
 	}
-	return a.run(ctx, a.t.Smbpasswd, []string{flag}, name)
+	res, err := runTool(ctx, a.t.Timeout, a.t.Smbpasswd, []string{flag}, name)
+	if err != nil {
+		return err
+	}
+	if res.ExitCode != 0 {
+		out := strings.Join(strings.Fields(string(res.Stderr)+" "+string(res.Stdout)), " ")
+		return fmt.Errorf("smbpasswd %s keluar dengan kode %d: %s", flag, res.ExitCode, clipTo(out, maxErrorText))
+	}
+	return nil
 }
 
 // SMBPasswordOp mengembalikan handler smb.set_password: password Samba

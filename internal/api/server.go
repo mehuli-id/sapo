@@ -82,6 +82,9 @@ type Server struct {
 	// syncMu: satu sinkronisasi akun dan shared folder ke sapod pada satu waktu.
 	syncMu        sync.Mutex
 	resyncRunning atomic.Bool
+	syncStateMu   sync.Mutex
+	syncLastErr   string
+	syncLastAt    time.Time
 	resyncDelay   time.Duration
 	// smbLocks: satu perubahan password Samba per pengguna pada satu waktu.
 	smbMu    sync.Mutex
@@ -206,6 +209,7 @@ func New(o Options) (*Server, error) {
 	s.mux.Handle("POST /api/v1/groups/{name}", s.requireAdmin(http.HandlerFunc(s.handleGroupUpdate)))
 	s.mux.Handle("POST /api/v1/groups/{name}/delete", s.requireAdmin(http.HandlerFunc(s.handleGroupDelete)))
 	s.mux.Handle("GET /api/v1/shares", s.requireAdmin(http.HandlerFunc(s.handleShares)))
+	s.mux.Handle("GET /api/v1/system/sync", s.requireAdmin(http.HandlerFunc(s.handleSyncStatus)))
 	s.mux.Handle("POST /api/v1/shares", s.requireAdmin(http.HandlerFunc(s.handleShareCreate)))
 	s.mux.Handle("POST /api/v1/shares/{name}", s.requireAdmin(http.HandlerFunc(s.handleShareUpdate)))
 	s.mux.Handle("POST /api/v1/shares/{name}/delete", s.requireAdmin(http.HandlerFunc(s.handleShareDelete)))

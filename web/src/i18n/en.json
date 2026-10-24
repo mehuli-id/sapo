@@ -518,6 +518,7 @@
     "typeName": "Type the folder name",
     "delete": "Delete folder and contents",
     "aclPending": "Applying permissions to the folder contents. This can take a while for large folders; until it finishes, new users may not open some files.",
-    "aclError": "Permissions couldn’t be applied to all folder contents: {message}"
+    "aclError": "Permissions couldn’t be applied to all folder contents: {message}",
+    "syncPending": "User or permission changes aren’t applied to the system yet; Sapo keeps retrying. Meanwhile folders are closed if accounts can’t be verified."
   }
 }

@@ -24,6 +24,7 @@ const users = ref<UserAccount[]>([])
 const groups = ref<UserGroup[]>([])
 const pools = ref<PoolsResult | null>(null)
 const loadError = ref("")
+const syncError = ref("")
 const notice = ref("")
 const wizard = ref<Wizard | null>(null)
 
@@ -36,6 +37,8 @@ async function load() {
   try {
     ;[shares.value, users.value, groups.value, pools.value] = await Promise.all([api.shares(), api.users(), api.groups(), api.pools()])
     loadError.value = ""
+    const sync = await api.syncStatus()
+    syncError.value = sync.ok ? "" : sync.error
   } catch (e) {
     loadError.value = message(e)
   }
@@ -144,6 +147,10 @@ const remove = (s: SharedFolder) =>
       <CircleCheck class="size-4 shrink-0 text-emerald-600" />{{ notice }}
     </p>
     <p v-if="loadError" class="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm">{{ loadError }}</p>
+    <div v-if="syncError" class="space-y-1 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+      <p class="flex items-center gap-2 font-medium"><TriangleAlert class="size-4 shrink-0 text-amber-600" />{{ t("shares.syncPending") }}</p>
+      <p class="font-mono text-xs break-all text-muted-foreground">{{ syncError }}</p>
+    </div>
     <p v-if="shares && !shares.length" class="rounded-xl border p-4 text-sm text-muted-foreground">{{ t("shares.none") }}</p>
 
     <ul v-if="shares?.length" class="space-y-3">

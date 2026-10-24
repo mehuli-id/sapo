@@ -143,9 +143,17 @@ func writeFileAtomic(path string, data []byte) error {
 
 // syncSystem mengirim keadaan lengkap pengguna, grup, dan folder ke sapod.
 // Hanya satu sinkronisasi berjalan pada satu waktu.
-func (s *Server) syncSystem(ctx context.Context) (proto.SharesApplyResult, error) {
+func (s *Server) syncSystem(ctx context.Context) (res proto.SharesApplyResult, err error) {
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
+	defer func() {
+		s.syncStateMu.Lock()
+		s.syncLastErr, s.syncLastAt = "", s.now().UTC()
+		if err != nil {
+			s.syncLastErr = clipText(err.Error(), 2000)
+		}
+		s.syncStateMu.Unlock()
+	}()
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 	defer cancel()
 
@@ -173,7 +181,7 @@ func (s *Server) syncSystem(ctx context.Context) (proto.SharesApplyResult, error
 			}
 			_ = s.agent.Call(ctx, proto.OpSharesApply, closed, nil)
 		}
-		return proto.SharesApplyResult{}, err
+		return res, err
 	}
 	// Akun yang gagal dibuat tidak mendapat izin folder; sisanya diterapkan.
 	failed := false
@@ -185,6 +193,7 @@ func (s *Server) syncSystem(ctx context.Context) (proto.SharesApplyResult, error
 	if failed && s.log != nil {
 		s.log.Warn("sebagian akun sistem gagal disinkronkan", "gagal", accRes.Failures)
 	}
+	failures := strings.Join(accRes.Failures, "; ")
 	// Nama yang bentrok dengan akun sistem lain tidak mendapat izin folder.
 	for _, c := range accRes.Conflicts {
 		delete(exists, c)
@@ -210,12 +219,18 @@ func (s *Server) syncSystem(ctx context.Context) (proto.SharesApplyResult, error
 		slices.Sort(spec.Write)
 		params.Shares = append(params.Shares, spec)
 	}
-	var res proto.SharesApplyResult
-	err := s.agent.Call(ctx, proto.OpSharesApply, params, &res)
+	err = s.agent.Call(ctx, proto.OpSharesApply, params, &res)
 	if err == nil && failed {
-		err = errors.New("sebagian akun sistem gagal disinkronkan")
+		err = errors.New("sebagian akun sistem gagal disinkronkan: " + failures)
 	}
 	return res, err
+}
+
+func clipText(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }
 
 // syncAfterChange menjalankan sinkronisasi setelah perubahan di panel.
@@ -230,6 +245,14 @@ func (s *Server) syncAfterChange(r *http.Request) string {
 		return "system_sync_failed"
 	}
 	return ""
+}
+
+// handleSyncStatus: status sinkronisasi akun dan shared folder terakhir
+// (untuk peringatan di panel dan diagnosis).
+func (s *Server) handleSyncStatus(w http.ResponseWriter, _ *http.Request) {
+	s.syncStateMu.Lock()
+	defer s.syncStateMu.Unlock()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": s.syncLastErr == "", "error": s.syncLastErr, "retrying": s.resyncRunning.Load(), "at": s.syncLastAt})
 }
 
 // SyncLoop menyamakan sistem saat sapo-api menyala (sapod mungkin belum

@@ -168,11 +168,11 @@ echo "scrub selesai tanpa kesalahan"
 UPASS="uji-smb-$(openssl rand -hex 6)"
 for u in budi ani cici; do
   res="$(api POST /api/v1/users "{\"username\":\"$u\",\"password\":\"$UPASS\",\"password_confirm\":\"$UPASS\",\"role\":\"user\",\"groups\":[],\"must_change_password\":false,\"admin_password\":\"$PASS\"}")"
-  [[ "$res" == *' 200' && "$res" != *'"warning":"system_sync_failed"'* ]] || fail "buat pengguna $u: $res"
+  [[ "$res" == *' 200' && "$res" != *'"warning":"system_sync_failed"'* ]] || fail "buat pengguna $u: $res; status sinkronisasi: $(api GET /api/v1/system/sync)"
 done
 res="$(api POST /api/v1/shares "{\"name\":\"keluarga\",\"pool\":\"uji\",\"description\":\"Uji asap\",\"permissions\":{\"user:budi\":\"write\",\"user:ani\":\"read\"},\"admin_password\":\"$PASS\"}")"
 [[ "$res" == *' 200' ]] || fail "buat shared folder: $res"
-json 'assert not v.get("error") and v["path"].endswith("/uji/keluarga"), v' <<<"$res" || fail "shared folder tidak siap: $res"
+json 'assert not v.get("error") and v["path"].endswith("/uji/keluarga"), v' <<<"$res" || fail "shared folder tidak siap: $res; status sinkronisasi: $(api GET /api/v1/system/sync)"
 smb() { # smb USER PERINTAH → keluaran smbclient (tidak gagal walau smbclient gagal)
   smbclient "//127.0.0.1/keluarga" -p "$SMB_PORT" -m SMB3 -U "$1%$UPASS" -c "$2" 2>&1 || true
 }
