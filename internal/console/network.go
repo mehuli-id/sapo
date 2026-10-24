@@ -36,6 +36,13 @@ func (m *Menu) resetNetwork(ctx context.Context) bool {
 		return m.fail(err)
 	}
 	m.printf("\n%s\n", m.t("working"))
+	// sapod dihentikan dulu dan perubahan jaringan dari panel yang menunggu
+	// konfirmasi dibuang, agar pengembalian otomatisnya tidak menimpa hasil
+	// reset (ADR 0009).
+	_ = m.systemctl(ctx, "stop", r.AgentService)
+	if err := os.Remove(r.NetworkPendingFile); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		m.printf("%s\n", m.t("failed", err.Error()))
+	}
 	// Antarmuka diturunkan dengan pengaturan lama dulu (misalnya alamat
 	// statis), baru dinaikkan lagi dengan DHCP.
 	_ = m.systemctl(ctx, "stop", r.NetworkService)
@@ -44,8 +51,12 @@ func (m *Menu) resetNetwork(ctx context.Context) bool {
 		err = resetAPIKeys(m.AdminConfig, cfgBackup, r.ResetAPIKeys)
 	}
 	m.audit("recovery.reset_network", err == nil, map[string]string{"interfaces": strings.Join(ifaces, ",")})
-	// Jaringan selalu dinyalakan lagi, juga bila langkah di atas gagal.
+	// Jaringan dan sapod selalu dinyalakan lagi, juga bila langkah di atas
+	// gagal.
 	if startErr := m.systemctl(ctx, "start", r.NetworkService); startErr != nil && err == nil {
+		err = startErr
+	}
+	if startErr := m.systemctl(ctx, "start", r.AgentService); startErr != nil && err == nil {
 		err = startErr
 	}
 	if restartErr := m.systemctl(ctx, "restart", r.APIService); restartErr != nil && err == nil {

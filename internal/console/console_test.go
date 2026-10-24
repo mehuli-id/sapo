@@ -27,6 +27,7 @@ func testMenu(t *testing.T, input string) (*Menu, *bytes.Buffer, *[]string) {
 	cfg.Agent.Console.IssueFile = filepath.Join(dir, "console.issue")
 	cfg.Recovery.InterfacesFile = filepath.Join(dir, "interfaces")
 	cfg.Recovery.NetDir = filepath.Join(dir, "net")
+	cfg.Recovery.NetworkPendingFile = filepath.Join(dir, "network-pending.json")
 	st, err := auth.OpenStore(cfg.API.DataDir)
 	if err != nil {
 		t.Fatal(err)
@@ -95,12 +96,16 @@ func TestResetNetwork(t *testing.T) {
 		}
 	}
 	_ = os.WriteFile(r.InterfacesFile, []byte("auto eth0\niface eth0 inet static\n  address 10.9.9.9/24\n"), 0o644)
+	_ = os.WriteFile(r.NetworkPendingFile, []byte("{}"), 0o600)
 	_ = os.WriteFile(m.AdminConfig, []byte("# catatan admin\napi:\n  listen: \":6000\"\n  allowed_networks: [10.9.0.0/16]\n  hostnames: [nas.lan]\n  audit_max_mb: 20\nauth:\n  require_totp_for_admin: false\n"), 0o644)
 	_ = m.Loop(context.Background())
 
-	want := "systemctl stop -- networking.service; systemctl start -- networking.service; systemctl restart -- sapo-api.service"
+	want := "systemctl stop -- sapod.service; systemctl stop -- networking.service; systemctl start -- networking.service; systemctl start -- sapod.service; systemctl restart -- sapo-api.service"
 	if strings.Join(*calls, "; ") != want {
 		t.Fatalf("panggilan = %v\n%s", *calls, out)
+	}
+	if _, err := os.Stat(r.NetworkPendingFile); err == nil {
+		t.Fatal("perubahan jaringan yang menunggu konfirmasi harus dibuang")
 	}
 	ifs, _ := os.ReadFile(r.InterfacesFile)
 	for _, w := range []string{"auto lo\niface lo inet loopback", "auto enp3s0\niface enp3s0 inet dhcp", "auto eth0\niface eth0 inet dhcp\niface eth0 inet6 auto"} {

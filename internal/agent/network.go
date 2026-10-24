@@ -34,6 +34,7 @@ type NetworkTools struct {
 	IP, Systemctl, Hostnamectl string
 	InterfacesFile             string
 	ResolvConf, HostsFile      string
+	HostnameFile               string
 	NetDir                     string
 	// StateFile: pengaturan yang terakhir dikonfirmasi; PendingFile:
 	// salinan file lama selama menunggu konfirmasi (dipakai juga untuk
@@ -173,7 +174,7 @@ func (n *Network) checkConfig(c proto.NetworkConfig) (proto.NetworkConfig, error
 		byName[i.Name] = i
 	}
 	out := proto.NetworkConfig{Hostname: c.Hostname, DNS: []string{}}
-	gateways, dhcp := 0, false
+	gateways, dhcp, active := 0, false, 0
 	for _, name := range phys {
 		i, ok := byName[name]
 		if !ok {
@@ -185,6 +186,13 @@ func (n *Network) checkConfig(c proto.NetworkConfig) (proto.NetworkConfig, error
 				return c, fmt.Errorf("%s: DHCP tidak memakai alamat atau gateway tetap", name)
 			}
 			dhcp = true
+			active++
+		case "off":
+			// Tidak dipakai (misalnya port yang tidak tercolok): tidak
+			// dinyalakan, jadi tidak menunda boot menunggu DHCP.
+			if i.Address != "" || i.Gateway != "" {
+				return c, fmt.Errorf("%s: antarmuka yang tidak dipakai tidak punya alamat", name)
+			}
 		case "static":
 			p, err := netip.ParsePrefix(i.Address)
 			if err != nil || !p.Addr().Is4() || p.Bits() < 8 || p.Bits() > 30 {
@@ -195,6 +203,7 @@ func (n *Network) checkConfig(c proto.NetworkConfig) (proto.NetworkConfig, error
 				return c, fmt.Errorf("%s: %s tidak bisa dipakai sebagai alamat NAS", name, a)
 			}
 			i.Address = p.String()
+			active++
 			if i.Gateway != "" {
 				g, err := netip.ParseAddr(i.Gateway)
 				if err != nil || !p.Contains(g) || g == a || g == p.Masked().Addr() || g == lastAddr(p) {
@@ -204,9 +213,12 @@ func (n *Network) checkConfig(c proto.NetworkConfig) (proto.NetworkConfig, error
 				gateways++
 			}
 		default:
-			return c, fmt.Errorf("%s: mode harus dhcp atau static", name)
+			return c, fmt.Errorf("%s: mode harus dhcp, static, atau off", name)
 		}
 		out.Interfaces = append(out.Interfaces, i)
+	}
+	if active == 0 {
+		return c, errors.New("minimal satu antarmuka harus dipakai")
 	}
 	if gateways > 1 {
 		return c, errors.New("gateway hanya boleh di satu antarmuka")
@@ -219,7 +231,7 @@ func (n *Network) checkConfig(c proto.NetworkConfig) (proto.NetworkConfig, error
 	}
 	for _, d := range c.DNS {
 		a, err := netip.ParseAddr(d)
-		if err != nil || a.Zone() != "" || a.IsUnspecified() || a.IsMulticast() {
+		if err != nil || a.Zone() != "" || !a.IsGlobalUnicast() {
 			return c, fmt.Errorf("server DNS tidak valid: %s", clip(d))
 		}
 		out.DNS = append(out.DNS, a.String())
@@ -242,6 +254,10 @@ func renderInterfaces(c proto.NetworkConfig) []byte {
 	b.WriteString("# Menu darurat di konsol NAS bisa mengembalikan semua antarmuka ke DHCP.\n\n")
 	b.WriteString("auto lo\niface lo inet loopback\n")
 	for _, i := range c.Interfaces {
+		if i.Mode == "off" {
+			fmt.Fprintf(&b, "\n# %s tidak dipakai.\niface %s inet manual\n", i.Name, i.Name)
+			continue
+		}
 		fmt.Fprintf(&b, "\nauto %s\n", i.Name)
 		if i.Mode == "static" {
 			fmt.Fprintf(&b, "iface %s inet static\n    address %s\n", i.Name, i.Address)
@@ -266,7 +282,7 @@ func renderResolvConf(dns []string) []byte {
 }
 
 // renderHosts mengganti baris 127.0.1.1 (nama host mesin) di /etc/hosts.
-func renderHosts(old []byte, hostname string) []byte {
+func renderHosts(old []byte, hostname string) ([]byte, error) {
 	var b bytes.Buffer
 	done := false
 	sc := bufio.NewScanner(bytes.NewReader(old))
@@ -281,10 +297,47 @@ func renderHosts(old []byte, hostname string) []byte {
 		}
 		b.WriteString(line + "\n")
 	}
+	if err := sc.Err(); err != nil {
+		return nil, fmt.Errorf("%s tidak bisa dibaca: %w", "/etc/hosts", err)
+	}
 	if !done {
 		fmt.Fprintf(&b, "127.0.1.1\t%s\n", hostname)
 	}
-	return b.Bytes()
+	return b.Bytes(), nil
+}
+
+// simpleInterfaces: file jaringan yang belum dikelola Sapo hanya boleh
+// diganti bila isinya pengaturan dasar (loopback, DHCP, SLAAC, manual) yang
+// tidak hilang maknanya; bond, bridge, VLAN, alamat tetap, perintah hook,
+// atau file di interfaces.d harus di-reset dulu (menu darurat) agar tidak
+// hilang diam-diam.
+func simpleInterfaces(data []byte, dir string) error {
+	sc := bufio.NewScanner(bytes.NewReader(data))
+	for sc.Scan() {
+		f := strings.Fields(sc.Text())
+		if len(f) == 0 || strings.HasPrefix(f[0], "#") {
+			continue
+		}
+		switch {
+		case (f[0] == "auto" || f[0] == "allow-hotplug") && len(f) >= 2:
+		case f[0] == "iface" && len(f) == 4 && ((f[2] == "inet" && slices.Contains([]string{"dhcp", "loopback", "manual"}, f[3])) || (f[2] == "inet6" && slices.Contains([]string{"auto", "dhcp", "manual"}, f[3]))):
+		case (f[0] == "source" || f[0] == "source-directory") && len(f) == 2:
+			// Hanya bila tidak ada file yang benar-benar dimuat.
+			pattern := f[1]
+			if !filepath.IsAbs(pattern) {
+				pattern = filepath.Join(dir, pattern)
+			}
+			if f[0] == "source-directory" {
+				pattern = filepath.Join(pattern, "*")
+			}
+			if m, _ := filepath.Glob(pattern); len(m) > 0 {
+				return fmt.Errorf("pengaturan jaringan memuat %s", m[0])
+			}
+		default:
+			return fmt.Errorf("pengaturan jaringan berisi %q", clip(strings.Join(f, " ")))
+		}
+	}
+	return sc.Err()
 }
 
 func hashBytes(b []byte) string {
@@ -428,13 +481,36 @@ func (n *Network) ApplyOp() Handler {
 		if err != nil {
 			return nil, &OpError{Code: proto.ErrInvalidParams, Message: err.Error()}
 		}
-		if fi, err := os.Lstat(n.t.ResolvConf); err == nil && fi.Mode()&fs.ModeSymlink != 0 && len(cfg.DNS) > 0 {
-			return nil, &OpError{Code: proto.ErrConflict, Message: n.t.ResolvConf + " dikelola program lain (symlink); DNS tidak bisa diatur"}
-		}
 		n.mu.Lock()
 		defer n.mu.Unlock()
 		if n.pending != nil {
 			return nil, &OpError{Code: proto.ErrBusy, Message: "perubahan jaringan sebelumnya belum dikonfirmasi"}
+		}
+		conflict := func(msg string) error { return &OpError{Code: proto.ErrConflict, Message: msg} }
+		oldHost := strings.TrimSpace(readSmall(n.t.HostnameFile))
+		// File yang diubah: interfaces dan catatan Sapo selalu; resolv.conf
+		// bila DNS diatur; hosts dan hostname bila nama host berganti. File
+		// berupa symlink (dikelola program lain) tidak pernah ditimpa.
+		files := []string{n.t.InterfacesFile, n.t.StateFile}
+		if len(cfg.DNS) > 0 {
+			files = append(files, n.t.ResolvConf)
+		}
+		if oldHost != cfg.Hostname {
+			files = append(files, n.t.HostsFile, n.t.HostnameFile)
+		}
+		for _, f := range files {
+			if fi, err := os.Lstat(f); err == nil && fi.Mode()&fs.ModeSymlink != 0 {
+				return nil, conflict(f + " dikelola program lain (symlink) dan tidak diubah Sapo")
+			}
+		}
+		if _, managed := n.managedConfig(); !managed {
+			if cur, err := os.ReadFile(n.t.InterfacesFile); err == nil {
+				if err := simpleInterfaces(cur, filepath.Dir(n.t.InterfacesFile)); err != nil {
+					return nil, conflict(err.Error() + "; reset jaringan dari menu darurat di konsol NAS dulu agar pengaturan itu tidak hilang diam-diam")
+				}
+				// Cadangan permanen pengaturan sebelum dikelola Sapo.
+				_ = writePrivateFile(filepath.Join(filepath.Dir(n.t.StateFile), fmt.Sprintf("interfaces.before-sapo-%d", n.now().Unix())), cur)
+			}
 		}
 		tokenBytes := make([]byte, 32)
 		if _, err := rand.Read(tokenBytes); err != nil {
@@ -449,8 +525,10 @@ func (n *Network) ApplyOp() Handler {
 			Old:       map[string]*string{},
 			OldMode:   map[string]uint32{},
 		}
-		p.OldHost, _ = os.Hostname()
-		for _, path := range []string{n.t.InterfacesFile, n.t.ResolvConf, n.t.HostsFile, n.t.StateFile} {
+		if oldHost != cfg.Hostname {
+			p.OldHost = oldHost
+		}
+		for _, path := range files {
 			data, err := os.ReadFile(path)
 			switch {
 			case err == nil:
@@ -506,7 +584,27 @@ func writePrivateFile(path string, data []byte) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return err
+	}
+	return syncDir(filepath.Dir(path))
+}
+
+// syncDir memastikan rename atau hapus di direktori tersimpan di disk
+// (listrik mati sesudahnya tidak mengembalikan file lama).
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
+}
+
+func removeSynced(path string) {
+	if err := os.Remove(path); err == nil {
+		_ = syncDir(filepath.Dir(path))
+	}
 }
 
 // applyPending menerapkan pengaturan baru (berjalan di latar belakang),
@@ -517,16 +615,20 @@ func (n *Network) applyPending(p *networkPending) {
 	if n.pending != p {
 		return // sudah dibatalkan
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	err := n.writeConfig(ctx, p.Config)
+	cancel()
 	p.Applied = true
 	if err != nil {
 		p.ApplyError = err.Error()
 		n.logWarn("pengaturan jaringan gagal diterapkan; dikembalikan", "err", err)
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer cancel()
 		n.revertLocked(ctx, p)
 		return
 	}
+	// Jendela konfirmasi dihitung sejak pengaturan baru selesai dipasang.
+	p.ConfirmBy = n.now().Add(n.t.ConfirmWindow)
 	_ = n.savePending(p)
 	wait := time.Until(p.ConfirmBy)
 	n.timer = time.AfterFunc(wait, func() {
@@ -536,7 +638,7 @@ func (n *Network) applyPending(p *networkPending) {
 			return
 		}
 		n.logWarn("pengaturan jaringan tidak dikonfirmasi; pengaturan lama dikembalikan")
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
 		n.revertLocked(ctx, p)
 	})
@@ -544,6 +646,10 @@ func (n *Network) applyPending(p *networkPending) {
 
 // writeConfig menurunkan jaringan dengan pengaturan lama, menulis file
 // baru, mengganti nama host, lalu menaikkan jaringan lagi.
+//
+// Hanya kegagalan menulis file yang dianggap gagal. Antarmuka yang gagal
+// naik (misalnya port tanpa kabel menunggu DHCP) tidak: konfirmasi dari
+// panel yang menentukan apakah pengaturan baru bisa dipakai.
 func (n *Network) writeConfig(ctx context.Context, c proto.NetworkConfig) error {
 	n.networkDown(ctx)
 	var errs []error
@@ -552,17 +658,23 @@ func (n *Network) writeConfig(ctx context.Context, c proto.NetworkConfig) error 
 		errs = append(errs, writeRootFile(n.t.ResolvConf, renderResolvConf(c.DNS)))
 	}
 	errs = append(errs, n.setHostname(ctx, c.Hostname))
-	errs = append(errs, n.service(ctx, "start", n.t.NetworkService))
+	if err := n.service(ctx, "start", n.t.NetworkService); err != nil {
+		n.logWarn("sebagian antarmuka jaringan gagal dinyalakan", "err", err)
+	}
 	_ = n.service(ctx, "restart", n.t.AvahiService)
 	return errors.Join(errs...)
 }
 
 func (n *Network) setHostname(ctx context.Context, name string) error {
-	if cur, _ := os.Hostname(); cur == name {
+	if strings.TrimSpace(readSmall(n.t.HostnameFile)) == name {
 		return nil
 	}
 	old, _ := os.ReadFile(n.t.HostsFile)
-	if err := writeRootFile(n.t.HostsFile, renderHosts(old, name)); err != nil {
+	hosts, err := renderHosts(old, name)
+	if err != nil {
+		return err
+	}
+	if err := writeRootFile(n.t.HostsFile, hosts); err != nil {
 		return err
 	}
 	res, err := n.run(ctx, n.t.Hostnamectl, []string{"set-hostname"}, name)
@@ -624,17 +736,23 @@ func (n *Network) revertLocked(ctx context.Context, p *networkPending) {
 		}
 	}
 	if p.OldHost != "" {
-		if cur, _ := os.Hostname(); cur != p.OldHost {
-			if res, err := n.run(ctx, n.t.Hostnamectl, []string{"set-hostname"}, p.OldHost); err != nil || res.ExitCode != 0 {
-				n.logWarn("nama host lama gagal dikembalikan", "err", err)
-			}
+		if res, err := n.run(ctx, n.t.Hostnamectl, []string{"set-hostname"}, p.OldHost); err != nil || res.ExitCode != 0 {
+			n.logWarn("nama host lama gagal dikembalikan (file /etc/hostname sudah dikembalikan)", "err", err)
 		}
 	}
-	if err := n.service(ctx, "start", n.t.NetworkService); err != nil {
-		n.logWarn("jaringan gagal dinyalakan lagi", "err", err)
+	// Jaringan dinyalakan lagi, dicoba beberapa kali dengan batas waktu
+	// sendiri-sendiri: tanpa ini NAS tidak terjangkau sampai di-restart.
+	for attempt := 1; attempt <= 3; attempt++ {
+		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 90*time.Second)
+		err := n.service(sctx, "start", n.t.NetworkService)
+		cancel()
+		if err == nil {
+			break
+		}
+		n.logWarn("jaringan gagal dinyalakan lagi", "percobaan", attempt, "err", err)
 	}
 	_ = n.service(ctx, "restart", n.t.AvahiService)
-	_ = os.Remove(n.t.PendingFile)
+	removeSynced(n.t.PendingFile)
 	n.pending, n.timer = nil, nil
 	n.logInfo("pengaturan jaringan lama dikembalikan")
 }
@@ -675,7 +793,7 @@ func (n *Network) ConfirmOp() Handler {
 		if n.timer != nil {
 			n.timer.Stop()
 		}
-		_ = os.Remove(n.t.PendingFile)
+		removeSynced(n.t.PendingFile)
 		n.pending, n.timer = nil, nil
 		n.logInfo("pengaturan jaringan dikonfirmasi", "hostname", p.Config.Hostname)
 		return map[string]bool{"ok": true}, nil

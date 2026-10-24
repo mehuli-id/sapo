@@ -47,11 +47,12 @@ func testNetwork(t *testing.T) (*Network, string, *netCalls) {
 	_ = os.WriteFile(filepath.Join(dir, "etc/interfaces"), []byte("# lama\nauto eth0\niface eth0 inet dhcp\n"), 0o644)
 	_ = os.WriteFile(filepath.Join(dir, "etc/resolv.conf"), []byte("nameserver 10.0.2.3\n"), 0o644)
 	_ = os.WriteFile(filepath.Join(dir, "etc/hosts"), []byte("127.0.0.1\tlocalhost\n127.0.1.1\tsapo\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "etc/hostname"), []byte("sapo\n"), 0o644)
 	calls := &netCalls{}
 	n := NewNetwork(NetworkTools{
 		IP: "/usr/sbin/ip", Systemctl: "/usr/bin/systemctl", Hostnamectl: "/usr/bin/hostnamectl",
 		InterfacesFile: filepath.Join(dir, "etc/interfaces"), ResolvConf: filepath.Join(dir, "etc/resolv.conf"),
-		HostsFile: filepath.Join(dir, "etc/hosts"), NetDir: filepath.Join(dir, "net"),
+		HostsFile: filepath.Join(dir, "etc/hosts"), HostnameFile: filepath.Join(dir, "etc/hostname"), NetDir: filepath.Join(dir, "net"),
 		StateFile: filepath.Join(dir, "state/network.json"), PendingFile: filepath.Join(dir, "state/network-pending.json"),
 		NetworkService: "networking.service", AvahiService: "avahi-daemon.service",
 		ApplyDelay: 10 * time.Millisecond, ConfirmWindow: time.Hour, Timeout: time.Second,
@@ -103,6 +104,8 @@ func TestNetworkCheckConfig(t *testing.T) {
 		"semua tetap tanpa DNS": {Hostname: "sapo", Interfaces: []proto.NetworkInterface{{Name: "eth0", Mode: "static", Address: "192.168.1.10/24"}, {Name: "eth1", Mode: "static", Address: "10.0.0.5/24"}}},
 		"DHCP dengan alamat":    {Hostname: "sapo", Interfaces: []proto.NetworkInterface{{Name: "eth0", Mode: "dhcp", Address: "192.168.1.10/24"}}},
 		"IPv6 statis":           {Hostname: "sapo", Interfaces: []proto.NetworkInterface{{Name: "eth0", Mode: "static", Address: "fd00::5/64"}}},
+		"semua tidak dipakai":   {Hostname: "sapo", Interfaces: []proto.NetworkInterface{{Name: "eth0", Mode: "off"}, {Name: "eth1", Mode: "off"}}},
+		"DNS loopback":          {Hostname: "sapo", DNS: []string{"127.0.0.1"}, Interfaces: []proto.NetworkInterface{{Name: "eth0", Mode: "static", Address: "192.168.1.10/24"}, {Name: "eth1", Mode: "off"}}},
 	}
 	for name, c := range bad {
 		if _, err := n.checkConfig(c); err == nil {
@@ -225,5 +228,64 @@ func TestNetworkCancelAndRecover(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "state/network-pending.json")); err == nil {
 		t.Fatal("catatan perubahan harus dihapus")
+	}
+}
+
+func TestNetworkOffAndUnmanagedFiles(t *testing.T) {
+	n, dir, _ := testNetwork(t)
+	cfg := proto.NetworkConfig{Hostname: "sapo", Interfaces: []proto.NetworkInterface{{Name: "eth0", Mode: "dhcp"}, {Name: "eth1", Mode: "off"}}}
+	got, err := n.checkConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := string(renderInterfaces(got))
+	if strings.Contains(r, "auto eth1") || !strings.Contains(r, "iface eth1 inet manual") || !strings.Contains(r, "auto eth0\niface eth0 inet dhcp") {
+		t.Fatalf("antarmuka yang tidak dipakai tidak boleh dinyalakan:\n%s", r)
+	}
+	// Pengaturan manual yang bisa hilang diam-diam: ditolak.
+	var oe *OpError
+	for name, body := range map[string]string{
+		"bond":         "auto bond0\niface bond0 inet dhcp\n    bond-slaves eth0 eth1\n",
+		"alamat tetap": "auto eth0\niface eth0 inet static\n    address 10.9.9.9/24\n",
+		"hook":         "auto eth0\niface eth0 inet dhcp\n    post-up /root/x.sh\n",
+	} {
+		_ = os.WriteFile(filepath.Join(dir, "etc/interfaces"), []byte(body), 0o644)
+		if _, err := call(t, n.ApplyOp(), proto.NetworkApplyParams{Config: cfg}); !errors.As(err, &oe) || oe.Code != proto.ErrConflict {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	// interfaces.d yang berisi file juga; yang kosong boleh.
+	_ = os.MkdirAll(filepath.Join(dir, "etc/interfaces.d"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "etc/interfaces"), []byte("source interfaces.d/*\nauto lo\niface lo inet loopback\nallow-hotplug eth0\niface eth0 inet dhcp\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "etc/interfaces.d/vlan"), []byte("auto eth0.10\n"), 0o644)
+	if _, err := call(t, n.ApplyOp(), proto.NetworkApplyParams{Config: cfg}); !errors.As(err, &oe) || oe.Code != proto.ErrConflict {
+		t.Errorf("interfaces.d berisi: %v", err)
+	}
+	_ = os.Remove(filepath.Join(dir, "etc/interfaces.d/vlan"))
+	n.t.ApplyDelay = time.Hour
+	if _, err := call(t, n.ApplyOp(), proto.NetworkApplyParams{Config: cfg}); err != nil {
+		t.Fatalf("pengaturan dasar boleh diganti: %v", err)
+	}
+	// resolv.conf dan hosts tidak disentuh bila DNS dan nama host tidak berubah.
+	n.mu.Lock()
+	_, hasResolv := n.pending.Old[n.t.ResolvConf]
+	_, hasHosts := n.pending.Old[n.t.HostsFile]
+	n.timer.Stop()
+	n.mu.Unlock()
+	if hasResolv || hasHosts {
+		t.Fatal("file yang tidak diubah tidak boleh disimpan atau dikembalikan")
+	}
+	if m, _ := filepath.Glob(filepath.Join(dir, "state/interfaces.before-sapo-*")); len(m) != 1 {
+		t.Fatalf("cadangan pengaturan sebelum Sapo: %v", m)
+	}
+}
+
+func TestNetworkRefusesSymlinkedResolvConf(t *testing.T) {
+	n, dir, _ := testNetwork(t)
+	_ = os.Remove(filepath.Join(dir, "etc/resolv.conf"))
+	_ = os.Symlink("/run/systemd/resolve/stub-resolv.conf", filepath.Join(dir, "etc/resolv.conf"))
+	var oe *OpError
+	if _, err := call(t, n.ApplyOp(), proto.NetworkApplyParams{Config: staticCfg}); !errors.As(err, &oe) || oe.Code != proto.ErrConflict {
+		t.Fatalf("resolv.conf symlink: %v", err)
 	}
 }

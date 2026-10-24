@@ -551,7 +551,8 @@
     "current": "Alamat sekarang",
     "mode": {
       "dhcp": "Otomatis (DHCP)",
-      "static": "Alamat tetap"
+      "static": "Alamat tetap",
+      "off": "Tidak dipakai"
     },
     "address": "Alamat IP / prefiks",
     "gateway": "Gateway (router)",
