@@ -651,6 +651,8 @@
     "ntpSynced": "Jam tersinkron otomatis.",
     "ntpWaiting": "Menunggu sinkronisasi jam otomatis…",
     "ntpOff": "Sinkronisasi jam otomatis mati.",
-    "timeSaved": "Pengaturan waktu disimpan."
+    "timeSaved": "Pengaturan waktu disimpan.",
+    "confirmOff": "Matikan {name}? Semua komputer yang sedang membuka folder lewat layanan ini akan terputus.",
+    "turnOff": "Matikan"
   }
 }

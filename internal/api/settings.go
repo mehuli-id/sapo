@@ -51,18 +51,22 @@ func (st *settingsStore) get() Settings {
 	return st.cur
 }
 
-func (st *settingsStore) set(v Settings) error {
+// update mengubah pengaturan di bawah satu kunci (dua admin yang mengubah
+// bersamaan tidak saling menghapus perubahan).
+func (st *settingsStore) update(fn func(*Settings)) (Settings, error) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
+	v := st.cur
+	fn(&v)
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
-		return err
+		return st.cur, err
 	}
 	if err := writeFileAtomic(st.path, data); err != nil {
-		return err
+		return st.cur, err
 	}
 	st.cur = v
-	return nil
+	return v, nil
 }
 
 func (s *Server) handleServices(w http.ResponseWriter, _ *http.Request) {
@@ -80,14 +84,19 @@ func (s *Server) handleServicesUpdate(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	v := s.settings.get()
-	if req.SMB != nil {
-		v.SMBOff = !*req.SMB
+	if req.SMB == nil && req.NFS == nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "tidak ada yang diubah")
+		return
 	}
-	if req.NFS != nil {
-		v.NFSOff = !*req.NFS
-	}
-	if err := s.settings.set(v); err != nil {
+	v, err := s.settings.update(func(v *Settings) {
+		if req.SMB != nil {
+			v.SMBOff = !*req.SMB
+		}
+		if req.NFS != nil {
+			v.NFSOff = !*req.NFS
+		}
+	})
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "gagal menyimpan pengaturan")
 		return
 	}

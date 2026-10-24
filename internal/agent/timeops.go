@@ -101,7 +101,8 @@ func TimeSetOp(t TimeTools) Handler {
 		if p.NTP {
 			ntp = "true"
 		}
-		for _, args := range [][]string{{"set-timezone", p.Timezone}, {"set-ntp", ntp}} {
+		// NTP dulu: bila tidak didukung, zona waktu belum berubah.
+		for _, args := range [][]string{{"set-ntp", ntp}, {"set-timezone", p.Timezone}} {
 			res, err := runTool(ctx, t.Timeout, t.Timedatectl, []string{args[0]}, args[1])
 			if err != nil {
 				return nil, err

@@ -257,8 +257,12 @@ func (s *Shares) ApplyOp() Handler {
 		var nfsErr, smbErr error
 		out.NFS, nfsErr = s.writeExports(ctx, exports)
 		out.SMB, smbErr = s.writeSMBConf(ctx, active)
-		if smbErr == nil && out.SMB == "applied" {
-			smbErr = s.smbService(ctx, req.SMBOff)
+		switch {
+		case req.SMBOff && out.SMB != "unavailable":
+			// Gagal-tertutup: Samba dimatikan walau smb.conf gagal ditulis.
+			smbErr = errors.Join(smbErr, s.smbService(ctx, true))
+		case smbErr == nil && out.SMB == "applied":
+			smbErr = s.smbService(ctx, false)
 		}
 		if err := errors.Join(nfsErr, smbErr); err != nil {
 			return nil, err
@@ -277,7 +281,9 @@ func (s *Shares) smbService(ctx context.Context, off bool) error {
 	if off {
 		flags, state = []string{"disable", "--now"}, "stop"
 	}
-	if s.smbState == state {
+	// Mematikan selalu dijalankan (murah, dan memperbaiki Samba yang
+	// dinyalakan di luar Sapo); menyalakan hanya bila keadaannya berubah.
+	if !off && s.smbState == state {
 		return nil
 	}
 	res, err := s.p.st.run(ctx, s.t.Systemctl, flags, s.t.SMBService)

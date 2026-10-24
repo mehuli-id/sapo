@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Control Panel (hanya admin): pintasan ke aplikasi pengaturan, layanan
 // berbagi file (SMB, NFS), serta waktu dan tanggal.
-import { computed, onMounted, reactive, ref } from "vue"
+import { computed, onMounted, onUnmounted, reactive, ref } from "vue"
 import { useI18n } from "vue-i18n"
 import { CircleCheck, Clock, LoaderCircle, Share2, TriangleAlert } from "@lucide/vue"
 import { findApp, iconFor } from "@/apps/registry"
@@ -25,12 +25,19 @@ function message(e: unknown) {
 
 // --- Layanan ---
 const services = ref<{ smb: boolean; nfs: boolean } | null>(null)
-const svcBusy = ref(false)
+const svcBusy = ref<"" | "smb" | "nfs">("")
 const svcMsg = ref("")
 const svcError = ref("")
+// Mematikan layanan memutus semua klien: harus dikonfirmasi dulu.
+const confirmOff = ref<"" | "smb" | "nfs">("")
 async function toggle(name: "smb" | "nfs") {
   if (!services.value) return
-  svcBusy.value = true
+  if (services.value[name] && confirmOff.value !== name) {
+    confirmOff.value = name
+    return
+  }
+  confirmOff.value = ""
+  svcBusy.value = name
   svcMsg.value = svcError.value = ""
   try {
     const res = await api.setServices({ [name]: !services.value[name] })
@@ -40,7 +47,7 @@ async function toggle(name: "smb" | "nfs") {
   } catch (e) {
     svcError.value = message(e)
   } finally {
-    svcBusy.value = false
+    svcBusy.value = ""
   }
 }
 
@@ -54,14 +61,27 @@ const timeError = ref("")
 async function loadTime() {
   try {
     time.value = await api.timeStatus()
+    fetchedAt.value = tick.value = Date.now()
     Object.assign(form, { timezone: time.value.timezone, ntp: time.value.ntp })
   } catch (e) {
     timeError.value = message(e)
   }
 }
-const nasTime = computed(() =>
-  time.value ? new Date(time.value.now).toLocaleString(locale.value, { dateStyle: "full", timeStyle: "short", timeZone: time.value.timezone || undefined }) : "",
-)
+// Jam NAS berjalan dari waktu server (diperbarui setiap 30 detik).
+const fetchedAt = ref(Date.now())
+const tick = ref(Date.now())
+let clock: number | undefined
+onUnmounted(() => window.clearInterval(clock))
+const nasTime = computed(() => {
+  if (!time.value) return ""
+  const at = new Date(Date.parse(time.value.now) + (tick.value - fetchedAt.value))
+  try {
+    return at.toLocaleString(locale.value, { dateStyle: "full", timeStyle: "short", timeZone: time.value.timezone || undefined })
+  } catch {
+    // zona waktu yang tidak dikenal browser
+    return `${at.toLocaleString(locale.value, { dateStyle: "full", timeStyle: "short", timeZone: "UTC" })} UTC`
+  }
+})
 const timeChanged = computed(() => !!time.value && (form.timezone !== time.value.timezone || form.ntp !== time.value.ntp))
 async function saveTime() {
   timeBusy.value = true
@@ -80,7 +100,11 @@ async function saveTime() {
 onMounted(async () => {
   api.services().then((s) => (services.value = s), (e) => (svcError.value = message(e)))
   loadTime()
-  api.timezones().then((z) => (zones.value = z.zones), () => {})
+  clock = window.setInterval(() => (tick.value = Date.now()), 30_000)
+  api.timezones().then(
+    (z) => (zones.value = z.zones),
+    (e) => (timeError.value = message(e)),
+  )
 })
 </script>
 
@@ -120,11 +144,16 @@ onMounted(async () => {
           role="switch"
           :aria-checked="services?.[name] ?? false"
           :variant="services?.[name] ? 'default' : 'outline'"
-          :disabled="!services || svcBusy"
+          :disabled="!services || !!svcBusy"
           @click="toggle(name)"
         >
-          <LoaderCircle v-if="svcBusy" class="animate-spin" />{{ services?.[name] ? t("controlPanel.on") : t("controlPanel.off") }}
+          <LoaderCircle v-if="svcBusy === name" class="animate-spin" />{{ services?.[name] ? t("controlPanel.on") : t("controlPanel.off") }}
         </Button>
+      </div>
+      <div v-if="confirmOff" class="flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-2.5 text-sm">
+        <span class="flex-1">{{ t("controlPanel.confirmOff", { name: t(`controlPanel.${confirmOff}`) }) }}</span>
+        <Button size="sm" variant="destructive" @click="toggle(confirmOff)">{{ t("controlPanel.turnOff") }}</Button>
+        <Button size="sm" variant="ghost" @click="confirmOff = ''">{{ t("common.cancel") }}</Button>
       </div>
       <p v-if="svcMsg" class="flex items-center gap-2 text-sm"><CircleCheck class="size-4 text-emerald-600" />{{ svcMsg }}</p>
       <p v-if="svcError" class="flex items-center gap-2 text-sm text-destructive" role="alert"><TriangleAlert class="size-4" />{{ svcError }}</p>
