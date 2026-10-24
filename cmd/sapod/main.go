@@ -79,7 +79,7 @@ func main() {
 	ac := cfg.Agent.Accounts
 	accounts := agent.NewAccounts(agent.AccountTools{
 		Useradd: ac.Useradd, Userdel: ac.Userdel, Groupadd: ac.Groupadd, Groupdel: ac.Groupdel, Gpasswd: ac.Gpasswd,
-		Smbpasswd: ac.Smbpasswd, PasswdFile: ac.PasswdFile, GroupFile: ac.GroupFile,
+		Smbpasswd: ac.Smbpasswd, Pkill: ac.Pkill, PasswdFile: ac.PasswdFile, GroupFile: ac.GroupFile, StateFile: ac.StateFile,
 		IDMin: ac.IDMin, IDMax: ac.IDMax, PrimaryGroup: ac.PrimaryGroup, Shell: ac.Shell,
 		Timeout: time.Duration(sc.CommandTimeoutSeconds) * time.Second, Log: log,
 	})
@@ -89,6 +89,7 @@ func main() {
 	shares := agent.NewShares(pools, agent.ShareTools{
 		Zfs: shc.Zfs, Setfacl: shc.Setfacl, Testparm: shc.Testparm, Smbcontrol: shc.Smbcontrol, SMBConf: shc.SMBConf,
 		Workgroup: shc.Workgroup, ServerString: shc.ServerString, MinProtocol: shc.MinProtocol,
+		MountBase: pc.MountBase, PasswdFile: ac.PasswdFile, GroupFile: ac.GroupFile,
 	})
 	reg.Register(proto.OpSharesApply, shares.ApplyOp())
 	reg.Register(proto.OpSharesDelete, shares.DeleteOp())

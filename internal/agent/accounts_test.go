@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -19,7 +20,7 @@ import (
 func testAccounts(t *testing.T) (*Accounts, string) {
 	t.Helper()
 	dir := t.TempDir()
-	for _, f := range []string{"passwd", "group", "fake.sh"} {
+	for _, f := range []string{"passwd", "group", "fake.sh", "state.json"} {
 		b, err := os.ReadFile(filepath.Join("testdata", "accounts", f))
 		if err != nil {
 			t.Fatal(err)
@@ -37,8 +38,8 @@ func testAccounts(t *testing.T) (*Accounts, string) {
 	}
 	return NewAccounts(AccountTools{
 		Useradd: tool("useradd"), Userdel: tool("userdel"), Groupadd: tool("groupadd"), Groupdel: tool("groupdel"),
-		Gpasswd: tool("gpasswd"), Smbpasswd: tool("smbpasswd"),
-		PasswdFile: filepath.Join(dir, "passwd"), GroupFile: filepath.Join(dir, "group"),
+		Gpasswd: tool("gpasswd"), Smbpasswd: tool("smbpasswd"), Pkill: tool("pkill"),
+		PasswdFile: filepath.Join(dir, "passwd"), GroupFile: filepath.Join(dir, "group"), StateFile: filepath.Join(dir, "state.json"),
 		IDMin: 20000, IDMax: 29999, PrimaryGroup: "sapo-users", Shell: "/usr/sbin/nologin", Timeout: 5 * time.Second,
 	}), dir
 }
@@ -100,14 +101,27 @@ func TestAccountsSync(t *testing.T) {
 	if !strings.Contains(string(calls), "smbpasswd -d -- ani") || !strings.Contains(string(calls), "smbpasswd -e -- budi") {
 		t.Fatalf("status Samba tidak disinkronkan:\n%s", calls)
 	}
+	// Sesi akun yang dihapus (lama, UID 20001) dan yang dinonaktifkan diputus.
+	if !strings.Contains(string(calls), "pkill -KILL --euid 20001 --") || !strings.Contains(string(calls), "pkill -KILL --euid "+strconv.Itoa(users["ani"].UID)) {
+		t.Fatalf("sesi tidak diputus:\n%s", calls)
+	}
 
-	// Diulang tanpa perubahan: tidak ada akun dibuat atau dihapus.
+	// ID baru dimulai dari catatan (tidak memakai ulang ID akun lama).
+	if users["budi"].UID < 20011 || users["ani"].UID < 20011 {
+		t.Fatalf("ID baru = %d %d", users["budi"].UID, users["ani"].UID)
+	}
+	os.Remove(filepath.Join(dir, "calls.log"))
+	// Diulang tanpa perubahan: tidak ada akun dibuat atau dihapus, dan
+	// status Samba yang sudah diterapkan tidak diulang.
 	res, err = syncAccounts(t, a, proto.AccountsSyncParams{
 		Users:  []proto.AccountUser{{Name: "budi", Groups: []string{"keluarga"}}, {Name: "ani", Groups: []string{"keluarga"}}},
 		Groups: []string{"keluarga"},
 	})
 	if err != nil || len(res.CreatedUsers)+len(res.RemovedUsers)+len(res.CreatedGroups)+len(res.RemovedGroups) != 0 {
 		t.Fatalf("sinkron ulang: %+v %v", res, err)
+	}
+	if calls, _ := os.ReadFile(filepath.Join(dir, "calls.log")); strings.Contains(string(calls), "smbpasswd -e -- budi") {
+		t.Fatalf("status Samba yang sama tidak perlu diterapkan ulang:\n%s", calls)
 	}
 	// budi keluar dari grup.
 	if _, err := syncAccounts(t, a, proto.AccountsSyncParams{
@@ -165,9 +179,41 @@ func TestSMBPassword(t *testing.T) {
 	}
 	var oe *OpError
 	// Akun di luar Sapo (admin lokal, root) dan password berbaris baru ditolak.
-	for _, tc := range [][2]string{{"admin", "x"}, {"root", "x"}, {"budi", "a\nb"}, {"budi", ""}} {
+	for _, tc := range [][2]string{{"admin", "x"}, {"root", "x"}, {"budi", "a\nb"}, {"budi", ""}, {"budi", strings.Repeat("x", 128)}, {"budi", "a\tb"}} {
 		if err := set(tc[0], tc[1]); !errors.As(err, &oe) {
 			t.Errorf("%q harus ditolak: %v", tc, err)
 		}
+	}
+}
+
+func TestAccountsNeverReuseIDs(t *testing.T) {
+	a, dir := testAccounts(t)
+	if _, err := syncAccounts(t, a, proto.AccountsSyncParams{Users: []proto.AccountUser{{Name: "budi"}}}); err != nil {
+		t.Fatal(err)
+	}
+	users, _ := readPasswd(filepath.Join(dir, "passwd"))
+	old := users["budi"].UID
+	// budi dihapus, lalu carol dibuat: carol tidak boleh mendapat UID budi.
+	if _, err := syncAccounts(t, a, proto.AccountsSyncParams{Users: []proto.AccountUser{{Name: "carol"}}}); err != nil {
+		t.Fatal(err)
+	}
+	users, _ = readPasswd(filepath.Join(dir, "passwd"))
+	if _, ok := users["budi"]; ok || users["carol"].UID <= old {
+		t.Fatalf("budi %d, carol %d", old, users["carol"].UID)
+	}
+}
+
+func TestAccountsRefuseForeignPrimaryGroup(t *testing.T) {
+	a, dir := testAccounts(t)
+	// Grup sapo-users yang tidak tercatat sebagai buatan sapod.
+	if err := os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{"next_id":20011}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var oe *OpError
+	if _, err := syncAccounts(t, a, proto.AccountsSyncParams{Users: []proto.AccountUser{{Name: "budi"}}}); !errors.As(err, &oe) || oe.Code != proto.ErrConflict {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "calls.log")); err == nil {
+		t.Fatal("tidak boleh ada perubahan")
 	}
 }

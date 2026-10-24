@@ -20,6 +20,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/mehuli-id/sapo/internal/audit"
@@ -79,7 +80,12 @@ type Server struct {
 	reenroll    pendingTOTP // pendaftaran ulang 2FA dari panel (per user)
 	shares      *shareStore
 	// syncMu: satu sinkronisasi akun dan shared folder ke sapod pada satu waktu.
-	syncMu sync.Mutex
+	syncMu        sync.Mutex
+	resyncRunning atomic.Bool
+	resyncDelay   time.Duration
+	// smbLocks: satu perubahan password Samba per pengguna pada satu waktu.
+	smbMu    sync.Mutex
+	smbLocks map[string]*sync.Mutex
 
 	hashSlots chan struct{}
 
@@ -152,6 +158,8 @@ func New(o Options) (*Server, error) {
 		setup:    pendingTOTP{entries: map[string]pendingEntry{}},
 		reenroll: pendingTOTP{entries: map[string]pendingEntry{}},
 		shares:   shares,
+
+		resyncDelay: 30 * time.Second,
 
 		hashSlots: make(chan struct{}, cfg.Auth.MaxConcurrentHashes),
 	}

@@ -311,14 +311,15 @@
     "group_reserved": "This group name is used by the system; choose another.",
     "group_not_found": "Group not found.",
     "password_same": "The new password must differ from the current one.",
-    "password_too_long": "The password is too long.",
+    "password_too_long": "The password can be at most 127 characters (SMB file sharing limit).",
     "bad_request": "Invalid input.",
     "share_invalid": "The folder name doesn’t follow the rules.",
     "share_taken": "This folder name is already taken.",
     "share_not_ready": "The folder was saved but couldn’t be set up: {message}",
     "share_delete_failed": "The folder couldn’t be deleted: {message}",
     "conflict": "Conflicts with the system state.",
-    "system_sync_failed": "Saved, but not yet applied to the system. Try again shortly."
+    "system_sync_failed": "Saved, but not yet applied to the system. Try again shortly.",
+    "password_invalid": "The password can’t contain control characters (such as tab or newline)."
   },
   "pool": {
     "title": "Storage pools",
@@ -515,6 +516,8 @@
     "openFrom": "Open from another computer (sign in with your panel username and password):",
     "deleteHelp": "The folder {name} and ALL its contents ({used}) will be permanently deleted. This cannot be undone.",
     "typeName": "Type the folder name",
-    "delete": "Delete folder and contents"
+    "delete": "Delete folder and contents",
+    "aclPending": "Applying permissions to the folder contents. This can take a while for large folders; until it finishes, new users may not open some files.",
+    "aclError": "Permissions couldn’t be applied to all folder contents: {message}"
   }
 }

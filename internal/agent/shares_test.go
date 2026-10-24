@@ -4,22 +4,31 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mehuli-id/sapo/internal/proto"
 )
 
 // testShares: zfs pengganti dengan dataset di direktori sementara
-// (<root>/<pool>/<folder>), setfacl/testparm/smbcontrol yang mencatat argumen.
+// (<root>/<pool>/<folder>) dan properti di file samping; setfacl, testparm,
+// dan smbcontrol mencatat argumen; ACL isi folder dicatat, tidak dipasang.
 func testShares(t *testing.T, testparmExit string) (*Shares, string, string) {
 	t.Helper()
 	p, _ := newTestPools(t, zpoolFake{names: "tank\n"})
 	dir := t.TempDir()
 	root := filepath.Join(dir, "mnt")
+	props := filepath.Join(dir, "props")
 	log := filepath.Join(dir, "calls.log")
+	for _, d := range []string{filepath.Join(root, "tank"), props} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
 	write := func(name, body string) string {
 		path := filepath.Join(dir, name)
 		script := "#!/bin/sh\nprintf '%s %s\\n' " + name + " \"$*\" >> '" + log + "'\n" + body
@@ -30,23 +39,40 @@ func testShares(t *testing.T, testparmExit string) (*Shares, string, string) {
 	}
 	// Operand terakhir adalah nama dataset (setelah "--").
 	zfs := write("zfs", `for a; do ds="$a"; done
+key=$(echo "$ds" | tr / _)
+prop() { cat "`+props+`/$key.$1" 2>/dev/null || echo -; }
 case "$1" in
-list) [ -d "`+root+`/$ds" ] || exit 1; [ "$4" = "name,type" ] && printf '%s\tfilesystem\n' "$ds" || echo "$ds" ;;
-create) mkdir -p "`+root+`/$ds" ;;
-get) echo "`+root+`/$ds" ;;
-destroy) rm -rf "`+root+`/$ds" ;;
+get)
+  if [ "$ds" = tank ]; then printf 'mountpoint\t%s\n' "`+root+`/tank"; exit 0; fi
+  [ -d "`+root+`/$ds" ] || { echo "cannot open '$ds': dataset does not exist" >&2; exit 1; }
+  printf 'type\tfilesystem\nmountpoint\t%s\nmounted\tyes\nsapo:share\t%s\nsapo:acl\t%s\n' "`+root+`/$ds" "$(prop share)" "$(prop acl)" ;;
+create) mkdir -p "`+root+`/$ds"; echo "${3#sapo:share=}" > "`+props+`/$key.share" ;;
+set) echo "${2#sapo:acl=}" > "`+props+`/$key.acl" ;;
+destroy) rm -rf "`+root+`/$ds"; rm -f "`+props+`/$key".* ;;
 esac
 `)
 	smbConfDir := filepath.Join(dir, "samba")
 	if err := os.MkdirAll(smbConfDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	passwd := filepath.Join(dir, "passwd")
+	group := filepath.Join(dir, "group")
+	_ = os.WriteFile(passwd, []byte("ani:x:20011:20000::/nonexistent:/usr/sbin/nologin\nbudi:x:20012:20000::/nonexistent:/usr/sbin/nologin\n"), 0o644)
+	_ = os.WriteFile(group, []byte("sapo-users:x:20000:\nortu:x:20013:budi\n"), 0o644)
 	s := NewShares(p, ShareTools{
 		Zfs: zfs, Setfacl: write("setfacl", ""), Testparm: write("testparm", "exit "+testparmExit+"\n"),
 		Smbcontrol: write("smbcontrol", ""), SMBConf: filepath.Join(smbConfDir, "smb.conf"),
 		Workgroup: "WORKGROUP", ServerString: "Sapo NAS", MinProtocol: "SMB2",
+		MountBase: root, PasswdFile: passwd, GroupFile: group,
 	})
 	s.chown = func(string, int, int) error { return nil }
+	s.isMount = func(string) bool { return true }
+	s.aclTree = func(_ context.Context, root string, acl shareACL) error {
+		f, _ := os.OpenFile(log, os.O_APPEND|os.O_WRONLY, 0o644)
+		defer f.Close()
+		fmt.Fprintf(f, "acltree %s %v\n", root, acl)
+		return nil
+	}
 	return s, root, log
 }
 
@@ -92,6 +118,27 @@ func TestSharesApply(t *testing.T) {
 		if !strings.Contains(c, want) {
 			t.Errorf("smb.conf tanpa %q:\n%s", want, c)
 		}
+	}
+	if !strings.Contains(c, "invalid users = root") {
+		t.Fatal("root harus ditolak di Samba")
+	}
+	// Izin diterapkan ke isi folder di latar belakang, lalu tercatat.
+	waitFor(t, func() bool {
+		b, _ := os.ReadFile(log)
+		return strings.Contains(string(b), "acltree "+filepath.Join(root, "tank/keluarga")+" {[20011] [20012] [] [20013]}") &&
+			strings.Contains(string(b), "zfs set sapo:acl=")
+	})
+	// Diterapkan ulang tanpa perubahan izin: isi folder tidak diproses lagi.
+	os.Remove(log)
+	if _, err := applyShares(t, s, proto.ShareSpec{Name: "keluarga", Pool: "tank", Description: "Foto & dokumen", Read: []string{"user:ani"}, Write: []string{"user:budi", "group:ortu"}}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if b, _ := os.ReadFile(log); strings.Contains(string(b), "acltree") {
+		t.Fatalf("ACL isi folder tidak perlu diulang:\n%s", b)
+	}
+	if b, _ := os.ReadFile(log); !strings.Contains(string(b), "smbcontrol smbd close-share -- kosong") && strings.Contains(c, "[kosong]") {
+		t.Fatal("tidak terduga")
 	}
 	// Folder tanpa izin tidak dibagikan (valid users kosong = semua boleh).
 	if strings.Contains(c, "[kosong]") || strings.Contains(c, "[hilang]") {
@@ -155,7 +202,50 @@ func TestSharesDelete(t *testing.T) {
 		t.Fatal("dataset harus terhapus")
 	}
 	calls, _ := os.ReadFile(log)
-	if !strings.Contains(string(calls), "smbcontrol smbd close-share -- data") || !strings.Contains(string(calls), "zfs destroy -r -- tank/data") {
+	if !strings.Contains(string(calls), "smbcontrol smbd close-share -- data\nzfs unmount -- tank/data\nzfs destroy -r -- tank/data") {
 		t.Fatalf("panggilan:\n%s", calls)
+	}
+}
+
+func waitFor(t *testing.T, ok func() bool) {
+	t.Helper()
+	for i := 0; i < 100; i++ {
+		if ok() {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("waktu tunggu habis")
+}
+
+func TestSharesRefuseForeignDatasets(t *testing.T) {
+	s, root, _ := testShares(t, "0")
+	// Dataset yang sudah ada tanpa penanda Sapo (misalnya rpool/home).
+	if err := os.MkdirAll(filepath.Join(root, "tank/home"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	res, err := applyShares(t, s, proto.ShareSpec{Name: "home", Pool: "tank", Write: []string{"user:budi"}})
+	if err != nil || !strings.Contains(res.Shares[0].Error, "bukan shared folder Sapo") {
+		t.Fatalf("hasil = %+v %v", res, err)
+	}
+	if b, _ := os.ReadFile(s.t.SMBConf); strings.Contains(string(b), "[home]") {
+		t.Fatal("dataset asing tidak boleh dibagikan")
+	}
+	raw, _ := json.Marshal(proto.ShareDeleteParams{Name: "home", Pool: "tank"})
+	var oe *OpError
+	if _, err := s.DeleteOp()(context.Background(), raw); !errors.As(err, &oe) || oe.Code != proto.ErrNotFound {
+		t.Fatalf("dataset asing tidak boleh dihapus: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "tank/home")); err != nil {
+		t.Fatal("dataset asing hilang")
+	}
+	// Pool yang tidak terpasang di mount_base (misalnya root-on-ZFS).
+	s.t.MountBase = "/srv/lain"
+	res, _ = applyShares(t, s, proto.ShareSpec{Name: "etc", Pool: "tank", Write: []string{"user:budi"}})
+	if !strings.Contains(res.Shares[0].Error, "tidak terpasang") {
+		t.Fatalf("hasil = %+v", res)
+	}
+	if _, err := os.Stat(filepath.Join(root, "tank/etc")); err == nil {
+		t.Fatal("dataset tidak boleh dibuat di pool asing")
 	}
 }

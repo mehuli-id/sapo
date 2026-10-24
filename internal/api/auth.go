@@ -16,6 +16,7 @@ import (
 
 	"github.com/mehuli-id/sapo/internal/audit"
 	"github.com/mehuli-id/sapo/internal/auth"
+	"github.com/mehuli-id/sapo/internal/proto"
 )
 
 type ctxKey int
@@ -262,8 +263,11 @@ func (s *Server) validatePassword(username, password, confirm string) (string, s
 	switch {
 	case utf8.RuneCountInString(password) < s.cfg.Auth.PasswordMinLength:
 		return "password_too_short", "password terlalu pendek"
-	case len(password) > 1024:
+	case len(password) > proto.MaxSMBPassword:
+		// Password yang sama dipakai untuk SMB, yang punya batas panjang.
 		return "password_too_long", "password terlalu panjang"
+	case strings.ContainsFunc(password, func(r rune) bool { return r < 0x20 || r == 0x7f }):
+		return "password_invalid", "password tidak boleh berisi karakter kendali"
 	case strings.EqualFold(password, username):
 		return "password_is_username", "password tidak boleh sama dengan nama pengguna"
 	case password != confirm:
@@ -336,7 +340,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	// Akun sistem dan password Samba admin pertama (tidak menunda jawaban).
 	go func(name, password string) {
 		if _, err := s.syncSystem(context.Background()); err == nil {
-			s.setSMBPassword(context.Background(), name, password)
+			s.setSMBPassword(context.Background(), name, password, "")
 		}
 	}(admin.Username, req.Password)
 
@@ -543,14 +547,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if usedRecovery {
 		// Dicatat terpisah: pemakaian kode cadangan perlu diketahui admin.
 		s.record(r, user.Username, "auth.login", true, map[string]string{"method": "recovery_code", "recovery_codes_left": strconv.Itoa(recoveryLeft)})
-		go s.setSMBPassword(context.Background(), user.Username, req.Password)
+		go s.setSMBPassword(context.Background(), user.Username, req.Password, s.currentHash(user.Username))
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": map[string]any{"username": user.Username, "role": user.Role}, "recovery_codes_left": recoveryLeft})
 		return
 	}
 	s.record(r, user.Username, "auth.login", true, nil)
 	// Password Samba disamakan dengan password panel (misalnya akun lama
 	// sebelum Samba terpasang); tidak menunda jawaban login.
-	go s.setSMBPassword(context.Background(), user.Username, req.Password)
+	go s.setSMBPassword(context.Background(), user.Username, req.Password, s.currentHash(user.Username))
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": map[string]any{"username": user.Username, "role": user.Role}})
 }
 

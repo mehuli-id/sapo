@@ -390,12 +390,19 @@ type AccountUser struct {
 // "group:nama" yang tidak bisa dibuat karena nama sudah dipakai akun atau
 // grup sistem di luar Sapo.
 type AccountsSyncResult struct {
+	// Failures: akun atau grup yang gagal diubah ("user:nama: pesan");
+	// sisanya tetap diterapkan.
+	Failures      []string `json:"failures"`
 	CreatedUsers  []string `json:"created_users,omitempty"`
 	RemovedUsers  []string `json:"removed_users,omitempty"`
 	CreatedGroups []string `json:"created_groups,omitempty"`
 	RemovedGroups []string `json:"removed_groups,omitempty"`
 	Conflicts     []string `json:"conflicts"`
 }
+
+// MaxSMBPassword: panjang password paling banyak (byte) yang bisa dipakai
+// untuk SMB; panel menolak password lebih panjang.
+const MaxSMBPassword = 127
 
 // SMBPasswordParams adalah parameter smb.set_password.
 type SMBPasswordParams struct {
@@ -444,4 +451,7 @@ type ShareDeleteParams struct {
 type ShareUsage struct {
 	UsedBytes      uint64 `json:"used_bytes"`
 	AvailableBytes uint64 `json:"available_bytes"`
+	// ACLPending: izin sedang diterapkan ke isi folder; ACLError: gagal.
+	ACLPending bool   `json:"acl_pending,omitempty"`
+	ACLError   string `json:"acl_error,omitempty"`
 }

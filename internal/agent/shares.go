@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +15,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -26,6 +31,11 @@ type ShareTools struct {
 	SMBConf                            string
 	Workgroup, ServerString            string
 	MinProtocol                        string
+	// MountBase: pool Sapo terpasang di <MountBase>/<pool>; folder harus
+	// tepat di <MountBase>/<pool>/<nama>.
+	MountBase string
+	// Untuk mengubah nama pengguna dan grup menjadi ID (ACL isi folder).
+	PasswdFile, GroupFile string
 }
 
 // Shares melayani shares.apply, shares.delete, dan shares.usage. Perubahan
@@ -34,13 +44,47 @@ type ShareTools struct {
 type Shares struct {
 	p *Pools
 	t ShareTools
-	// chown mengganti pemilik folder (diganti di test, yang tidak berjalan
-	// sebagai root).
-	chown func(path string, uid, gid int) error
+	// chown dan isMount diganti di test (yang tidak berjalan sebagai root
+	// dan tanpa ZFS).
+	chown   func(path string, uid, gid int) error
+	isMount func(path string) bool
+	// aclTree memasang ACL ke isi folder (diganti di test).
+	aclTree func(ctx context.Context, root string, acl shareACL) error
+
+	jobsMu sync.Mutex
+	jobs   map[string]*aclJob
+}
+
+// aclJob adalah penerapan izin ke isi satu folder yang berjalan di latar
+// belakang.
+type aclJob struct {
+	hash     string
+	cancel   context.CancelFunc
+	finished chan struct{}
+	done     bool
+	err      string
 }
 
 // NewShares menyiapkan operasi shared folder di atas pool p.
-func NewShares(p *Pools, t ShareTools) *Shares { return &Shares{p: p, t: t, chown: os.Lchown} }
+func NewShares(p *Pools, t ShareTools) *Shares {
+	return &Shares{p: p, t: t, chown: os.Lchown, isMount: isMountPoint, aclTree: applyACLTree, jobs: map[string]*aclJob{}}
+}
+
+// isMountPoint: path berada di perangkat yang berbeda dengan induknya.
+func isMountPoint(path string) bool {
+	var self, parent syscall.Stat_t
+	if syscall.Lstat(path, &self) != nil || syscall.Lstat(filepath.Dir(path), &parent) != nil {
+		return false
+	}
+	return self.Dev != parent.Dev
+}
+
+// Penanda dataset buatan Sapo (properti pengguna ZFS). Dataset tanpa
+// penanda tidak pernah diubah izinnya, dibagikan, atau dihapus.
+const (
+	sharePropName = "sapo:share"
+	sharePropACL  = "sapo:acl"
+)
 
 // shareNamePattern: nama folder (juga nama share SMB dan nama dataset).
 var shareNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
@@ -118,6 +162,10 @@ func (s *Shares) ApplyOp() Handler {
 		if err != nil {
 			return nil, err
 		}
+		ids, err := s.lookupIDs()
+		if err != nil {
+			return nil, err
+		}
 		out := proto.SharesApplyResult{Shares: []proto.ShareState{}}
 		var active []shareConf
 		for _, sp := range req.Shares {
@@ -125,7 +173,11 @@ func (s *Shares) ApplyOp() Handler {
 				out.Shares = append(out.Shares, proto.ShareState{Name: sp.Name, Pool: sp.Pool, Error: "pool tidak ditemukan"})
 				continue
 			}
-			path, err := s.ensureDataset(ctx, sp)
+			acl, aclErr := ids.resolve(sp)
+			path, applied, err := s.ensureDataset(ctx, sp)
+			if err == nil {
+				err = aclErr
+			}
 			if err == nil {
 				err = s.setPermissions(ctx, path, sp)
 			}
@@ -133,10 +185,15 @@ func (s *Shares) ApplyOp() Handler {
 			if err != nil {
 				st.Error = clipTo(err.Error(), maxErrorText)
 				s.p.logWarn("shared folder gagal disiapkan", "folder", sp.Name, "err", err)
-			} else if len(sp.Read)+len(sp.Write) > 0 {
-				// Folder tanpa izin sama sekali tidak dibagikan (valid users
-				// kosong di Samba berarti semua pengguna boleh masuk).
-				active = append(active, shareConf{spec: sp, path: path})
+			} else {
+				// Izin juga diterapkan ke isi folder yang sudah ada (latar
+				// belakang), bila berbeda dari yang terakhir diterapkan.
+				s.startACLJob(sp.Pool+"/"+sp.Name, path, acl, applied)
+				if len(sp.Read)+len(sp.Write) > 0 {
+					// Folder tanpa izin sama sekali tidak dibagikan (valid
+					// users kosong di Samba berarti semua pengguna boleh masuk).
+					active = append(active, shareConf{spec: sp, path: path})
+				}
 			}
 			out.Shares = append(out.Shares, st)
 		}
@@ -148,37 +205,202 @@ func (s *Shares) ApplyOp() Handler {
 	}
 }
 
-// ensureDataset membuat <pool>/<nama> bila belum ada dan mengembalikan
-// mountpoint-nya.
-func (s *Shares) ensureDataset(ctx context.Context, sp proto.ShareSpec) (string, error) {
+// ensureDataset membuat <pool>/<nama> bila belum ada (dengan penanda
+// sapo:share), lalu memastikan dataset itu memang folder Sapo yang terpasang
+// tepat di <MountBase>/<pool>/<nama>. Mengembalikan path dan nilai sapo:acl.
+func (s *Shares) ensureDataset(ctx context.Context, sp proto.ShareSpec) (string, string, error) {
 	ds := sp.Pool + "/" + sp.Name
-	res, err := s.p.st.run(ctx, s.t.Zfs, []string{"list", "-H", "-o", "name"}, ds)
+	want := filepath.Join(s.t.MountBase, sp.Pool, sp.Name)
+	// Akar pool harus terpasang di tempat Sapo (pool dari luar Sapo, misalnya
+	// sistem root-on-ZFS, tidak dipakai untuk shared folder).
+	props, err := s.zfsProps(ctx, sp.Pool, "mountpoint")
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	if res.ExitCode != 0 {
-		res, err = s.p.st.run(ctx, s.t.Zfs, []string{"create"}, ds)
-		if err != nil {
-			return "", err
+	if props["mountpoint"] != filepath.Join(s.t.MountBase, sp.Pool) {
+		return "", "", fmt.Errorf("pool %s tidak terpasang di %s", sp.Pool, filepath.Join(s.t.MountBase, sp.Pool))
+	}
+	props, err = s.zfsProps(ctx, ds, "mountpoint", "mounted", sharePropName, sharePropACL)
+	if errors.Is(err, errNoDataset) {
+		res, runErr := s.p.st.run(ctx, s.t.Zfs, []string{"create", "-o", sharePropName + "=" + sp.Name}, ds)
+		if runErr != nil {
+			return "", "", runErr
 		}
 		if res.ExitCode != 0 {
-			return "", fmt.Errorf("zfs create: %s", firstLine(res.Stderr))
+			return "", "", fmt.Errorf("zfs create: %s", firstLine(res.Stderr))
 		}
 		s.p.logInfo("dataset shared folder dibuat", "dataset", ds)
+		props, err = s.zfsProps(ctx, ds, "mountpoint", "mounted", sharePropName, sharePropACL)
 	}
-	res, err = s.p.st.run(ctx, s.t.Zfs, []string{"get", "-H", "-o", "value", "mountpoint"}, ds)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	path := strings.TrimSpace(string(res.Stdout))
-	if res.ExitCode != 0 || !filepath.IsAbs(path) || filepath.Clean(path) != path || path == "/" {
-		return "", fmt.Errorf("mountpoint %s tidak bisa dipakai: %q", ds, clip(path))
+	switch {
+	case props[sharePropName] != sp.Name:
+		return "", "", fmt.Errorf("dataset %s sudah ada dan bukan shared folder Sapo", ds)
+	case props["mountpoint"] != want:
+		return "", "", fmt.Errorf("dataset %s terpasang di %q, bukan %s", ds, clip(props["mountpoint"]), want)
+	case props["mounted"] != "yes":
+		return "", "", fmt.Errorf("dataset %s belum terpasang", ds)
 	}
-	// Harus direktori sungguhan (bukan symlink) yang sedang terpasang.
-	if st, err := os.Lstat(path); err != nil || !st.IsDir() {
-		return "", fmt.Errorf("%s belum terpasang di %s", ds, path)
+	// Harus direktori sungguhan (bukan symlink) yang benar-benar titik
+	// pasang dataset itu, bukan direktori biasa di bawah pool.
+	if st, err := os.Lstat(want); err != nil || !st.IsDir() || !s.isMount(want) {
+		return "", "", fmt.Errorf("%s belum terpasang di %s", ds, want)
 	}
-	return path, nil
+	acl := props[sharePropACL]
+	if acl == "-" {
+		acl = ""
+	}
+	return want, acl, nil
+}
+
+var errNoDataset = errors.New("dataset tidak ada")
+
+// zfsProps membaca properti dataset (zfs get -H -p). errNoDataset bila
+// dataset tidak ada.
+func (s *Shares) zfsProps(ctx context.Context, ds string, names ...string) (map[string]string, error) {
+	res, err := s.p.st.run(ctx, s.t.Zfs, []string{"get", "-H", "-p", "-o", "property,value", strings.Join(names, ",")}, ds)
+	if err != nil {
+		return nil, err
+	}
+	if res.ExitCode != 0 {
+		if strings.Contains(string(res.Stderr), "does not exist") {
+			return nil, errNoDataset
+		}
+		return nil, fmt.Errorf("zfs get %s: %s", ds, firstLine(res.Stderr))
+	}
+	out := map[string]string{}
+	sc := bufio.NewScanner(bytes.NewReader(res.Stdout))
+	for sc.Scan() {
+		if k, v, ok := strings.Cut(sc.Text(), "\t"); ok {
+			out[k] = v
+		}
+	}
+	return out, nil
+}
+
+// shareIDs memetakan nama akun dan grup ke ID (dari /etc/passwd dan
+// /etc/group) untuk ACL isi folder.
+type shareIDs struct {
+	users  map[string]passwdEntry
+	groups map[string]groupEntry
+}
+
+func (s *Shares) lookupIDs() (shareIDs, error) {
+	users, err := readPasswd(s.t.PasswdFile)
+	if err != nil {
+		return shareIDs{}, err
+	}
+	groups, err := readGroup(s.t.GroupFile)
+	if err != nil {
+		return shareIDs{}, err
+	}
+	return shareIDs{users, groups}, nil
+}
+
+func (ids shareIDs) resolve(sp proto.ShareSpec) (shareACL, error) {
+	var acl shareACL
+	add := func(list []string, write bool) error {
+		for _, p := range list {
+			kind, name, _ := principal(p)
+			switch kind {
+			case "user":
+				u, ok := ids.users[name]
+				if !ok {
+					return fmt.Errorf("akun %s tidak ada", name)
+				}
+				if write {
+					acl.WriteUsers = append(acl.WriteUsers, uint32(u.UID))
+				} else {
+					acl.ReadUsers = append(acl.ReadUsers, uint32(u.UID))
+				}
+			case "group":
+				g, ok := ids.groups[name]
+				if !ok {
+					return fmt.Errorf("grup %s tidak ada", name)
+				}
+				if write {
+					acl.WriteGroups = append(acl.WriteGroups, uint32(g.GID))
+				} else {
+					acl.ReadGroups = append(acl.ReadGroups, uint32(g.GID))
+				}
+			}
+		}
+		return nil
+	}
+	if err := add(sp.Read, false); err != nil {
+		return acl, err
+	}
+	return acl, add(sp.Write, true)
+}
+
+// aclHash meringkas ACL (dengan ID numerik) untuk properti sapo:acl.
+func aclHash(acl shareACL) string {
+	sum := sha256.Sum256(encodeACL(acl.entries(true)))
+	return hex.EncodeToString(sum[:12])
+}
+
+// startACLJob menerapkan ACL ke isi folder di latar belakang bila hash-nya
+// berbeda dari yang tercatat di dataset (sapo:acl). Pekerjaan lama untuk
+// folder yang sama dibatalkan.
+func (s *Shares) startACLJob(ds, path string, acl shareACL, applied string) {
+	hash := aclHash(acl)
+	s.jobsMu.Lock()
+	defer s.jobsMu.Unlock()
+	if j := s.jobs[ds]; j != nil {
+		if j.hash == hash && (!j.done || j.err == "") {
+			return
+		}
+		j.cancel()
+	}
+	if applied == hash {
+		delete(s.jobs, ds)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 24*time.Hour)
+	job := &aclJob{hash: hash, cancel: cancel, finished: make(chan struct{})}
+	s.jobs[ds] = job
+	go func() {
+		defer close(job.finished)
+		defer cancel()
+		err := s.aclTree(ctx, path, acl)
+		if err == nil {
+			res, runErr := runTool(ctx, s.p.st.t.Timeout, s.t.Zfs, []string{"set", sharePropACL + "=" + hash}, ds)
+			switch {
+			case runErr != nil:
+				err = runErr
+			case res.ExitCode != 0:
+				err = errors.New("zfs set: " + firstLine(res.Stderr))
+			}
+		}
+		s.jobsMu.Lock()
+		defer s.jobsMu.Unlock()
+		job.done = true
+		if err != nil && ctx.Err() == nil {
+			job.err = clipTo(err.Error(), maxErrorText)
+			s.p.logWarn("izin isi folder gagal diterapkan", "dataset", ds, "err", err)
+		} else if err == nil {
+			s.p.logInfo("izin isi folder diterapkan", "dataset", ds)
+		}
+	}()
+}
+
+// stopACLJob membatalkan dan menunggu pekerjaan ACL folder (sebelum folder
+// dihapus, agar tidak ada berkas yang masih terbuka).
+func (s *Shares) stopACLJob(ds string) {
+	s.jobsMu.Lock()
+	j := s.jobs[ds]
+	delete(s.jobs, ds)
+	s.jobsMu.Unlock()
+	if j == nil {
+		return
+	}
+	j.cancel()
+	select {
+	case <-j.finished:
+	case <-time.After(30 * time.Second):
+	}
 }
 
 // setPermissions: pemilik root, grup akun Sapo, mode 0770, dan ACL POSIX:
@@ -242,6 +464,7 @@ func (s *Shares) renderSMBConf(shares []shareConf) []byte {
 		{"printcap name", "/dev/null"},
 		{"disable spoolss", "yes"},
 		{"unix password sync", "no"},
+		{"invalid users", "root"},
 		{"logging", "file"},
 		{"log file", "/var/log/samba/log.%m"},
 		{"max log size", "1000"},
@@ -313,12 +536,44 @@ func (s *Shares) writeSMBConf(ctx context.Context, shares []shareConf) (string, 
 	if res.ExitCode != 0 {
 		return "", fmt.Errorf("testparm menolak smb.conf: %s", firstLine(res.Stderr))
 	}
+	old, _ := os.ReadFile(s.t.SMBConf)
 	if err := os.Rename(tmp.Name(), s.t.SMBConf); err != nil {
 		return "", err
 	}
 	// smbd yang belum berjalan tidak perlu dimuat ulang.
 	_, _ = s.p.st.run(ctx, s.t.Smbcontrol, []string{"smbd", "reload-config"})
+	// Samba memeriksa izin saat koneksi dibuka: koneksi ke folder yang
+	// izinnya berubah atau dicabut ditutup, agar perubahan langsung berlaku.
+	before, after := smbSections(old), smbSections(data)
+	for name, sec := range before {
+		if name != "global" && after[name] != sec {
+			_, _ = s.p.st.run(ctx, s.t.Smbcontrol, []string{"smbd", "close-share"}, name)
+		}
+	}
 	return "applied", nil
+}
+
+// smbSections memecah smb.conf menjadi bagian per nama ([nama] → isi).
+func smbSections(conf []byte) map[string]string {
+	out := map[string]string{}
+	name := ""
+	var cur strings.Builder
+	flush := func() {
+		if name != "" {
+			out[name] = cur.String()
+		}
+	}
+	for _, line := range strings.Split(string(conf), "\n") {
+		t := strings.TrimSpace(line)
+		if strings.HasPrefix(t, "[") && strings.HasSuffix(t, "]") {
+			flush()
+			name, cur = strings.Trim(t, "[]"), strings.Builder{}
+			continue
+		}
+		cur.WriteString(line + "\n")
+	}
+	flush()
+	return out
 }
 
 // DeleteOp mengembalikan handler shares.delete: menghapus dataset folder
@@ -340,18 +595,20 @@ func (s *Shares) DeleteOp() Handler {
 		ctx, cancel := context.WithTimeout(ctx, s.p.t.CreateTimeout)
 		defer cancel()
 		ds := req.Pool + "/" + req.Name
-		// Harus sistem berkas yang benar-benar ada, tepat di bawah pool.
-		res, err := s.p.st.run(ctx, s.t.Zfs, []string{"list", "-H", "-o", "name,type"}, ds)
+		// Hanya dataset yang dibuat Sapo sebagai shared folder bernama sama.
+		props, err := s.zfsProps(ctx, ds, "type", sharePropName)
+		if errors.Is(err, errNoDataset) || (err == nil && (props["type"] != "filesystem" || props[sharePropName] != req.Name)) {
+			return nil, &OpError{Code: proto.ErrNotFound, Message: "shared folder " + ds + " tidak ditemukan"}
+		}
 		if err != nil {
 			return nil, err
 		}
-		if res.ExitCode != 0 || strings.TrimSpace(string(res.Stdout)) != ds+"\tfilesystem" {
-			return nil, &OpError{Code: proto.ErrNotFound, Message: "shared folder " + ds + " tidak ditemukan"}
-		}
-		// Koneksi SMB yang masih membuka folder ditutup dulu.
+		s.stopACLJob(ds)
+		// Koneksi SMB yang masih membuka folder ditutup dulu, lalu folder
+		// dilepas. Bila masih dipakai, tidak ada yang dihapus (zfs destroy -r
+		// menghapus snapshot sebelum melepas folder).
 		_, _ = s.p.st.run(ctx, s.t.Smbcontrol, []string{"smbd", "close-share"}, req.Name)
-		s.p.logInfo("menghapus shared folder", "dataset", ds)
-		res, err = s.p.st.run(ctx, s.t.Zfs, []string{"destroy", "-r"}, ds)
+		res, err := s.p.st.run(ctx, s.t.Zfs, []string{"unmount"}, ds)
 		if err != nil {
 			return nil, err
 		}
@@ -362,6 +619,16 @@ func (s *Shares) DeleteOp() Handler {
 				code = proto.ErrPoolBusy
 			}
 			return nil, &OpError{Code: code, Message: msg}
+		}
+		s.p.logInfo("menghapus shared folder", "dataset", ds)
+		res, err = s.p.st.run(ctx, s.t.Zfs, []string{"destroy", "-r"}, ds)
+		if err == nil && res.ExitCode != 0 {
+			err = errors.New(clipTo(strings.TrimSpace(string(res.Stderr)), maxErrorText))
+		}
+		if err != nil {
+			// Gagal: folder dipasang lagi agar tetap bisa dipakai.
+			_, _ = s.p.st.run(ctx, s.t.Zfs, []string{"mount"}, ds)
+			return nil, &OpError{Code: "share_delete_failed", Message: err.Error()}
 		}
 		s.p.logInfo("shared folder dihapus", "dataset", ds)
 		return map[string]bool{"ok": true}, nil
@@ -393,6 +660,13 @@ func (s *Shares) UsageOp() Handler {
 			avail, _ := strconv.ParseUint(f[2], 10, 64)
 			out[f[0]] = proto.ShareUsage{UsedBytes: used, AvailableBytes: avail}
 		}
+		s.jobsMu.Lock()
+		for ds, j := range s.jobs {
+			u := out[ds]
+			u.ACLPending, u.ACLError = !j.done, j.err
+			out[ds] = u
+		}
+		s.jobsMu.Unlock()
 		return out, nil
 	}
 }
