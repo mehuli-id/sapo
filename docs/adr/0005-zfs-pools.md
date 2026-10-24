@@ -68,5 +68,6 @@ Membuat pool adalah operasi pertama `sapod` yang menghapus data. Kesalahan memil
 
 - ZFS butuh `zfs-dkms` (contrib, CDDL), jadi modul dikompilasi di mesin pengguna (ADR 0001). ISO dev memasangnya dan memeriksa modulnya saat build. Uji asap QEMU membuat pool mirror sungguhan di disk virtual lewat API, menjalankan scrub, mengganti satu disk sampai resilver selesai, lalu menghapus pool.
 - Pool dari NAS lain belum bisa diimpor dari panel (disknya hanya bisa dihapus dan dipakai ulang). RAID mdadm yang berhenti tetap dianggap dipakai sampai dukungan mdadm ada.
+- Disk lama yang dilepas setelah ganti disk masih membawa label bernama pool yang aktif. Karena tidak bisa dibedakan dari anggota yang sedang terputus, disk itu tetap tampil "dipakai" sampai pool dihapus. Membersihkan label disk seperti ini dari panel (dengan pemeriksaan tambahan) menyusul.
 - Disk tanpa nomor seri dan WWN (sebagian disk virtual dan adaptor USB murah) hanya dikenali dari nama, ukuran, dan status pakainya.
 - `storage.pools` bergantung pada format JSON OpenZFS 2.3 (Debian trixie). Bila formatnya berubah, daftar pool dan kapasitas tetap tampil dari `zpool list`.
