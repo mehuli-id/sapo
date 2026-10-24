@@ -166,6 +166,10 @@ const remove = (s: SharedFolder) =>
           </div>
         </div>
 
+        <p v-if="s.acl_pending" class="flex items-center gap-2 rounded-lg bg-muted p-2.5 text-xs">
+          <LoaderCircle class="size-4 shrink-0 animate-spin" />{{ t("shares.aclPending") }}
+        </p>
+        <p v-else-if="s.acl_error" class="rounded-lg border border-destructive/40 bg-destructive/5 p-2.5 text-xs">{{ t("shares.aclError", { message: s.acl_error }) }}</p>
         <p v-if="!Object.keys(s.permissions).length" class="flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-2.5 text-xs">
           <TriangleAlert class="size-4 shrink-0 text-amber-600" />{{ t("shares.notShared") }}
         </p>

@@ -49,13 +49,17 @@ type Agent struct {
 // akun dan grup dengan UID/GID di rentang [id_min, id_max]; akun juga harus
 // bergrup utama primary_group.
 type Accounts struct {
-	Useradd      string `yaml:"useradd"`
-	Userdel      string `yaml:"userdel"`
-	Groupadd     string `yaml:"groupadd"`
-	Groupdel     string `yaml:"groupdel"`
-	Gpasswd      string `yaml:"gpasswd"`
-	Smbpasswd    string `yaml:"smbpasswd"`
-	PasswdFile   string `yaml:"passwd_file"`
+	Useradd    string `yaml:"useradd"`
+	Userdel    string `yaml:"userdel"`
+	Groupadd   string `yaml:"groupadd"`
+	Groupdel   string `yaml:"groupdel"`
+	Gpasswd    string `yaml:"gpasswd"`
+	Smbpasswd  string `yaml:"smbpasswd"`
+	Pkill      string `yaml:"pkill"`
+	PasswdFile string `yaml:"passwd_file"`
+	// StateFile: catatan sapod tentang akun dan grup buatannya (hanya
+	// yang tercatat yang pernah diubah atau dihapus).
+	StateFile    string `yaml:"state_file"`
 	GroupFile    string `yaml:"group_file"`
 	IDMin        int    `yaml:"id_min"`
 	IDMax        int    `yaml:"id_max"`
@@ -214,8 +218,8 @@ func Default() Config {
 			Console:        Console{IssueFile: "/run/sapo/console.issue", Agetty: "/usr/sbin/agetty"},
 			Accounts: Accounts{
 				Useradd: "/usr/sbin/useradd", Userdel: "/usr/sbin/userdel", Groupadd: "/usr/sbin/groupadd",
-				Groupdel: "/usr/sbin/groupdel", Gpasswd: "/usr/bin/gpasswd", Smbpasswd: "/usr/bin/smbpasswd",
-				PasswdFile: "/etc/passwd", GroupFile: "/etc/group",
+				Groupdel: "/usr/sbin/groupdel", Gpasswd: "/usr/bin/gpasswd", Smbpasswd: "/usr/bin/smbpasswd", Pkill: "/usr/bin/pkill",
+				PasswdFile: "/etc/passwd", GroupFile: "/etc/group", StateFile: "/var/lib/sapod/accounts.json",
 				IDMin: 20000, IDMax: 29999, PrimaryGroup: "sapo-users", Shell: "/usr/sbin/nologin",
 			},
 			Shares: Shares{
@@ -274,10 +278,14 @@ func Default() Config {
 			PasswordMinLength: 10,
 			UsernamePattern:   `^[a-z][a-z0-9._-]{2,31}$`,
 			ReservedUsernames: []string{"root", "sapo", "daemon", "bin", "sys", "sync", "games", "man", "lp", "mail", "news", "uucp", "proxy",
-				"www-data", "backup", "list", "irc", "nobody", "guest", "systemd-network", "systemd-timesync", "messagebus", "sshd", "_apt"},
+				"www-data", "backup", "list", "irc", "nobody", "guest", "systemd-network", "systemd-timesync", "messagebus", "sshd", "_apt",
+				// Akun yang dibuat paket umum saat dipasang kemudian.
+				"avahi", "ftp", "postfix", "ntp", "_chrony", "systemd-resolve", "tss", "uuidd", "polkitd", "statd", "tcpdump", "dnsmasq", "postgres", "mysql", "redis", "wsdd", "nslcd", "usbmux", "_rpc", "colord", "saned", "geoclue", "pulse", "rtkit", "sddm", "lightdm", "gdm", "libvirt-qemu", "dockremap"},
 			GroupNamePattern: "^[a-z][a-z0-9._-]{1,31}$",
 			ReservedGroupNames: []string{"root", "sapo", "sudo", "adm", "staff", "users", "admin", "administrators", "wheel", "nogroup",
-				"daemon", "bin", "sys", "disk", "tty", "shadow", "systemd-journal"},
+				"daemon", "bin", "sys", "disk", "tty", "shadow", "systemd-journal",
+				// Grup penanda akun Sapo dan grup yang dibuat paket umum.
+				"sapo-users", "docker", "libvirt", "libvirt-qemu", "kvm", "sambashare", "lpadmin", "netdev", "plugdev", "input", "render", "video", "audio", "cdrom", "floppy", "dialout", "lp", "voice", "tape", "operator", "src", "kmem", "utmp", "crontab", "_ssh", "sgx", "fuse", "bluetooth", "scanner", "ssl-cert", "systemd-network", "systemd-timesync", "messagebus"},
 			RequireTOTPForAdmin:    true,
 			SessionIdleMinutes:     30,
 			SessionMaxHours:        12,
@@ -510,7 +518,7 @@ func (p Pools) validate() error {
 }
 
 func (a Accounts) validate() error {
-	for _, p := range []string{a.Useradd, a.Userdel, a.Groupadd, a.Groupdel, a.Gpasswd, a.Smbpasswd, a.PasswdFile, a.GroupFile, a.Shell} {
+	for _, p := range []string{a.Useradd, a.Userdel, a.Groupadd, a.Groupdel, a.Gpasswd, a.Smbpasswd, a.Pkill, a.PasswdFile, a.GroupFile, a.StateFile, a.Shell} {
 		if !filepath.IsAbs(p) {
 			return fmt.Errorf("agent.accounts: %q harus path absolut", p)
 		}

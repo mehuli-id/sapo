@@ -172,7 +172,7 @@ func (s *Server) handleUserCreate(w http.ResponseWriter, r *http.Request) {
 	// Akun sistem dibuat dulu, baru password Samba-nya.
 	warning := s.syncAfterChange(r)
 	if warning == "" {
-		s.setSMBPassword(r.Context(), u.Username, req.Password)
+		s.setSMBPassword(r.Context(), u.Username, req.Password, hash)
 	}
 	created, _ := s.store.Get(u.Username)
 	writeJSON(w, http.StatusOK, map[string]any{"user": s.viewOf(created), "warning": warning})
@@ -285,7 +285,7 @@ func (s *Server) handleUserPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ended := s.sessions.DeleteUserExcept(name, "")
-	s.setSMBPassword(r.Context(), name, req.Password)
+	s.setSMBPassword(r.Context(), name, req.Password, hash)
 	s.record(r, admin.Username, "users.password_reset", true, map[string]string{"user": name, "must_change": boolText(req.MustChangePassword), "sessions_ended": itoa(ended)})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
@@ -446,7 +446,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ended := s.endOtherSessions(r, user.Username)
-	s.setSMBPassword(r.Context(), user.Username, req.Password)
+	s.setSMBPassword(r.Context(), user.Username, req.Password, hash)
 	s.record(r, user.Username, "account.password", true, map[string]string{"other_sessions_ended": itoa(ended)})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "other_sessions_ended": ended})
 }

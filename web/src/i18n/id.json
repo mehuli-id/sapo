@@ -311,14 +311,15 @@
     "group_reserved": "Nama grup ini dipakai sistem, pilih nama lain.",
     "group_not_found": "Grup tidak ditemukan.",
     "password_same": "Password baru harus berbeda dari password sekarang.",
-    "password_too_long": "Password terlalu panjang.",
+    "password_too_long": "Password paling panjang 127 karakter (batas berbagi file SMB).",
     "bad_request": "Isian tidak valid.",
     "share_invalid": "Nama folder tidak sesuai aturan.",
     "share_taken": "Nama folder ini sudah dipakai.",
     "share_not_ready": "Folder tersimpan, tetapi belum bisa disiapkan: {message}",
     "share_delete_failed": "Folder gagal dihapus: {message}",
     "conflict": "Bentrok dengan keadaan sistem.",
-    "system_sync_failed": "Perubahan tersimpan, tetapi belum bisa diterapkan ke sistem. Coba lagi sebentar."
+    "system_sync_failed": "Perubahan tersimpan, tetapi belum bisa diterapkan ke sistem. Coba lagi sebentar.",
+    "password_invalid": "Password tidak boleh berisi karakter kendali (misalnya tab atau baris baru)."
   },
   "pool": {
     "title": "Pool penyimpanan",
@@ -515,6 +516,8 @@
     "openFrom": "Buka dari komputer lain (masuk dengan nama pengguna dan password panel):",
     "deleteHelp": "Folder {name} dan SEMUA isinya ({used}) akan dihapus permanen. Tindakan ini tidak bisa dibatalkan.",
     "typeName": "Ketik nama folder",
-    "delete": "Hapus folder dan isinya"
+    "delete": "Hapus folder dan isinya",
+    "aclPending": "Izin sedang diterapkan ke isi folder. Untuk folder besar ini bisa lama; sampai selesai, sebagian file mungkin belum bisa dibuka pengguna baru.",
+    "aclError": "Izin belum berhasil diterapkan ke semua isi folder: {message}"
   }
 }

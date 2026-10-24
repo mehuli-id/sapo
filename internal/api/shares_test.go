@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mehuli-id/sapo/internal/auth"
 	"github.com/mehuli-id/sapo/internal/proto"
 )
 
@@ -123,5 +125,34 @@ func TestShareLifecycle(t *testing.T) {
 	h.loginAs("ani", userPassword)
 	if rec := h.do(http.MethodGet, "/api/v1/shares", nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("pengguna biasa: %d", rec.Code)
+	}
+}
+
+func TestSMBPasswordSkipsStaleOrDisabled(t *testing.T) {
+	agent := shareAgent()
+	h := newHarness(t, agent)
+	h.runSetup()
+	h.createUser("budi", "user", false)
+	agent.mu.Lock()
+	agent.params[proto.OpSMBPassword] = nil
+	agent.mu.Unlock()
+	// Password lama dari login yang tertunda: hash sudah berbeda, dilewati.
+	h.s.setSMBPassword(context.Background(), "budi", "password lama sekali", "hash-lama")
+	if agent.param(proto.OpSMBPassword) != nil {
+		t.Fatal("password lama tidak boleh dipasang lagi")
+	}
+	// Akun nonaktif tidak diberi password Samba (bisa mengaktifkannya lagi).
+	disabled := true
+	_ = h.s.store.UpdateUser("budi", auth.UserChange{Disabled: &disabled})
+	h.s.setSMBPassword(context.Background(), "budi", userPassword, "")
+	if agent.param(proto.OpSMBPassword) != nil {
+		t.Fatal("akun nonaktif tidak boleh diberi password Samba")
+	}
+	// Karakter kendali dan password terlalu panjang ditolak panel.
+	for _, pw := range []string{"tab\tdi tengah ini", strings.Repeat("x", 128)} {
+		rec := h.do(http.MethodPost, "/api/v1/users", map[string]any{"username": "cici", "password": pw, "password_confirm": pw, "role": "user", "admin_password": adminPassword})
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("password %q: %d", pw[:5], rec.Code)
+		}
 	}
 }

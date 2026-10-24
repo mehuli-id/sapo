@@ -191,6 +191,21 @@ out="$(smbclient //127.0.0.1/keluarga -p "$SMB_PORT" -m SMB3 -N -c ls 2>&1 || tr
 [[ "$out" != *"halo.txt"* ]] || fail "tamu (tanpa login) tidak boleh masuk: $out"
 echo "SMB: tulis (budi), baca saja (ani), tanpa izin (cici), password salah, dan tamu sesuai izin"
 
+# Izin baru berlaku juga untuk isi folder yang sudah ada (diterapkan sapod
+# di latar belakang): cici diberi izin baca setelah halo.txt ditulis.
+res="$(api POST /api/v1/shares/keluarga "{\"permissions\":{\"user:budi\":\"write\",\"user:ani\":\"read\",\"user:cici\":\"read\"},\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' && "$res" != *'system_sync_failed'* ]] || fail "ubah izin: $res"
+for _ in $(seq 1 30); do
+  shares="$(api GET /api/v1/shares)"
+  json 'import sys; s=v[0]; sys.exit(1 if s.get("acl_pending") else 0)' <<<"$shares" && break
+  sleep 2
+done
+json 's=v[0]; assert not s.get("acl_pending") and not s.get("acl_error"), s' <<<"$shares" || fail "izin isi folder: $shares"
+rm -f "$WORK/salinan.txt"
+out="$(smb cici "get halo.txt $WORK/salinan.txt")"
+cmp -s "$WORK/halo.txt" "$WORK/salinan.txt" || fail "cici (baca, izin baru) harus bisa membaca file lama: $out"
+echo "SMB: izin baru berlaku untuk file yang sudah ada"
+
 # Pengguna yang dinonaktifkan tidak bisa masuk lewat SMB.
 res="$(api POST /api/v1/users/ani "{\"disabled\":true}")"
 [[ "$res" == *' 200' ]] || fail "nonaktifkan ani: $res"

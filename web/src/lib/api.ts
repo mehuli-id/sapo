@@ -240,6 +240,9 @@ export interface SharedFolder {
   error?: string
   used_bytes: number
   available_bytes: number
+  // Izin sedang diterapkan ke isi folder / gagal diterapkan.
+  acl_pending?: boolean
+  acl_error?: string
 }
 
 export type Localized = Record<string, string>

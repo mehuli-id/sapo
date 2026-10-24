@@ -76,8 +76,13 @@ agent:
     groupdel: /usr/sbin/groupdel
     gpasswd: /usr/bin/gpasswd
     smbpasswd: /usr/bin/smbpasswd
+    # Memutus sesi SMB pengguna yang dinonaktifkan atau dihapus.
+    pkill: /usr/bin/pkill
     passwd_file: /etc/passwd
     group_file: /etc/group
+    # Catatan akun dan grup buatan sapod. ID tidak pernah dipakai ulang,
+    # agar akun baru tidak mewarisi file akun yang sudah dihapus.
+    state_file: /var/lib/sapod/accounts.json
     id_min: 20000
     id_max: 29999
     primary_group: sapo-users
@@ -146,10 +151,14 @@ auth:
   username_pattern: "^[a-z][a-z0-9._-]{2,31}$"
   # Nama yang dipakai sistem Debian (nantinya akun sistem untuk berbagi file
   # dibuat dengan nama yang sama, jadi tidak boleh bentrok).
-  reserved_usernames: [root, sapo, daemon, bin, sys, sync, games, man, lp, mail, news, uucp, proxy, www-data, backup, list, irc, nobody, guest, systemd-network, systemd-timesync, messagebus, sshd, _apt]
+  reserved_usernames: [root, sapo, daemon, bin, sys, sync, games, man, lp, mail, news, uucp, proxy, www-data, backup, list, irc, nobody, guest, systemd-network, systemd-timesync, messagebus, sshd, _apt,
+    avahi, ftp, postfix, ntp, _chrony, systemd-resolve, tss, uuidd, polkitd, statd, tcpdump, dnsmasq, postgres, mysql, redis, wsdd, nslcd, usbmux, _rpc, colord, saned, geoclue, pulse, rtkit, sddm, lightdm, gdm, libvirt-qemu, dockremap]
   # Grup untuk izin folder dan aplikasi (dikelola di aplikasi Pengguna & Grup).
   group_name_pattern: "^[a-z][a-z0-9._-]{1,31}$"
-  reserved_group_names: [root, sapo, sudo, adm, staff, users, admin, administrators, wheel, nogroup, daemon, bin, sys, disk, tty, shadow, systemd-journal]
+  # Termasuk grup penanda akun Sapo (sapo-users) dan grup yang dibuat paket
+  # umum (docker, libvirt, …): anggotanya mendapat hak paket itu.
+  reserved_group_names: [root, sapo, sudo, adm, staff, users, admin, administrators, wheel, nogroup, daemon, bin, sys, disk, tty, shadow, systemd-journal,
+    sapo-users, docker, libvirt, libvirt-qemu, kvm, sambashare, lpadmin, netdev, plugdev, input, render, video, audio, cdrom, floppy, dialout, lp, voice, tape, operator, src, kmem, utmp, crontab, _ssh, sgx, fuse, bluetooth, scanner, ssl-cert, systemd-network, systemd-timesync, messagebus]
   require_totp_for_admin: true
   session_idle_minutes: 30
   session_max_hours: 12

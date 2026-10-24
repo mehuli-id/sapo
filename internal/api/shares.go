@@ -165,6 +165,16 @@ func (s *Server) syncSystem(ctx context.Context) (proto.SharesApplyResult, error
 	if err := s.agent.Call(ctx, proto.OpAccountsSync, acc, &accRes); err != nil {
 		return proto.SharesApplyResult{}, err
 	}
+	// Akun yang gagal dibuat tidak mendapat izin folder; sisanya diterapkan.
+	failed := false
+	for _, f := range accRes.Failures {
+		name, _, _ := strings.Cut(f, ": ")
+		delete(exists, name)
+		failed = true
+	}
+	if failed && s.log != nil {
+		s.log.Warn("sebagian akun sistem gagal disinkronkan", "gagal", accRes.Failures)
+	}
 	// Nama yang bentrok dengan akun sistem lain tidak mendapat izin folder.
 	for _, c := range accRes.Conflicts {
 		delete(exists, c)
@@ -192,6 +202,9 @@ func (s *Server) syncSystem(ctx context.Context) (proto.SharesApplyResult, error
 	}
 	var res proto.SharesApplyResult
 	err := s.agent.Call(ctx, proto.OpSharesApply, params, &res)
+	if err == nil && failed {
+		err = errors.New("sebagian akun sistem gagal disinkronkan")
+	}
 	return res, err
 }
 
@@ -201,8 +214,9 @@ func (s *Server) syncSystem(ctx context.Context) (proto.SharesApplyResult, error
 func (s *Server) syncAfterChange(r *http.Request) string {
 	if _, err := s.syncSystem(r.Context()); err != nil {
 		if s.log != nil {
-			s.log.Warn("sinkronisasi akun dan shared folder gagal", "err", err)
+			s.log.Warn("sinkronisasi akun dan shared folder gagal; dicoba ulang di latar belakang", "err", err)
 		}
+		s.scheduleResync()
 		return "system_sync_failed"
 	}
 	return ""
@@ -216,8 +230,11 @@ func (s *Server) SyncLoop(ctx context.Context) {
 		if err == nil {
 			return
 		}
-		if s.log != nil && attempt == 19 {
-			s.log.Warn("sinkronisasi awal akun dan shared folder gagal", "err", err)
+		if attempt == 19 {
+			if s.log != nil {
+				s.log.Warn("sinkronisasi awal akun dan shared folder gagal; dicoba ulang di latar belakang", "err", err)
+			}
+			s.scheduleResync()
 		}
 		select {
 		case <-ctx.Done():
@@ -229,7 +246,19 @@ func (s *Server) SyncLoop(ctx context.Context) {
 
 // setSMBPassword menyamakan password Samba (password hanya tersedia saat
 // login, dibuat, atau diganti). Samba yang belum terpasang diabaikan.
-func (s *Server) setSMBPassword(ctx context.Context, username, password string) {
+//
+// hash adalah hash password panel yang cocok dengan password ini (kosong =
+// tidak diperiksa). Permintaan per pengguna berurutan, dan dilewati bila
+// password panel sudah berganti atau akunnya nonaktif, sehingga login lama
+// yang tertunda tidak bisa memasang kembali password lama.
+func (s *Server) setSMBPassword(ctx context.Context, username, password, hash string) {
+	mu := s.smbLock(username)
+	mu.Lock()
+	defer mu.Unlock()
+	u, ok := s.store.Get(username)
+	if !ok || u.Disabled || (hash != "" && u.PasswordHash != hash) {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	err := s.agent.Call(ctx, proto.OpSMBPassword, proto.SMBPasswordParams{Name: username, Password: password}, nil)
@@ -237,6 +266,45 @@ func (s *Server) setSMBPassword(ctx context.Context, username, password string) 
 	if err != nil && !(errors.As(err, &pe) && pe.Code == proto.ErrUnavailable) && s.log != nil {
 		s.log.Warn("password Samba tidak bisa disamakan", "user", username, "err", err)
 	}
+}
+
+func (s *Server) smbLock(username string) *sync.Mutex {
+	s.smbMu.Lock()
+	defer s.smbMu.Unlock()
+	if s.smbLocks == nil {
+		s.smbLocks = map[string]*sync.Mutex{}
+	}
+	mu, ok := s.smbLocks[username]
+	if !ok {
+		mu = &sync.Mutex{}
+		s.smbLocks[username] = mu
+	}
+	return mu
+}
+
+func (s *Server) currentHash(username string) string {
+	u, _ := s.store.Get(username)
+	return u.PasswordHash
+}
+
+// scheduleResync mencoba ulang sinkronisasi di latar belakang sampai
+// berhasil (misalnya sapod sedang sibuk dengan operasi pool).
+func (s *Server) scheduleResync() {
+	if !s.resyncRunning.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		defer s.resyncRunning.Store(false)
+		for attempt := 0; attempt < 240; attempt++ {
+			time.Sleep(s.resyncDelay)
+			if _, err := s.syncSystem(context.Background()); err == nil {
+				if s.log != nil {
+					s.log.Info("sinkronisasi akun dan shared folder berhasil setelah dicoba ulang")
+				}
+				return
+			}
+		}
+	}()
 }
 
 // --- Handler -----------------------------------------------------------------
@@ -251,6 +319,8 @@ type shareView struct {
 	Error          string `json:"error,omitempty"`
 	UsedBytes      uint64 `json:"used_bytes"`
 	AvailableBytes uint64 `json:"available_bytes"`
+	ACLPending     bool   `json:"acl_pending,omitempty"`
+	ACLError       string `json:"acl_error,omitempty"`
 }
 
 func (s *Server) handleShares(w http.ResponseWriter, r *http.Request) {
@@ -259,7 +329,7 @@ func (s *Server) handleShares(w http.ResponseWriter, r *http.Request) {
 	out := []shareView{}
 	for _, sh := range s.shares.list() {
 		u := usage[sh.Pool+"/"+sh.Name]
-		out = append(out, shareView{Share: sh, UsedBytes: u.UsedBytes, AvailableBytes: u.AvailableBytes})
+		out = append(out, shareView{Share: sh, UsedBytes: u.UsedBytes, AvailableBytes: u.AvailableBytes, ACLPending: u.ACLPending, ACLError: u.ACLError})
 	}
 	writeJSON(w, http.StatusOK, out)
 }

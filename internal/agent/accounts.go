@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -24,13 +26,14 @@ import (
 //
 // Setiap pengguna Sapo punya akun Linux dengan nama yang sama (tanpa shell,
 // tanpa home) agar bisa memiliki file dan masuk lewat SMB. sapod hanya
-// menyentuh akun dan grup yang ia kelola: UID/GID di dalam rentang
-// [IDMin, IDMax], dan untuk akun, grup utamanya PrimaryGroup. Akun lain
-// (root, akun paket, akun buatan admin lewat terminal) tidak pernah diubah.
+// menyentuh akun dan grup yang ia buat sendiri: tercatat di StateFile dengan
+// UID/GID yang sama, di dalam rentang [IDMin, IDMax]. ID tidak pernah dipakai
+// ulang, sehingga akun baru tidak mewarisi file dan ACL akun yang dihapus.
 type AccountTools struct {
 	Useradd, Userdel, Groupadd, Groupdel, Gpasswd string
-	Smbpasswd                                     string
+	Smbpasswd, Pkill                              string
 	PasswdFile, GroupFile                         string
+	StateFile                                     string
 	IDMin, IDMax                                  int
 	PrimaryGroup                                  string
 	Shell                                         string
@@ -51,6 +54,97 @@ func NewAccounts(t AccountTools) *Accounts { return &Accounts{t: t} }
 // accountNamePattern: nama akun dan grup yang diterima (sama dengan aturan
 // Sapo; tidak diawali tanda hubung atau angka).
 var accountNamePattern = regexp.MustCompile(`^[a-z][a-z0-9._-]{0,31}$`)
+
+// accountState adalah catatan sapod tentang akun dan grup buatannya.
+type accountState struct {
+	// NextID: ID berikutnya; hanya naik, tidak pernah dipakai ulang.
+	NextID  int                     `json:"next_id"`
+	Primary int                     `json:"primary_gid,omitempty"`
+	Users   map[string]stateAccount `json:"users"`
+	Groups  map[string]int          `json:"groups"`
+}
+
+type stateAccount struct {
+	UID int `json:"uid"`
+	// SMBDisabled: status terakhir yang berhasil diterapkan ke Samba (nil =
+	// belum pernah).
+	SMBDisabled *bool `json:"smb_disabled,omitempty"`
+}
+
+func (a *Accounts) loadState() (accountState, error) {
+	st := accountState{NextID: a.t.IDMin, Users: map[string]stateAccount{}, Groups: map[string]int{}}
+	data, err := os.ReadFile(a.t.StateFile)
+	if errors.Is(err, fs.ErrNotExist) {
+		return st, nil
+	}
+	if err != nil {
+		return st, err
+	}
+	if err := json.Unmarshal(data, &st); err != nil {
+		return st, fmt.Errorf("catatan akun rusak (%s): %w", a.t.StateFile, err)
+	}
+	if st.Users == nil {
+		st.Users = map[string]stateAccount{}
+	}
+	if st.Groups == nil {
+		st.Groups = map[string]int{}
+	}
+	return st, nil
+}
+
+// saveState menulis catatan secara atomik (0600, direktori milik root).
+func (a *Accounts) saveState(st accountState) error {
+	dir := filepath.Dir(a.t.StateFile)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(st, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".accounts-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), a.t.StateFile)
+}
+
+// allocID mengambil ID berikutnya yang belum dipakai akun atau grup mana pun,
+// lalu langsung mencatatnya (agar ID tidak dipakai ulang walau langkah
+// berikutnya gagal).
+func (a *Accounts) allocID(st *accountState, users map[string]passwdEntry, groups map[string]groupEntry) (int, error) {
+	used := map[int]bool{}
+	for _, u := range users {
+		used[u.UID] = true
+	}
+	for _, g := range groups {
+		used[g.GID] = true
+	}
+	id := max(st.NextID, a.t.IDMin)
+	for ; id <= a.t.IDMax && used[id]; id++ {
+	}
+	if id > a.t.IDMax {
+		return 0, &OpError{Code: proto.ErrConflict, Message: "rentang ID akun Sapo sudah habis"}
+	}
+	st.NextID = id + 1
+	return id, a.saveState(*st)
+}
 
 type passwdEntry struct {
 	Name     string
@@ -114,29 +208,21 @@ func readGroup(path string) (map[string]groupEntry, error) {
 
 func (a *Accounts) inRange(id int) bool { return id >= a.t.IDMin && id <= a.t.IDMax }
 
-// rangeKeys membatasi useradd/groupadd ke rentang Sapo.
-func (a *Accounts) rangeKeys(kind string) []string {
-	return []string{
-		"--key", kind + "_MIN=" + strconv.Itoa(a.t.IDMin),
-		"--key", kind + "_MAX=" + strconv.Itoa(a.t.IDMax),
-	}
-}
-
 func (a *Accounts) run(ctx context.Context, prog string, flags []string, operands ...string) error {
 	res, err := runTool(ctx, a.t.Timeout, prog, flags, operands...)
 	if err != nil {
 		return err
 	}
 	if res.ExitCode != 0 {
-		return fmt.Errorf("%s keluar dengan kode %d: %s", prog, res.ExitCode, firstLine(res.Stderr))
+		return fmt.Errorf("%s keluar dengan kode %d: %s", filepath.Base(prog), res.ExitCode, firstLine(res.Stderr))
 	}
 	return nil
 }
 
 // SyncOp mengembalikan handler accounts.sync: menyamakan akun dan grup
-// sistem yang dikelola Sapo dengan daftar pengguna dan grup di panel.
-// Operasi ini deklaratif dan aman diulang. Akun yang tidak lagi ada di
-// daftar dihapus (tanpa menghapus file miliknya).
+// sistem buatan Sapo dengan daftar pengguna dan grup di panel. Operasi ini
+// deklaratif dan aman diulang. Kegagalan satu akun tidak menghentikan yang
+// lain; semuanya dilaporkan di Failures.
 func (a *Accounts) SyncOp() Handler {
 	return func(ctx context.Context, raw json.RawMessage) (any, error) {
 		var req proto.AccountsSyncParams
@@ -180,72 +266,115 @@ func (a *Accounts) checkSync(req proto.AccountsSyncParams) error {
 }
 
 func (a *Accounts) sync(ctx context.Context, req proto.AccountsSyncParams) (proto.AccountsSyncResult, error) {
-	out := proto.AccountsSyncResult{Conflicts: []string{}}
+	out := proto.AccountsSyncResult{Conflicts: []string{}, Failures: []string{}}
 	ctx, cancel := context.WithTimeout(ctx, 4*time.Minute)
 	defer cancel()
+	fail := func(what string, err error) {
+		out.Failures = append(out.Failures, what+": "+clipTo(err.Error(), maxErrorText))
+	}
 
-	groups, err := readGroup(a.t.GroupFile)
+	st, err := a.loadState()
 	if err != nil {
 		return out, err
-	}
-	// Grup utama penanda akun Sapo.
-	pg, ok := groups[a.t.PrimaryGroup]
-	if !ok {
-		if err := a.run(ctx, a.t.Groupadd, a.rangeKeys("GID"), a.t.PrimaryGroup); err != nil {
-			return out, err
-		}
-		if groups, err = readGroup(a.t.GroupFile); err != nil {
-			return out, err
-		}
-		pg = groups[a.t.PrimaryGroup]
-	}
-	if !a.inRange(pg.GID) {
-		return out, &OpError{Code: proto.ErrConflict, Message: fmt.Sprintf("grup %s (GID %d) di luar rentang akun Sapo", a.t.PrimaryGroup, pg.GID)}
 	}
 	users, err := readPasswd(a.t.PasswdFile)
 	if err != nil {
 		return out, err
 	}
-	managedUser := func(e passwdEntry) bool { return a.inRange(e.UID) && e.GID == pg.GID }
-	managedGroup := func(e groupEntry) bool { return a.inRange(e.GID) && e.Name != a.t.PrimaryGroup }
+	groups, err := readGroup(a.t.GroupFile)
+	if err != nil {
+		return out, err
+	}
+
+	// Grup utama penanda akun Sapo: dibuat sapod sendiri dan tercatat.
+	pg, ok := groups[a.t.PrimaryGroup]
+	switch {
+	case !ok:
+		id, err := a.allocID(&st, users, groups)
+		if err != nil {
+			return out, err
+		}
+		if err := a.run(ctx, a.t.Groupadd, []string{"--gid", strconv.Itoa(id)}, a.t.PrimaryGroup); err != nil {
+			return out, err
+		}
+		st.Primary = id
+		if err := a.saveState(st); err != nil {
+			return out, err
+		}
+		pg = groupEntry{Name: a.t.PrimaryGroup, GID: id}
+	case pg.GID != st.Primary || !a.inRange(pg.GID):
+		// Grup bernama sama yang tidak dibuat sapod: tidak diambil alih.
+		return out, &OpError{Code: proto.ErrConflict, Message: fmt.Sprintf("grup %s (GID %d) bukan buatan Sapo", a.t.PrimaryGroup, pg.GID)}
+	}
+	managedUser := func(name string) bool {
+		s, rec := st.Users[name]
+		e, exists := users[name]
+		return rec && exists && e.UID == s.UID && e.GID == pg.GID && a.inRange(e.UID)
+	}
+	managedGroup := func(name string) bool {
+		gid, rec := st.Groups[name]
+		e, exists := groups[name]
+		return rec && exists && e.GID == gid && a.inRange(gid)
+	}
 
 	// 1. Grup yang dibutuhkan.
 	wantGroups := map[string]bool{}
 	for _, g := range req.Groups {
-		wantGroups[g] = true
-		e, exists := groups[g]
+		_, exists := groups[g]
 		switch {
-		case !exists:
-			if err := a.run(ctx, a.t.Groupadd, a.rangeKeys("GID"), g); err != nil {
-				return out, err
-			}
-			out.CreatedGroups = append(out.CreatedGroups, g)
-		case !managedGroup(e):
-			// Nama sudah dipakai grup sistem: tidak pernah diambil alih.
+		case managedGroup(g):
+			wantGroups[g] = true
+		case exists:
+			// Nama sudah dipakai grup lain: tidak pernah diambil alih.
 			out.Conflicts = append(out.Conflicts, "group:"+g)
-			wantGroups[g] = false
+		default:
+			id, err := a.allocID(&st, users, groups)
+			if err != nil {
+				fail("group:"+g, err)
+				continue
+			}
+			if err := a.run(ctx, a.t.Groupadd, []string{"--gid", strconv.Itoa(id)}, g); err != nil {
+				fail("group:"+g, err)
+				continue
+			}
+			st.Groups[g] = id
+			groups[g] = groupEntry{Name: g, GID: id}
+			wantGroups[g] = true
+			out.CreatedGroups = append(out.CreatedGroups, g)
 		}
 	}
 
 	// 2. Akun yang dibutuhkan.
 	wantUsers := map[string]bool{}
 	for _, u := range req.Users {
-		wantUsers[u.Name] = true
-		e, exists := users[u.Name]
+		_, exists := users[u.Name]
 		switch {
-		case !exists:
-			flags := []string{"--no-create-home", "--home-dir", "/nonexistent", "--shell", a.t.Shell, "--gid", a.t.PrimaryGroup, "--no-user-group"}
-			if err := a.run(ctx, a.t.Useradd, append(flags, a.rangeKeys("UID")...), u.Name); err != nil {
-				return out, err
-			}
-			out.CreatedUsers = append(out.CreatedUsers, u.Name)
-		case !managedUser(e):
+		case managedUser(u.Name):
+			wantUsers[u.Name] = true
+		case exists:
 			out.Conflicts = append(out.Conflicts, "user:"+u.Name)
-			wantUsers[u.Name] = false
+		default:
+			id, err := a.allocID(&st, users, groups)
+			if err != nil {
+				fail("user:"+u.Name, err)
+				continue
+			}
+			flags := []string{"--uid", strconv.Itoa(id), "--no-create-home", "--home-dir", "/nonexistent", "--shell", a.t.Shell, "--gid", strconv.Itoa(pg.GID), "--no-user-group"}
+			if err := a.run(ctx, a.t.Useradd, flags, u.Name); err != nil {
+				fail("user:"+u.Name, err)
+				continue
+			}
+			st.Users[u.Name] = stateAccount{UID: id}
+			users[u.Name] = passwdEntry{Name: u.Name, UID: id, GID: pg.GID}
+			wantUsers[u.Name] = true
+			out.CreatedUsers = append(out.CreatedUsers, u.Name)
 		}
 	}
+	if err := a.saveState(st); err != nil {
+		return out, err
+	}
 
-	// 3. Anggota setiap grup yang dikelola (daftar lengkap).
+	// 3. Anggota setiap grup Sapo (daftar lengkap).
 	members := map[string][]string{}
 	for _, u := range req.Users {
 		if !wantUsers[u.Name] {
@@ -260,108 +389,133 @@ func (a *Accounts) sync(ctx context.Context, req proto.AccountsSyncParams) (prot
 	if groups, err = readGroup(a.t.GroupFile); err != nil {
 		return out, err
 	}
-	for g, ok := range wantGroups {
-		if !ok {
-			continue
-		}
+	for g := range wantGroups {
 		want := members[g]
 		slices.Sort(want)
 		have := slices.Clone(groups[g].Members)
 		slices.Sort(have)
 		if !slices.Equal(want, have) {
 			if err := a.run(ctx, a.t.Gpasswd, []string{"--members", strings.Join(want, ",")}, g); err != nil {
-				return out, err
+				fail("group:"+g, err)
 			}
 		}
 	}
 
-	// 4. Akun dan grup Sapo yang sudah tidak ada di panel dihapus. File
-	//    miliknya tetap ada (pemiliknya menjadi angka UID).
-	if users, err = readPasswd(a.t.PasswdFile); err != nil {
-		return out, err
-	}
-	for name, e := range users {
-		if managedUser(e) && !wantUsers[name] && !slices.Contains(out.Conflicts, "user:"+name) {
-			a.dropSMB(ctx, name)
+	// 4. Akun Sapo yang tidak ada lagi di panel: sesinya diputus, akunnya
+	//    dihapus (file miliknya tetap ada; UID-nya tidak dipakai ulang).
+	for name := range st.Users {
+		if wantUsers[name] {
+			continue
+		}
+		if managedUser(name) {
+			a.endSessions(ctx, users[name].UID)
+			a.smb(ctx, "-x", name)
 			if err := a.run(ctx, a.t.Userdel, nil, name); err != nil {
-				return out, err
+				fail("user:"+name, err)
+				continue
 			}
 			out.RemovedUsers = append(out.RemovedUsers, name)
 		}
+		delete(st.Users, name)
 	}
-	for name, e := range groups {
-		if managedGroup(e) && !wantGroups[name] && !slices.Contains(out.Conflicts, "group:"+name) {
+	for name := range st.Groups {
+		if wantGroups[name] {
+			continue
+		}
+		if managedGroup(name) {
 			if err := a.run(ctx, a.t.Groupdel, nil, name); err != nil {
-				return out, err
+				fail("group:"+name, err)
+				continue
 			}
 			out.RemovedGroups = append(out.RemovedGroups, name)
 		}
+		delete(st.Groups, name)
 	}
 
-	// 5. Akun nonaktif tidak bisa masuk lewat SMB.
+	// 5. Status Samba hanya diubah bila berbeda dari yang terakhir
+	//    diterapkan. Menonaktifkan juga memutus sesi yang sedang berjalan.
 	for _, u := range req.Users {
-		if wantUsers[u.Name] {
-			a.setSMBEnabled(ctx, u.Name, !u.Disabled)
+		if !wantUsers[u.Name] {
+			continue
 		}
+		s := st.Users[u.Name]
+		if s.SMBDisabled != nil && *s.SMBDisabled == u.Disabled {
+			continue
+		}
+		if u.Disabled {
+			// Akun yang belum punya password Samba gagal di -d, tetapi memang
+			// belum bisa masuk; status nonaktif diterapkan lagi saat password
+			// Samba dibuat (SMBPasswordOp).
+			_ = a.smb(ctx, "-d", u.Name)
+			a.endSessions(ctx, s.UID)
+		} else if err := a.smb(ctx, "-e", u.Name); err != nil && s.SMBDisabled != nil && *s.SMBDisabled {
+			// Akun yang belum punya password Samba gagal di sini (wajar).
+			fail("user:"+u.Name, err)
+			continue
+		}
+		disabled := u.Disabled
+		s.SMBDisabled = &disabled
+		st.Users[u.Name] = s
 	}
-	if len(out.CreatedUsers)+len(out.RemovedUsers)+len(out.CreatedGroups)+len(out.RemovedGroups)+len(out.Conflicts) > 0 && a.t.Log != nil {
+	if err := a.saveState(st); err != nil {
+		return out, err
+	}
+	if len(out.CreatedUsers)+len(out.RemovedUsers)+len(out.CreatedGroups)+len(out.RemovedGroups)+len(out.Conflicts)+len(out.Failures) > 0 && a.t.Log != nil {
 		a.t.Log.Info("akun sistem disinkronkan", "akun_baru", out.CreatedUsers, "akun_dihapus", out.RemovedUsers,
-			"grup_baru", out.CreatedGroups, "grup_dihapus", out.RemovedGroups, "bentrok", out.Conflicts)
+			"grup_baru", out.CreatedGroups, "grup_dihapus", out.RemovedGroups, "bentrok", out.Conflicts, "gagal", out.Failures)
 	}
 	return out, nil
 }
 
-// dropSMB menghapus akun dari basis data Samba (bila Samba terpasang).
-func (a *Accounts) dropSMB(ctx context.Context, name string) {
-	if _, err := os.Stat(a.t.Smbpasswd); err != nil {
+// endSessions menghentikan semua proses milik UID (sesi SMB berjalan sebagai
+// pengguna itu), agar pencabutan akses langsung berlaku.
+func (a *Accounts) endSessions(ctx context.Context, uid int) {
+	if !a.inRange(uid) {
 		return
 	}
-	_, _ = runTool(ctx, a.t.Timeout, a.t.Smbpasswd, []string{"-x"}, name)
+	_, _ = runTool(ctx, a.t.Timeout, a.t.Pkill, []string{"-KILL", "--euid", strconv.Itoa(uid)})
 }
 
-// setSMBEnabled mengaktifkan atau menonaktifkan akun Samba yang sudah ada.
-// Akun yang belum punya password Samba diabaikan (dibuat saat password
-// disinkronkan).
-func (a *Accounts) setSMBEnabled(ctx context.Context, name string, enabled bool) {
+// smb menjalankan smbpasswd dengan satu opsi untuk akun (bila Samba
+// terpasang).
+func (a *Accounts) smb(ctx context.Context, flag, name string) error {
 	if _, err := os.Stat(a.t.Smbpasswd); err != nil {
-		return
+		return nil
 	}
-	flag := "-e"
-	if !enabled {
-		flag = "-d"
-	}
-	_, _ = runTool(ctx, a.t.Timeout, a.t.Smbpasswd, []string{flag}, name)
+	return a.run(ctx, a.t.Smbpasswd, []string{flag}, name)
 }
 
 // SMBPasswordOp mengembalikan handler smb.set_password: password Samba
 // (hash NT disimpan Samba sendiri) disamakan dengan password panel. Hanya
-// untuk akun yang dikelola Sapo; password dikirim lewat stdin.
+// untuk akun buatan Sapo; password dikirim lewat stdin.
 func (a *Accounts) SMBPasswordOp() Handler {
 	return func(ctx context.Context, raw json.RawMessage) (any, error) {
 		var req proto.SMBPasswordParams
 		if err := decodeParams(raw, &req); err != nil {
 			return nil, err
 		}
-		if !accountNamePattern.MatchString(req.Name) || req.Password == "" || len(req.Password) > 1024 ||
-			strings.ContainsAny(req.Password, "\n\r\x00") {
+		if !accountNamePattern.MatchString(req.Name) || !validSMBPassword(req.Password) {
 			return nil, &OpError{Code: proto.ErrInvalidParams, Message: "parameter tidak valid"}
 		}
 		if _, err := os.Stat(a.t.Smbpasswd); err != nil {
 			return nil, &OpError{Code: proto.ErrUnavailable, Message: "Samba belum terpasang"}
 		}
-		a.mu.Lock()
+		// Sinkronisasi panjang tidak boleh menahan banyak permintaan ini.
+		if !tryLockFor(ctx, &a.mu, 10*time.Second) {
+			return nil, &OpError{Code: proto.ErrBusy, Message: "akun sedang disinkronkan"}
+		}
 		defer a.mu.Unlock()
+		st, err := a.loadState()
+		if err != nil {
+			return nil, err
+		}
 		users, err := readPasswd(a.t.PasswdFile)
 		if err != nil {
 			return nil, err
 		}
-		groups, err := readGroup(a.t.GroupFile)
-		if err != nil {
-			return nil, err
-		}
-		e, ok := users[req.Name]
-		pg, pgOK := groups[a.t.PrimaryGroup]
-		if !ok || !pgOK || !a.inRange(e.UID) || e.GID != pg.GID {
+		s, rec := st.Users[req.Name]
+		e, exists := users[req.Name]
+		if !rec || !exists || e.UID != s.UID || e.GID != st.Primary || !a.inRange(e.UID) {
 			return nil, &OpError{Code: proto.ErrNotFound, Message: "akun " + req.Name + " bukan akun Sapo"}
 		}
 		input := []byte(req.Password + "\n" + req.Password + "\n")
@@ -372,6 +526,36 @@ func (a *Accounts) SMBPasswordOp() Handler {
 		if res.ExitCode != 0 {
 			return nil, errors.New("smbpasswd gagal: " + firstLine(res.Stderr))
 		}
+		// Mengganti password bisa mengaktifkan akun Samba lagi: status
+		// nonaktif yang tercatat diterapkan ulang.
+		if s.SMBDisabled != nil && *s.SMBDisabled {
+			if err := a.run(ctx, a.t.Smbpasswd, []string{"-d"}, req.Name); err != nil {
+				return nil, err
+			}
+		}
 		return map[string]bool{"ok": true}, nil
+	}
+}
+
+// validSMBPassword: aturan yang sama dengan panel (tanpa karakter kendali,
+// paling panjang MaxSMBPassword byte).
+func validSMBPassword(p string) bool {
+	if p == "" || len(p) > proto.MaxSMBPassword {
+		return false
+	}
+	return !strings.ContainsFunc(p, func(r rune) bool { return r < 0x20 || r == 0x7f })
+}
+
+// tryLockFor menunggu kunci paling lama d.
+func tryLockFor(ctx context.Context, mu *sync.Mutex, d time.Duration) bool {
+	deadline := time.Now().Add(d)
+	for {
+		if mu.TryLock() {
+			return true
+		}
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			return false
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
