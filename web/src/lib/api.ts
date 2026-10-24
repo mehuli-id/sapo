@@ -287,6 +287,29 @@ export interface NetworkApplyResult {
   confirm_by: string
 }
 
+export interface StatsRate {
+  name: string
+  // byte per detik: diterima/dibaca dan dikirim/ditulis
+  in: number
+  out: number
+}
+
+export interface StatsSample {
+  time: string
+  cpu_percent: number
+  iowait_percent: number
+  memory_used_bytes: number
+  memory_total_bytes: number
+  net: StatsRate[]
+  disk: StatsRate[]
+}
+
+export interface SystemStats {
+  interval_seconds: number
+  cpu_cores: number
+  samples: StatsSample[]
+}
+
 export type Localized = Record<string, string>
 
 export interface WizardField {
@@ -416,6 +439,7 @@ export const api = {
   pools: () => get<PoolsResult>("/api/v1/storage/pools"),
   createPool: (req: PoolCreateRequest) => post<Pool>("/api/v1/storage/pools", req),
   networkStatus: () => get<NetworkStatus>("/api/v1/network"),
+  systemStats: (since?: string) => get<SystemStats>(`/api/v1/system/stats${since ? `?since=${encodeURIComponent(since)}` : ""}`),
   applyNetwork: (config: NetworkConfig, admin_password: string) => post<NetworkApplyResult>("/api/v1/network", { config, admin_password }),
   confirmNetwork: (token: string) => post<{ ok: boolean }>("/api/v1/network/confirm", { token }),
   cancelNetwork: (token: string) => post<{ ok: boolean }>("/api/v1/network/cancel", { token }),

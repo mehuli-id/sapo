@@ -224,6 +224,7 @@ func New(o Options) (*Server, error) {
 	// Butuh login.
 	// Info sistem boleh dilihat semua user; storage dan paket hanya admin.
 	s.mux.Handle("GET /api/v1/system/info", s.requireAuth(s.proxyRead(proto.OpSystemInfo)))
+	s.mux.Handle("GET /api/v1/system/stats", s.requireAdmin(http.HandlerFunc(s.handleStats)))
 	s.mux.Handle("GET /api/v1/features", s.requireAdmin(s.proxyRead(proto.OpFeaturesList)))
 	s.mux.Handle("GET /api/v1/storage/disks", s.requireAdmin(s.proxyRead(proto.OpStorageDisks)))
 	s.mux.Handle("GET /api/v1/storage/disks/{name}/smart", s.requireAdmin(http.HandlerFunc(s.handleDiskSMART)))
@@ -482,6 +483,26 @@ func (s *Server) proxyRead(op string) http.HandlerFunc {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(out)
 	}
+}
+
+// handleStats: riwayat pemakaian sistem; ?since=<RFC 3339> hanya sampel
+// yang lebih baru.
+func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
+	var params proto.StatsParams
+	if v := r.URL.Query().Get("since"); v != "" {
+		t, err := time.Parse(time.RFC3339Nano, v)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "since tidak valid")
+			return
+		}
+		params.Since = t
+	}
+	var out json.RawMessage
+	if err := s.agent.Call(r.Context(), proto.OpSystemStats, params, &out); err != nil {
+		s.agentError(w, proto.OpSystemStats, err)
+		return
+	}
+	writeRaw(w, out)
 }
 
 // handleDiskSMART membaca SMART satu disk. Nama disk diperiksa lagi oleh

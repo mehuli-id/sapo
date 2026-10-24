@@ -71,6 +71,7 @@ type Agent struct {
 	Accounts       Accounts `yaml:"accounts"`
 	Shares         Shares   `yaml:"shares"`
 	Network        Network  `yaml:"network"`
+	Stats          Stats    `yaml:"stats"`
 }
 
 // Accounts mengatur akun sistem untuk berbagi file. sapod hanya menyentuh
@@ -93,6 +94,21 @@ type Accounts struct {
 	IDMax        int    `yaml:"id_max"`
 	PrimaryGroup string `yaml:"primary_group"`
 	Shell        string `yaml:"shell"`
+}
+
+// Stats mengatur Resource Monitor (system.stats): sampel diambil setiap
+// interval_seconds hanya selama ada yang melihat, history sampel disimpan.
+type Stats struct {
+	IntervalSeconds int `yaml:"interval_seconds"`
+	History         int `yaml:"history"`
+	IdleStopSeconds int `yaml:"idle_stop_seconds"`
+}
+
+func (s Stats) validate() error {
+	if s.IntervalSeconds < 1 || s.IntervalSeconds > 60 || s.History < 10 || s.History > 3600 || s.IdleStopSeconds < 10 {
+		return errors.New("agent.stats: interval_seconds 1-60, history 10-3600, idle_stop_seconds minimal 10")
+	}
+	return nil
 }
 
 // Network mengatur pengaturan jaringan dari panel (ADR 0009).
@@ -300,6 +316,7 @@ func Default() Config {
 				Exportfs: "/usr/sbin/exportfs", Systemctl: "/usr/bin/systemctl", ExportsFile: "/etc/exports.d/sapo.exports",
 				NFSService: "nfs-server.service",
 			},
+			Stats: Stats{IntervalSeconds: 2, History: 300, IdleStopSeconds: 60},
 			Network: Network{
 				IP: "/usr/sbin/ip", Systemctl: "/usr/bin/systemctl", Hostnamectl: "/usr/bin/hostnamectl",
 				InterfacesFile: "/etc/network/interfaces", ResolvConf: "/etc/resolv.conf", HostsFile: "/etc/hosts", HostnameFile: "/etc/hostname",
@@ -501,6 +518,9 @@ func (c Config) Validate() error {
 		return err
 	}
 	if err := c.Agent.Accounts.validate(); err != nil {
+		return err
+	}
+	if err := c.Agent.Stats.validate(); err != nil {
 		return err
 	}
 	if err := c.Agent.Network.validate(); err != nil {

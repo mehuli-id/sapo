@@ -574,5 +574,20 @@
       "failed": "No network change is waiting for confirmation (it may already be confirmed, cancelled, or expired).",
       "open": "Open the panel"
     }
+  },
+  "monitor": {
+    "intro": "System usage over the last 10 minutes, updated every {seconds} seconds while this window is open.",
+    "collecting": "Collecting data…",
+    "cpu": "CPU",
+    "cpuBusy": "In use",
+    "cpuIOWait": "Waiting for disk",
+    "memory": "Memory ({total})",
+    "memoryUsed": "In use",
+    "network": "Network · {name}",
+    "received": "Received",
+    "sent": "Sent",
+    "disk": "Disk · {name}",
+    "read": "Read",
+    "written": "Written"
   }
 }

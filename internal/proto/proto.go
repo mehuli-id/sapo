@@ -65,7 +65,10 @@ const (
 
 // Nama operasi yang dikenal sapod saat ini.
 const (
-	OpSystemInfo   = "system.info"
+	OpSystemInfo = "system.info"
+	// OpSystemStats membaca riwayat pemakaian CPU, memori, jaringan, dan
+	// disk beberapa menit terakhir (Resource Monitor). Hanya membaca.
+	OpSystemStats  = "system.stats"
 	OpFeaturesList = "features.list"
 	OpStorageDisks = "storage.disks"
 	OpStorageSMART = "storage.smart"
@@ -553,4 +556,36 @@ type NetworkApplyResult struct {
 // NetworkTokenParams adalah parameter network.confirm dan network.cancel.
 type NetworkTokenParams struct {
 	Token string `json:"token"`
+}
+
+// StatsParams: hanya sampel setelah Since (kosong = semua riwayat).
+type StatsParams struct {
+	Since time.Time `json:"since,omitempty"`
+}
+
+// SystemStats adalah hasil system.stats: sampel urut dari yang terlama.
+type SystemStats struct {
+	IntervalSeconds float64       `json:"interval_seconds"`
+	CPUCores        int           `json:"cpu_cores"`
+	Samples         []StatsSample `json:"samples"`
+}
+
+// StatsSample adalah pemakaian sistem rata-rata selama satu selang.
+type StatsSample struct {
+	Time       time.Time `json:"time"`
+	CPUPercent float64   `json:"cpu_percent"`
+	// IOWaitPercent: waktu CPU menunggu disk.
+	IOWaitPercent    float64     `json:"iowait_percent"`
+	MemoryUsedBytes  uint64      `json:"memory_used_bytes"`
+	MemoryTotalBytes uint64      `json:"memory_total_bytes"`
+	Net              []StatsRate `json:"net"`
+	Disk             []StatsRate `json:"disk"`
+}
+
+// StatsRate: laju per detik satu antarmuka (diterima/dikirim) atau disk
+// (dibaca/ditulis), dalam byte.
+type StatsRate struct {
+	Name string  `json:"name"`
+	In   float64 `json:"in"`
+	Out  float64 `json:"out"`
 }
