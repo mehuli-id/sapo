@@ -59,6 +59,15 @@ type WizardField struct {
 	Max          int    `yaml:"max" json:"max,omitempty"`
 	Autocomplete string `yaml:"autocomplete" json:"autocomplete,omitempty"`
 	Secret       bool   `yaml:"secret" json:"secret,omitempty"`
+	// Options: pilihan untuk isian choice.
+	Options []WizardOption `yaml:"options" json:"options,omitempty"`
+}
+
+// WizardOption adalah satu pilihan isian choice.
+type WizardOption struct {
+	Value string            `yaml:"value" json:"value"`
+	Label map[string]string `yaml:"label" json:"label"`
+	Help  map[string]string `yaml:"help" json:"help,omitempty"`
 }
 
 var wizardID = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
@@ -71,6 +80,7 @@ var (
 		"text": true, "username": true, "password": true, "password-confirm": true, "current-password": true,
 		"language": true, "totp-enroll": true, "recovery-codes": true,
 		"disk-select": true, "pool-layout": true, "erase-confirm": true, "confirm": true, "acknowledge": true,
+		"choice": true, "group-select": true, "toggle": true,
 	}
 	// Jenis isian yang wajib merujuk isian disk-select lewat source.
 	needsDiskSource = map[string]bool{"pool-layout": true, "erase-confirm": true}
@@ -117,6 +127,9 @@ func LoadWizard(dir, id string) (*Wizard, error) {
 		for _, f := range st.Fields {
 			if f.Match != "" && !keys[f.Match] {
 				return nil, fmt.Errorf("wizard %s: isian %q merujuk %q yang tidak ada", id, f.Key, f.Match)
+			}
+			if f.Type == "choice" && len(f.Options) == 0 {
+				return nil, fmt.Errorf("wizard %s: isian %q butuh options", id, f.Key)
 			}
 			if f.MatchContext != "" && f.MatchContext != "pool" {
 				return nil, fmt.Errorf("wizard %s: match_context %q tidak dikenal", id, f.MatchContext)

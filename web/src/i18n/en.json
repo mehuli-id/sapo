@@ -69,6 +69,10 @@
     "about": {
       "title": "About",
       "description": "Version, license, and trademarks"
+    },
+    "users": {
+      "title": "Users & Groups",
+      "description": "Accounts, roles, and groups"
     }
   },
   "systemInfo": {
@@ -185,7 +189,10 @@
     "twofaOn": "On",
     "hidden": "(hidden)",
     "strength": "Password length: {n} characters",
-    "mustAcknowledge": "Tick to continue."
+    "mustAcknowledge": "Tick to continue.",
+    "yes": "Yes",
+    "no": "No",
+    "noGroups": "No groups yet. You can create them in the Groups tab."
   },
   "login": {
     "title": "Sign in to {name}",
@@ -247,7 +254,14 @@
     "done": "Done",
     "menuLow": "Backup codes running low",
     "othersSignedOut": "Other devices signed in with this account have been signed out.",
-    "totpCodesStillValid": "Your existing backup codes still work; create new ones if you suspect someone else knows them."
+    "totpCodesStillValid": "Your existing backup codes still work; create new ones if you suspect someone else knows them.",
+    "twofaOff": "Two-step verification is off",
+    "totpIntroOff": "Protect your account with a code from an authenticator app on your phone, besides the password.",
+    "totpEnable": "Turn on two-step verification",
+    "passwordTitle": "Password",
+    "passwordChange": "Change password",
+    "passwordSave": "Save new password",
+    "passwordDone": "Your password has been changed."
   },
   "errors": {
     "bad_credentials": "Wrong username or password.",
@@ -282,7 +296,19 @@
     "forbidden": "Only administrators can do this.",
     "audit_unavailable": "The audit log can’t be written, so this action was cancelled for safety.",
     "pool_replace_failed": "ZFS couldn’t replace the disk: {message}",
-    "pool_destroy_failed": "ZFS couldn’t delete the pool: {message}"
+    "pool_destroy_failed": "ZFS couldn’t delete the pool: {message}",
+    "account_setup_required": "Finish the required account steps first.",
+    "account_disabled": "This account has been disabled by an administrator.",
+    "username_taken": "This username is already taken.",
+    "last_admin": "There must always be at least one active administrator.",
+    "self_change": "You can’t do this to your own account.",
+    "group_taken": "This group name is already taken.",
+    "group_invalid": "The group name doesn’t follow the rules.",
+    "group_reserved": "This group name is used by the system; choose another.",
+    "group_not_found": "Group not found.",
+    "password_same": "The new password must differ from the current one.",
+    "password_too_long": "The password is too long.",
+    "bad_request": "Invalid input."
   },
   "pool": {
     "title": "Storage pools",
@@ -383,5 +409,72 @@
       "cache": "cache (L2ARC)",
       "spares": "spare"
     }
+  },
+  "setupAccount": {
+    "title": "Hi, {name}",
+    "intro": "Finish these steps before using the panel.",
+    "passwordTitle": "Choose your own password",
+    "passwordIntro": "Your password was set by an administrator. Replace it with one only you know.",
+    "current": "Current password",
+    "savePassword": "Save password",
+    "totpTitle": "Two-step verification",
+    "totpIntro": "Required for administrators. Besides the password, signing in also asks for a 6-digit code from an authenticator app.",
+    "codesSaved": "I have saved these backup codes somewhere safe",
+    "finish": "Go to the panel"
+  },
+  "users": {
+    "tab": {
+      "users": "Users",
+      "groups": "Groups"
+    },
+    "add": "Add user",
+    "created": "User {name} has been created.",
+    "saved": "Changes to {name} saved.",
+    "disabledDone": "{name} is disabled and signed out everywhere.",
+    "enabledDone": "{name} is enabled again.",
+    "roleDone": "Role of {name} changed; they need to sign in again.",
+    "passwordDone": "Password of {name} reset; they are signed out everywhere.",
+    "deleted": "User {name} deleted.",
+    "role": {
+      "admin": "Admin",
+      "user": "User"
+    },
+    "disabled": "Disabled",
+    "mustChange": "Must change password",
+    "you": "You",
+    "groups": "Groups",
+    "lastLogin": "Last sign-in",
+    "never": "never",
+    "edit": "Edit",
+    "save": "Save",
+    "description": "Description",
+    "resetPassword": "Reset password",
+    "resetHelp": "The account owner is signed out everywhere and signs in with this new password.",
+    "newPassword": "New password",
+    "repeatPassword": "Repeat new password",
+    "mustChangeLabel": "Must change password at next sign-in",
+    "makeAdmin": "Make admin",
+    "makeUser": "Make regular user",
+    "makeAdminHelp": "Administrators have full access to the NAS and must set up two-step verification at their next sign-in.",
+    "makeUserHelp": "This user will no longer be able to change NAS settings.",
+    "enable": "Enable",
+    "disable": "Disable",
+    "delete": "Delete user",
+    "deleteHelp": "The account {name} is deleted and can no longer sign in. This cannot be undone.",
+    "typeName": "Type the username"
+  },
+  "groups": {
+    "new": "New group",
+    "name": "Group name",
+    "description": "Description (optional)",
+    "create": "Create group",
+    "nameHelp": "Lowercase letters, digits, dots, underscores, or hyphens; starts with a letter; at least 2 characters.",
+    "created": "Group created.",
+    "saved": "Members of {name} saved.",
+    "deleted": "Group {name} deleted.",
+    "none": "No groups yet.",
+    "members": "Members",
+    "editMembers": "Edit members",
+    "confirmDelete": "Yes, delete group"
   }
 }

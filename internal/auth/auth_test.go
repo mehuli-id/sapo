@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -237,5 +238,66 @@ func TestNeedsRehash(t *testing.T) {
 	}
 	if !NeedsRehash(h, Argon2Params{MemoryKiB: 16 * 1024, Iterations: 1, Parallelism: 1}) {
 		t.Fatal("parameter berbeda harus rehash")
+	}
+}
+
+func TestStoreKeepsAnActiveAdmin(t *testing.T) {
+	s, err := OpenStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_800_000_000, 0)
+	if err := s.CompleteSetup(User{Username: "arthur", Role: RoleAdmin}, "id", now); err != nil {
+		t.Fatal(err)
+	}
+	user, disabled := RoleUser, true
+	if err := s.UpdateUser("arthur", UserChange{Role: &user}); !errors.Is(err, ErrLastAdmin) {
+		t.Fatalf("menurunkan admin terakhir: %v", err)
+	}
+	if err := s.UpdateUser("arthur", UserChange{Disabled: &disabled}); !errors.Is(err, ErrLastAdmin) {
+		t.Fatalf("menonaktifkan admin terakhir: %v", err)
+	}
+	if err := s.DeleteUser("arthur"); !errors.Is(err, ErrLastAdmin) {
+		t.Fatalf("menghapus admin terakhir: %v", err)
+	}
+	// Ditolak = tidak ada yang berubah, termasuk di file.
+	reopened, _ := OpenStore(filepath.Dir(s.path))
+	if u, ok := reopened.Get("arthur"); !ok || u.Role != RoleAdmin || u.Disabled {
+		t.Fatalf("admin berubah: %+v", u)
+	}
+	// Dengan admin kedua yang aktif, admin pertama boleh diturunkan.
+	if err := s.CreateUser(User{Username: "sari", Role: RoleAdmin}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateUser("arthur", UserChange{Role: &user}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStoreGroupMembership(t *testing.T) {
+	s, _ := OpenStore(t.TempDir())
+	_ = s.CompleteSetup(User{Username: "arthur", Role: RoleAdmin}, "id", time.Now())
+	if err := s.CreateUser(User{Username: "budi", Role: RoleUser, Groups: []string{"keluarga"}}); !errors.Is(err, ErrGroupNotFound) {
+		t.Fatalf("grup belum ada: %v", err)
+	}
+	_ = s.CreateGroup(Group{Name: "keluarga"})
+	if err := s.CreateGroup(Group{Name: "keluarga"}); !errors.Is(err, ErrGroupExists) {
+		t.Fatalf("grup ganda: %v", err)
+	}
+	_ = s.CreateUser(User{Username: "budi", Role: RoleUser, Groups: []string{"keluarga", "keluarga"}})
+	if u, _ := s.Get("budi"); len(u.Groups) != 1 {
+		t.Fatalf("grup ganda harus disatukan: %v", u.Groups)
+	}
+	members := []string{"arthur"}
+	_ = s.UpdateGroup("keluarga", nil, &members)
+	if u, _ := s.Get("budi"); len(u.Groups) != 0 {
+		t.Fatalf("budi harus keluar dari grup: %v", u.Groups)
+	}
+	if u, _ := s.Get("arthur"); len(u.Groups) != 1 {
+		t.Fatalf("arthur harus masuk grup: %v", u.Groups)
+	}
+	bogus := []string{"tidak-ada"}
+	if err := s.UpdateGroup("keluarga", nil, &bogus); !errors.Is(err, ErrUserNotFound) {
+		t.Fatalf("anggota tidak dikenal: %v", err)
 	}
 }

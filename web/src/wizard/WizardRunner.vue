@@ -68,6 +68,13 @@ const step = computed(() => props.wizard.steps[index.value]!)
 const isLast = computed(() => index.value === props.wizard.steps.length - 1)
 const usernameRe = computed(() => new RegExp(props.policy.username_pattern))
 
+// Menambah atau membuang satu nama di isian daftar (dipisah koma).
+function toggleListItem(key: string, item: string, on: boolean) {
+  const list = splitList(values[key]).filter((x) => x !== item)
+  if (on) list.push(item)
+  values[key] = list.sort().join(",")
+}
+
 // Disk yang dipilih di isian disk-select yang dirujuk f.source.
 function sourceDisks(f: WizardField): Disk[] {
   const names = new Set(splitList(values[f.source ?? ""]))
@@ -80,6 +87,7 @@ function validateField(f: WizardField): string {
   if (f.type === "recovery-codes") return v === "yes" ? "" : t("recovery.mustConfirm")
   if (f.type === "erase-confirm") return v === "yes" ? "" : t("pool.mustConfirmErase")
   if (f.type === "acknowledge") return v === "yes" ? "" : t("wizard.mustAcknowledge")
+  if (f.type === "choice") return f.options?.some((o) => o.value === v) ? "" : t("wizard.required")
   if (f.type === "confirm" && f.match_context === "pool") return v === props.context?.pool?.name ? "" : t("wizard.mismatch")
   if (f.type === "disk-select" && f.required && !v) return t("pool.pickDisks")
   if (f.type === "pool-layout") {
@@ -192,6 +200,9 @@ const reviewRows = computed(() =>
             .map((d) => `${d.name} (${size(d.size_bytes)})`)
             .join(", ")
         } else if (f.type === "pool-layout") value = value ? t(`pool.layout.${value}.name`) : ""
+        else if (f.type === "choice") value = pick(f.options?.find((o) => o.value === value)?.label, locale.value)
+        else if (f.type === "group-select") value = splitList(value).join(", ") || "—"
+        else if (f.type === "toggle") value = value === "yes" ? t("wizard.yes") : t("wizard.no")
         else if (f.type === "totp-enroll") {
           // Yang relevan di ringkasan adalah statusnya, bukan kodenya.
           label = pick(st.title, locale.value)
@@ -257,7 +268,7 @@ const reviewRows = computed(() =>
 
       <div v-for="f in step.fields ?? []" :key="f.key" class="space-y-1.5">
         <!-- Label kode cadangan ada di samping kotak centangnya. -->
-        <Label v-if="f.type !== 'recovery-codes' && f.type !== 'erase-confirm' && f.type !== 'acknowledge'" :for="`wz-${f.key}`">{{ pick(f.label, locale) }}</Label>
+        <Label v-if="!['recovery-codes', 'erase-confirm', 'acknowledge', 'toggle'].includes(f.type)" :for="`wz-${f.key}`">{{ pick(f.label, locale) }}</Label>
 
         <!-- Bahasa -->
         <div v-if="f.type === 'language'" :id="`wz-${f.key}`" role="radiogroup" class="grid gap-2 sm:grid-cols-2">
@@ -336,6 +347,59 @@ const reviewRows = computed(() =>
           :label="pick(f.label, locale)"
           :input-id="`wz-${f.key}`"
         />
+
+        <!-- Pilihan (misalnya peran pengguna) -->
+        <div v-else-if="f.type === 'choice'" :id="`wz-${f.key}`" role="radiogroup" class="space-y-2">
+          <button
+            v-for="o in f.options ?? []"
+            :key="o.value"
+            type="button"
+            role="radio"
+            :aria-checked="values[f.key] === o.value"
+            :class="
+              cn(
+                'flex w-full items-start justify-between gap-3 rounded-lg border px-3 py-2.5 text-left text-sm hover:bg-accent',
+                values[f.key] === o.value && 'border-primary ring-1 ring-primary',
+              )
+            "
+            @click="values[f.key] = o.value"
+          >
+            <span class="space-y-0.5">
+              <span class="block font-medium">{{ pick(o.label, locale) }}</span>
+              <span v-if="o.help" class="block text-xs text-muted-foreground">{{ pick(o.help, locale) }}</span>
+            </span>
+            <Check v-if="values[f.key] === o.value" class="size-4 shrink-0 text-primary" />
+          </button>
+        </div>
+
+        <!-- Grup -->
+        <div v-else-if="f.type === 'group-select'" :id="`wz-${f.key}`" class="space-y-2">
+          <label v-for="g in context?.groups ?? []" :key="g.name" class="flex items-start gap-2 rounded-lg border px-3 py-2 text-sm">
+            <input
+              type="checkbox"
+              class="mt-0.5 size-4 accent-primary"
+              :checked="splitList(values[f.key]).includes(g.name)"
+              @change="toggleListItem(f.key, g.name, ($event.target as HTMLInputElement).checked)"
+            />
+            <span>
+              <span class="block font-medium">{{ g.name }}</span>
+              <span v-if="g.description" class="block text-xs text-muted-foreground">{{ g.description }}</span>
+            </span>
+          </label>
+          <p v-if="!(context?.groups ?? []).length" class="text-sm text-muted-foreground">{{ t("wizard.noGroups") }}</p>
+        </div>
+
+        <!-- Sakelar ya/tidak -->
+        <label v-else-if="f.type === 'toggle'" class="flex items-start gap-2 text-sm">
+          <input
+            :id="`wz-${f.key}`"
+            type="checkbox"
+            class="mt-0.5 size-4 accent-primary"
+            :checked="values[f.key] === 'yes'"
+            @change="values[f.key] = ($event.target as HTMLInputElement).checked ? 'yes' : ''"
+          />
+          <span>{{ pick(f.label, locale) }}</span>
+        </label>
 
         <!-- Kotak centang pernyataan (misalnya "saya mengerti data hilang") -->
         <label v-else-if="f.type === 'acknowledge'" class="flex items-start gap-2 text-sm">

@@ -115,7 +115,12 @@ api:
 auth:
   password_min_length: 10
   username_pattern: "^[a-z][a-z0-9._-]{2,31}$"
-  reserved_usernames: [root, sapo, daemon, bin, sys, nobody, guest]
+  # Nama yang dipakai sistem Debian (nantinya akun sistem untuk berbagi file
+  # dibuat dengan nama yang sama, jadi tidak boleh bentrok).
+  reserved_usernames: [root, sapo, daemon, bin, sys, sync, games, man, lp, mail, news, uucp, proxy, www-data, backup, list, irc, nobody, guest, systemd-network, systemd-timesync, messagebus, sshd, _apt]
+  # Grup untuk izin folder dan aplikasi (dikelola di aplikasi Pengguna & Grup).
+  group_name_pattern: "^[a-z][a-z0-9._-]{1,31}$"
+  reserved_group_names: [root, sapo, sudo, adm, staff, users, admin, administrators, wheel, nogroup, daemon, bin, sys, disk, tty, shadow, systemd-journal]
   require_totp_for_admin: true
   session_idle_minutes: 30
   session_max_hours: 12

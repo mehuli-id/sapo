@@ -61,6 +61,12 @@ export function useWindows() {
     state.windows.push({ appId: app.id, x, y, width, height, z: ++state.topZ, minimized: false, maximized: false })
   }
 
+  // Menutup semua jendela, misalnya saat user berganti (jendela aplikasi
+  // admin tidak boleh terbawa ke sesi pengguna biasa).
+  function closeAll() {
+    state.windows.splice(0)
+  }
+
   function close(appId: string) {
     const i = state.windows.findIndex((w) => w.appId === appId)
     if (i >= 0) state.windows.splice(i, 1)
@@ -89,7 +95,7 @@ export function useWindows() {
     saveGeometry(all)
   }
 
-  return { state, focused, open, close, focus, toggleMinimize, remember }
+  return { state, focused, open, close, closeAll, focus, toggleMinimize, remember }
 }
 
 export function clamp(v: number, min: number, max: number) {

@@ -1,5 +1,5 @@
 import type { Component } from "vue"
-import { defineAsyncComponent } from "vue"
+import { computed, defineAsyncComponent } from "vue"
 import {
   Activity,
   Cloud,
@@ -11,7 +11,9 @@ import {
   Package,
   Settings,
   ShieldCheck,
+  UsersRound,
 } from "@lucide/vue"
+import { useSession } from "@/composables/useSession"
 import appsData from "./apps.json"
 
 // Daftar aplikasi panel adalah data (apps.json). Nantinya aplikasi dari
@@ -25,9 +27,17 @@ export interface AppDef {
   phase?: number
   window?: { width: number; height: number }
   keywords?: string[]
+  // Hanya tampil untuk administrator (server tetap memeriksa haknya).
+  admin_only?: boolean
 }
 
 export const apps: AppDef[] = appsData as AppDef[]
+
+// Aplikasi yang tampil untuk user yang sedang login.
+export function useVisibleApps() {
+  const { status } = useSession()
+  return computed(() => apps.filter((a) => !a.admin_only || status.value?.user?.role === "admin"))
+}
 
 export function findApp(id: string): AppDef | undefined {
   return apps.find((a) => a.id === id)
@@ -45,6 +55,7 @@ const icons: Record<string, Component> = {
   "package": Package,
   "settings": Settings,
   "shield-check": ShieldCheck,
+  "users-round": UsersRound,
 }
 
 export function iconFor(name: string): Component {
@@ -57,6 +68,7 @@ const components: Record<string, Component> = {
   Features: defineAsyncComponent(() => import("./Features.vue")),
   Storage: defineAsyncComponent(() => import("./Storage.vue")),
   AccountSecurity: defineAsyncComponent(() => import("./AccountSecurity.vue")),
+  Users: defineAsyncComponent(() => import("./Users.vue")),
   About: defineAsyncComponent(() => import("./About.vue")),
   Planned: defineAsyncComponent(() => import("./Planned.vue")),
 }

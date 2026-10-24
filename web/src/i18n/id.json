@@ -69,6 +69,10 @@
     "about": {
       "title": "Tentang",
       "description": "Versi, lisensi, dan merek"
+    },
+    "users": {
+      "title": "Pengguna & Grup",
+      "description": "Akun, peran, dan grup"
     }
   },
   "systemInfo": {
@@ -185,7 +189,10 @@
     "twofaOn": "Aktif",
     "hidden": "(disembunyikan)",
     "strength": "Panjang password: {n} karakter",
-    "mustAcknowledge": "Centang untuk melanjutkan."
+    "mustAcknowledge": "Centang untuk melanjutkan.",
+    "yes": "Ya",
+    "no": "Tidak",
+    "noGroups": "Belum ada grup. Grup bisa dibuat di tab Grup."
   },
   "login": {
     "title": "Masuk ke {name}",
@@ -247,7 +254,14 @@
     "done": "Selesai",
     "menuLow": "Kode cadangan hampir habis",
     "othersSignedOut": "Perangkat lain yang masih login dengan akun ini sudah dikeluarkan.",
-    "totpCodesStillValid": "Kode cadangan lama tetap berlaku; buat kode baru bila Anda curiga kodenya diketahui orang lain."
+    "totpCodesStillValid": "Kode cadangan lama tetap berlaku; buat kode baru bila Anda curiga kodenya diketahui orang lain.",
+    "twofaOff": "Verifikasi dua langkah belum aktif",
+    "totpIntroOff": "Lindungi akun dengan kode dari aplikasi autentikator di HP, selain password.",
+    "totpEnable": "Aktifkan verifikasi dua langkah",
+    "passwordTitle": "Password",
+    "passwordChange": "Ganti password",
+    "passwordSave": "Simpan password baru",
+    "passwordDone": "Password sudah diganti."
   },
   "errors": {
     "bad_credentials": "Nama pengguna atau password salah.",
@@ -282,7 +296,19 @@
     "forbidden": "Hanya administrator yang bisa melakukan ini.",
     "audit_unavailable": "Log audit tidak bisa ditulis, jadi tindakan ini dibatalkan demi keamanan.",
     "pool_replace_failed": "ZFS gagal mengganti disk: {message}",
-    "pool_destroy_failed": "ZFS gagal menghapus pool: {message}"
+    "pool_destroy_failed": "ZFS gagal menghapus pool: {message}",
+    "account_setup_required": "Selesaikan dulu langkah wajib akun.",
+    "account_disabled": "Akun ini dinonaktifkan administrator.",
+    "username_taken": "Nama pengguna ini sudah dipakai.",
+    "last_admin": "Harus tetap ada minimal satu administrator aktif.",
+    "self_change": "Tindakan ini tidak bisa dilakukan pada akun Anda sendiri.",
+    "group_taken": "Nama grup ini sudah dipakai.",
+    "group_invalid": "Nama grup tidak sesuai aturan.",
+    "group_reserved": "Nama grup ini dipakai sistem, pilih nama lain.",
+    "group_not_found": "Grup tidak ditemukan.",
+    "password_same": "Password baru harus berbeda dari password sekarang.",
+    "password_too_long": "Password terlalu panjang.",
+    "bad_request": "Isian tidak valid."
   },
   "pool": {
     "title": "Pool penyimpanan",
@@ -383,5 +409,72 @@
       "cache": "cache (L2ARC)",
       "spares": "cadangan (spare)"
     }
+  },
+  "setupAccount": {
+    "title": "Halo, {name}",
+    "intro": "Selesaikan langkah berikut sebelum memakai panel.",
+    "passwordTitle": "Buat password sendiri",
+    "passwordIntro": "Password Anda dibuat administrator. Ganti dengan password yang hanya Anda ketahui.",
+    "current": "Password sekarang",
+    "savePassword": "Simpan password",
+    "totpTitle": "Verifikasi dua langkah",
+    "totpIntro": "Wajib untuk administrator. Selain password, login juga meminta kode 6 digit dari aplikasi autentikator.",
+    "codesSaved": "Saya sudah menyimpan kode cadangan ini di tempat yang aman",
+    "finish": "Masuk ke panel"
+  },
+  "users": {
+    "tab": {
+      "users": "Pengguna",
+      "groups": "Grup"
+    },
+    "add": "Tambah pengguna",
+    "created": "Pengguna {name} sudah dibuat.",
+    "saved": "Perubahan {name} disimpan.",
+    "disabledDone": "{name} dinonaktifkan dan dikeluarkan dari semua perangkat.",
+    "enabledDone": "{name} diaktifkan lagi.",
+    "roleDone": "Peran {name} diubah; ia perlu masuk lagi.",
+    "passwordDone": "Password {name} di-reset; ia dikeluarkan dari semua perangkat.",
+    "deleted": "Pengguna {name} dihapus.",
+    "role": {
+      "admin": "Admin",
+      "user": "Pengguna"
+    },
+    "disabled": "Nonaktif",
+    "mustChange": "Wajib ganti password",
+    "you": "Anda",
+    "groups": "Grup",
+    "lastLogin": "Terakhir masuk",
+    "never": "belum pernah",
+    "edit": "Ubah",
+    "save": "Simpan",
+    "description": "Keterangan",
+    "resetPassword": "Reset password",
+    "resetHelp": "Pemilik akun dikeluarkan dari semua perangkat dan masuk dengan password baru ini.",
+    "newPassword": "Password baru",
+    "repeatPassword": "Ulangi password baru",
+    "mustChangeLabel": "Wajib ganti password saat masuk berikutnya",
+    "makeAdmin": "Jadikan admin",
+    "makeUser": "Jadikan pengguna biasa",
+    "makeAdminHelp": "Administrator punya akses penuh ke NAS dan wajib memasang verifikasi dua langkah saat masuk berikutnya.",
+    "makeUserHelp": "Pengguna ini tidak bisa lagi mengubah pengaturan NAS.",
+    "enable": "Aktifkan",
+    "disable": "Nonaktifkan",
+    "delete": "Hapus pengguna",
+    "deleteHelp": "Akun {name} dihapus dan tidak bisa masuk lagi. Tindakan ini tidak bisa dibatalkan.",
+    "typeName": "Ketik nama pengguna"
+  },
+  "groups": {
+    "new": "Grup baru",
+    "name": "Nama grup",
+    "description": "Keterangan (boleh kosong)",
+    "create": "Buat grup",
+    "nameHelp": "Huruf kecil, angka, titik, garis bawah, atau tanda hubung; diawali huruf; minimal 2 karakter.",
+    "created": "Grup dibuat.",
+    "saved": "Anggota {name} disimpan.",
+    "deleted": "Grup {name} dihapus.",
+    "none": "Belum ada grup.",
+    "members": "Anggota",
+    "editMembers": "Ubah anggota",
+    "confirmDelete": "Ya, hapus grup"
   }
 }

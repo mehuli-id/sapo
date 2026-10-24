@@ -71,31 +71,65 @@ func (s *Server) currentSession(r *http.Request) (auth.Session, string, bool) {
 	if !ok {
 		return auth.Session{}, "", false
 	}
-	// User yang sudah dihapus tidak boleh tetap masuk.
-	if _, exists := s.store.Get(sess.Username); !exists {
+	// User yang sudah dihapus atau dinonaktifkan tidak boleh tetap masuk.
+	if u, exists := s.store.Get(sess.Username); !exists || u.Disabled {
 		s.sessions.Delete(c.Value)
 		return auth.Session{}, "", false
 	}
 	return sess, c.Value, true
 }
 
+// requireAuth: harus login, dan akun tidak sedang menunggu langkah wajib
+// (ganti password dari admin, atau 2FA untuk administrator).
 func (s *Server) requireAuth(next http.Handler) http.Handler {
+	return s.authorize(next, false)
+}
+
+// requireAuthPending: harus login; boleh dipakai selama langkah wajib akun
+// belum selesai (justru untuk menyelesaikannya).
+func (s *Server) requireAuthPending(next http.Handler) http.Handler {
+	return s.authorize(next, true)
+}
+
+func (s *Server) authorize(next http.Handler, allowPending bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sess, _, ok := s.currentSession(r)
 		if !ok {
 			writeError(w, http.StatusUnauthorized, "unauthenticated", "silakan login")
 			return
 		}
+		if !allowPending {
+			if u, _ := s.store.Get(sess.Username); len(s.pendingSteps(u)) > 0 {
+				writeError(w, http.StatusForbidden, "account_setup_required", "selesaikan dulu langkah wajib akun")
+				return
+			}
+		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), sessionKey, sess)))
 	})
+}
+
+// pendingSteps adalah langkah wajib sebelum akun boleh memakai panel:
+// "password" (password dibuat atau di-reset admin) dan "totp"
+// (administrator tanpa 2FA, bila auth.require_totp_for_admin).
+func (s *Server) pendingSteps(u auth.User) []string {
+	steps := []string{}
+	if u.MustChangePassword {
+		steps = append(steps, "password")
+	}
+	if u.Role == auth.RoleAdmin && s.cfg.Auth.RequireTOTPForAdmin && u.TOTPSecret == "" {
+		steps = append(steps, "totp")
+	}
+	return steps
 }
 
 func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]any{"setup_required": s.store.SetupRequired(), "authenticated": false}
 	if sess, _, ok := s.currentSession(r); ok {
 		resp["authenticated"] = true
-		user := map[string]any{"username": sess.Username, "role": sess.Role}
-		if u, found := s.store.Get(sess.Username); found && u.TOTPSecret != "" {
+		u, _ := s.store.Get(sess.Username)
+		// Peran dari data akun (bisa berubah setelah login).
+		user := map[string]any{"username": sess.Username, "role": u.Role, "pending": s.pendingSteps(u)}
+		if u.TOTPSecret != "" {
 			// Panel memberi peringatan bila kode cadangan habis atau tinggal sedikit.
 			user["recovery_codes_left"] = len(u.RecoveryCodes)
 			user["recovery_codes_low"] = len(u.RecoveryCodes) <= s.cfg.Auth.RecoveryCodesLow
@@ -405,6 +439,12 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// Password benar tidak pernah dihitung sebagai percobaan gagal.
 	s.limiter.Refund(ipKey)
 	s.limiter.Refund(userKey)
+	if user.Disabled {
+		// Baru diberi tahu setelah password terbukti benar.
+		s.record(r, user.Username, "auth.login", false, map[string]string{"reason": "disabled"})
+		writeError(w, http.StatusForbidden, "account_disabled", "akun ini dinonaktifkan administrator")
+		return
+	}
 
 	if hasTOTP {
 		if code == "" {
@@ -478,6 +518,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "gagal membuat sesi")
 		return
 	}
+	_ = s.store.RecordLogin(user.Username, s.now().UTC())
 	s.setCookie(w, r, tok, 0)
 	if usedRecovery {
 		// Dicatat terpisah: pemakaian kode cadangan perlu diketahui admin.

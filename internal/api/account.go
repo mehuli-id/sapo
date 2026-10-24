@@ -19,6 +19,12 @@ import (
 // reauth memeriksa password user yang sedang login. Bila gagal, jawaban
 // sudah ditulis dan ok bernilai false.
 func (s *Server) reauth(w http.ResponseWriter, r *http.Request, password string) (auth.User, bool) {
+	return s.reauthField(w, r, password, "password")
+}
+
+// reauthField sama dengan reauth; field adalah nama isian password di
+// panel, untuk menandai isian yang salah.
+func (s *Server) reauthField(w http.ResponseWriter, r *http.Request, password, field string) (auth.User, bool) {
 	sess, _, ok := s.currentSession(r)
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "unauthenticated", "silakan login")
@@ -42,7 +48,7 @@ func (s *Server) reauth(w http.ResponseWriter, r *http.Request, password string)
 	}
 	if !passOK {
 		s.record(r, user.Username, "account.reauth", false, nil)
-		writeErrorDetail(w, http.StatusUnauthorized, "bad_password", "password salah", map[string]any{"field": "password"})
+		writeErrorDetail(w, http.StatusUnauthorized, "bad_password", "password salah", map[string]any{"field": field})
 		return auth.User{}, false
 	}
 	s.limiter.Refund(userKey)

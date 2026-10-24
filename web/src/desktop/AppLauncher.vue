@@ -4,18 +4,19 @@ import { computed, onMounted, ref } from "vue"
 import { useI18n } from "vue-i18n"
 import { Search } from "@lucide/vue"
 import type { AppDef } from "@/apps/registry"
-import { apps, iconFor } from "@/apps/registry"
+import { iconFor, useVisibleApps } from "@/apps/registry"
 import { Badge } from "@/components/ui/badge"
 
 const emit = defineEmits<{ open: [app: AppDef] }>()
 const { t } = useI18n()
+const apps = useVisibleApps()
 const query = ref("")
 const input = ref<HTMLInputElement | null>(null)
 
 const results = computed(() => {
   const q = query.value.trim().toLowerCase()
-  if (!q) return apps
-  return apps.filter((a) =>
+  if (!q) return apps.value
+  return apps.value.filter((a) =>
     [t(`apps.${a.id}.title`), t(`apps.${a.id}.description`), ...(a.keywords ?? [])].some((s) =>
       s.toLowerCase().includes(q),
     ),

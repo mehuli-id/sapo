@@ -42,3 +42,12 @@ Panel tidak boleh terbuka ke jaringan sebelum ada login. Pengguna juga ingin sem
   - **Sesi lain berakhir.** Setelah salah satu tindakan itu berhasil, semua sesi lain milik user diakhiri. Sesi yang sedang dipakai tetap berlaku.
   - **Peringatan.** Panel memberi peringatan bila sisa kode `<= auth.recovery_codes_low`.
   - **Belum ada:** pemulihan bila password **dan** kode cadangan sama-sama hilang. Rencananya lewat menu darurat di konsol NAS (dokumen rancangan).
+- **Pengguna dan grup** (sejak 2026-10-24, aplikasi Pengguna & Grup):
+  - **Dua peran.** `admin` mengelola NAS. `user` hanya memakai file dan aplikasi yang diizinkan; storage, paket, serta pengguna dan grup hanya untuk admin, dan hak itu diperiksa server (`requireAdmin`), bukan hanya disembunyikan di panel.
+  - **Grup** dipakai untuk izin folder dan aplikasi. Nama grup mengikuti `auth.group_name_pattern` dan tidak boleh memakai `auth.reserved_group_names`; nama pengguna tidak boleh memakai `auth.reserved_usernames`. Keduanya nantinya juga menjadi akun dan grup sistem untuk berbagi file, jadi nama sistem Debian dicadangkan sejak awal.
+  - **Password admin diminta lagi** untuk tindakan yang memberi hak atau mencabut akses: membuat user, mengubah peran, me-reset password, dan menghapus user. Menghapus juga butuh nama diketik ulang.
+  - **Sesi berakhir** saat peran user berubah, akunnya dinonaktifkan, password-nya di-reset admin, atau akunnya dihapus. User yang dinonaktifkan tidak bisa login; pesannya baru diberikan setelah password terbukti benar.
+  - **Selalu ada administrator aktif.** Penyimpanan menolak perubahan yang membuat NAS tanpa admin aktif, dan admin tidak bisa menonaktifkan, menurunkan, atau menghapus akunnya sendiri.
+  - **Langkah wajib akun.** Password yang dibuat atau di-reset admin wajib diganti saat masuk (`must_change_password`), dan administrator tanpa 2FA wajib memasangnya. Selama langkah ini belum selesai, server menolak semua API selain status, logout, ganti password, dan pendaftaran 2FA (`account_setup_required`).
+  - **Ganti password sendiri** di Keamanan Akun, dengan password lama; sesi lain berakhir.
+  - Semua perubahan pengguna dan grup dicatat di log audit, tanpa password.

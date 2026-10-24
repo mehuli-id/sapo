@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue"
+import { onMounted, ref, watch } from "vue"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useSession } from "@/composables/useSession"
 import { initMode, useShell } from "@/composables/useShell"
+import { useWindows } from "@/composables/useWindows"
 import CompactShell from "@/desktop/CompactShell.vue"
 import DesktopShell from "@/desktop/DesktopShell.vue"
 import { setLocale } from "@/i18n"
@@ -11,11 +12,21 @@ import { api } from "@/lib/api"
 import { applyBranding } from "@/lib/theme"
 import HttpsNoticeView from "@/views/HttpsNoticeView.vue"
 import LoginView from "@/views/LoginView.vue"
+import AccountSetupView from "@/views/AccountSetupView.vue"
 import SetupView from "@/views/SetupView.vue"
 
 const { effectiveMode, branding } = useShell()
 const { status, policy, refresh } = useSession()
 const ready = ref(false)
+// Jendela yang terbuka milik sesi user sebelumnya ditutup saat user berganti
+// atau keluar.
+const { closeAll } = useWindows()
+watch(
+  () => status.value?.user?.username,
+  (now, before) => {
+    if (now !== before) closeAll()
+  },
+)
 // Diisi bila panel dibuka lewat HTTP padahal HTTPS wajib.
 const httpsNotice = ref<HTTPSConfig | null>(null)
 
@@ -53,6 +64,7 @@ onMounted(async () => {
     <HttpsNoticeView v-else-if="httpsNotice" :https="httpsNotice" />
     <SetupView v-else-if="status?.setup_required" />
     <LoginView v-else-if="!status?.authenticated" />
+    <AccountSetupView v-else-if="status.user?.pending?.length" />
     <DesktopShell v-else-if="effectiveMode === 'desktop'" />
     <CompactShell v-else />
   </TooltipProvider>
