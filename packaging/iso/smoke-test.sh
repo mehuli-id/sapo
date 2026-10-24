@@ -184,9 +184,10 @@ new_disk="$(json "print([x['name'] for x in v if x['serial']=='SAPOUJI3'][0])" <
 json "p=v['pools'][0]; leaves=sorted(c.get('disk','') for t in p['vdevs'] for c in t['children'])
 assert p['health']=='ONLINE' and p['scan']['function']=='resilver' and p['scan']['state']=='finished', p
 assert '$new_disk' in leaves and '$old_disk' not in leaves, leaves" <<<"$pools" || fail "resilver tidak selesai dengan benar: $pools"
-# Disk lama yang dilepas tidak lagi dianggap anggota pool.
+# Disk baru anggota pool. Disk lama yang dilepas masih berlabel nama pool
+# yang aktif, jadi sengaja tetap dianggap dipakai (gagal-tertutup, ADR 0005).
 json "u={x['serial']:(x['usage'],x.get('usage_reason','')) for x in v}
-assert u['SAPOUJI2'][0]!='in_use' and u['SAPOUJI3']==('in_use','pool'), u" <<<"$disks_json" \
+assert u['SAPOUJI2']==('in_use','pool') and u['SAPOUJI3']==('in_use','pool'), u" <<<"$disks_json" \
   || fail "status disk setelah ganti salah: $disks_json"
 echo "disk $old_disk diganti $new_disk, resilver selesai"
 
@@ -200,7 +201,7 @@ json 'assert v["pools"]==[], v' <<<"$pools" || fail "pool masih ada: $pools"
 # Label pool terhapus tersisa: disk tampil berisi data, boleh dipakai lagi.
 disks_json="$(api GET /api/v1/storage/disks)"
 json "u={x['serial']:(x['usage'],x.get('usage_reason','')) for x in v}
-assert u['SAPOUJI1']==('data','zfs_label') and u['SAPOUJI3']==('data','zfs_label'), u" <<<"$disks_json" \
+assert all(u[s]==('data','zfs_label') for s in ('SAPOUJI1','SAPOUJI2','SAPOUJI3')), u" <<<"$disks_json" \
   || fail "disk pool terhapus harus berstatus data/zfs_label: $disks_json"
 echo "pool dihapus; disknya tampil berisi data (label ZFS lama)"
 echo "Uji asap lulus."
