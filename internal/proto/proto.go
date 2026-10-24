@@ -70,6 +70,11 @@ const (
 	OpStoragePoolCreate = "storage.pool_create"
 	// OpStoragePoolScrub memulai atau menghentikan scrub pool.
 	OpStoragePoolScrub = "storage.pool_scrub"
+	// OpStoragePoolReplace mengganti satu disk pool dengan disk lain
+	// (resilver). Destruktif untuk disk baru.
+	OpStoragePoolReplace = "storage.pool_replace"
+	// OpStoragePoolDestroy menghapus pool beserta seluruh isinya.
+	OpStoragePoolDestroy = "storage.pool_destroy"
 	// OpConsolePanelAddress memperbarui alamat panel (dan sidik jari
 	// sertifikat) di layar login konsol NAS.
 	OpConsolePanelAddress = "console.panel_address"
@@ -143,6 +148,9 @@ type Disk struct {
 	// DiskInUse (tidak boleh; alasannya di UsageReason).
 	Usage       string `json:"usage"`
 	UsageReason string `json:"usage_reason,omitempty"`
+	// Reasons: semua alasan pakai yang ditemukan (UsageReason hanya yang
+	// terpenting). Hanya dipakai di dalam sapod.
+	Reasons []string `json:"-"`
 }
 
 // Nilai Disk.Usage.
@@ -164,6 +172,10 @@ const (
 	// (device-mapper, multipath, bcache, …). Gagal-tertutup: lebih baik
 	// menolak disk daripada menghapus disk yang sedang dipakai.
 	UsageHolder = "holder"
+	// UsageZFSLabel (untuk DiskHasData): label ZFS dari pool yang tidak
+	// sedang aktif di NAS ini, misalnya pool yang sudah dihapus atau disk
+	// dari NAS lain. Boleh dipakai setelah penghapusan dikonfirmasi.
+	UsageZFSLabel = "zfs_label"
 )
 
 // Partition adalah partisi atau perangkat turunan sebuah disk.
@@ -278,7 +290,9 @@ type Pool struct {
 
 // Vdev adalah satu perangkat di pohon pool: grup (mirror, raidz) atau disk.
 type Vdev struct {
-	Name           string `json:"name"`
+	Name string `json:"name"`
+	// GUID ZFS: penunjuk disk yang tidak ambigu, juga untuk disk yang hilang.
+	GUID           string `json:"guid,omitempty"`
 	Type           string `json:"type"` // mirror, raidz, disk, file, …
 	State          string `json:"state"`
 	Path           string `json:"path,omitempty"`
@@ -329,4 +343,16 @@ type DiskRef struct {
 type PoolScrubParams struct {
 	Name   string `json:"name"`
 	Action string `json:"action"` // start atau stop
+}
+
+// PoolReplaceParams adalah parameter storage.pool_replace.
+type PoolReplaceParams struct {
+	Name    string  `json:"name"`
+	OldGUID string  `json:"old_guid"` // Vdev.GUID disk yang diganti
+	Disk    DiskRef `json:"disk"`     // disk pengganti
+}
+
+// PoolDestroyParams adalah parameter storage.pool_destroy.
+type PoolDestroyParams struct {
+	Name string `json:"name"`
 }

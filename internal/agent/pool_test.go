@@ -30,6 +30,9 @@ type zpoolFake struct {
 	createNoPool bool
 	scrubExit    int
 	scrubStderr  string
+	replaceExit  int
+	destroyExit  int
+	destroyErr   string
 }
 
 func writeZpool(t *testing.T, dir string, z zpoolFake) string {
@@ -59,6 +62,8 @@ func writeZpool(t *testing.T, dir string, z zpoolFake) string {
 		"    seen=; for a in \"$@\"; do if [ \"$seen\" = 1 ]; then echo \"$a\" >> '" + namesFile + "'; break; fi; [ \"$a\" = -- ] && seen=1; done\n" +
 		"  fi; exit " + strconv.Itoa(z.createExit) + " ;;\n" +
 		"scrub) printf '%s' " + q(z.scrubStderr) + " >&2; exit " + strconv.Itoa(z.scrubExit) + " ;;\n" +
+		"replace) exit " + strconv.Itoa(z.replaceExit) + " ;;\n" +
+		"destroy) printf '%s' " + q(z.destroyErr) + " >&2; exit " + strconv.Itoa(z.destroyExit) + " ;;\n" +
 		"esac\n"
 	if err := os.WriteFile(prog, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
@@ -104,7 +109,7 @@ func newTestPools(t *testing.T, z zpoolFake) (*Pools, string) {
 			t.Fatal(err)
 		}
 	}
-	for serial, name := range map[string]string{"SYS0": "vda", "POOL1": "vdb", "POOL2": "vdc", "NEW1": "vdd", "OLD1": "vde", "BIG1": "vdf", "SWAP1": "vdg", "LVM1": "vdh", "DM1": "vdj"} {
+	for serial, name := range map[string]string{"SYS0": "vda", "POOL1": "vdb", "POOL2": "vdc", "NEW1": "vdd", "OLD1": "vde", "BIG1": "vdf", "SWAP1": "vdg", "LVM1": "vdh", "DM1": "vdj", "OLDZ": "vdk"} {
 		if err := os.WriteFile(filepath.Join(devDir, name), nil, 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -143,7 +148,7 @@ func TestDiskUsage(t *testing.T) {
 		"vdd": "free/", "vdf": "free/",
 		"vde": "data/", // ext4 yang tidak terpasang: boleh dipakai bila penghapusan dikonfirmasi
 		"vdg": "in_use/swap", "vdh": "in_use/lvm",
-		"sdi": "free/", "vdj": "in_use/holder",
+		"sdi": "free/", "vdj": "in_use/holder", "vdk": "in_use/pool",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("usage = %v\nharus   %v", got, want)
@@ -217,7 +222,7 @@ func TestPoolsUnavailable(t *testing.T) {
 
 // ref adalah disk seperti yang dilihat pengguna; usage diambil dari fixture.
 func ref(name, serial string, size uint64, erase bool) proto.DiskRef {
-	usage := map[string]string{"vda": "in_use", "vdb": "in_use", "vdc": "in_use", "vde": "data", "vdg": "in_use", "vdh": "in_use", "vdj": "in_use"}[name]
+	usage := map[string]string{"vda": "in_use", "vdb": "in_use", "vdc": "in_use", "vde": "data", "vdg": "in_use", "vdh": "in_use", "vdj": "in_use", "vdk": "in_use"}[name]
 	if usage == "" {
 		usage = "free"
 	}
@@ -462,5 +467,105 @@ func TestPoolCreateReportsRealOutcome(t *testing.T) {
 	p, _ := newTestPools(t, zpoolFake{createExit: 1})
 	if _, err := p.PoolCreateOp()(context.Background(), params); err != nil {
 		t.Fatalf("pool terbentuk harus dilaporkan berhasil: %v", err)
+	}
+}
+
+func TestInactiveZFSLabelIsData(t *testing.T) {
+	usage := func(p *Pools) map[string]string {
+		res, err := p.st.DisksOp()(context.Background(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]string{}
+		for _, d := range res.([]proto.Disk) {
+			out[d.Name] = d.Usage + "/" + d.UsageReason
+		}
+		return out
+	}
+	// vdb dan vdc anggota pool aktif (tank); vdk berlabel pool lama.
+	p, _ := newTestPools(t, zpoolFake{status: "zpool-status.json"})
+	got := usage(p)
+	if got["vdb"] != "in_use/pool" || got["vdc"] != "in_use/pool" || got["vdk"] != "data/zfs_label" || got["vda"] != "in_use/mounted" {
+		t.Fatalf("usage = %v", got)
+	}
+	// Daftar anggota tidak terbaca: gagal-tertutup.
+	p, _ = newTestPools(t, zpoolFake{})
+	if got := usage(p); got["vdk"] != "in_use/pool" {
+		t.Fatalf("tanpa zpool status, vdk = %s", got["vdk"])
+	}
+}
+
+func TestPoolReplace(t *testing.T) {
+	replace := func(z zpoolFake, guid string, r proto.DiskRef) (string, error) {
+		p, zpool := newTestPools(t, z)
+		raw, _ := json.Marshal(proto.PoolReplaceParams{Name: "tank", OldGUID: guid, Disk: r})
+		_, err := p.PoolReplaceOp()(context.Background(), raw)
+		for _, c := range zpoolCalls(t, zpool) {
+			if c[0] == "replace" {
+				return strings.Join(c, " "), err
+			}
+		}
+		return "", err
+	}
+	z := zpoolFake{names: "tank\n", status: "zpool-status.json"}
+	// vdc (GUID 7) diganti vde yang berisi data (dikonfirmasi): butuh -f.
+	call, err := replace(z, "7", ref("vde", "OLD1", gib4, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(call, "replace -f -o ashift=12 -- tank 7 ") || !strings.HasSuffix(call, "/virtio-OLD1") {
+		t.Fatalf("zpool = %q", call)
+	}
+	// Disk berlabel pool lama boleh dipakai setelah dikonfirmasi.
+	old := ref("vdk", "OLDZ", gib4, true)
+	old.Usage = proto.DiskHasData
+	if call, err := replace(z, "6", old); err != nil || call == "" {
+		t.Fatalf("label lama: %q %v", call, err)
+	}
+	var oe *OpError
+	for name, tc := range map[string]struct {
+		guid string
+		disk proto.DiskRef
+		code string
+	}{
+		"GUID tidak ada":     {"99", ref("vdd", "NEW1", gib4, false), proto.ErrNotFound},
+		"GUID grup mirror":   {"5", ref("vdd", "NEW1", gib4, false), proto.ErrNotFound},
+		"disk anggota pool":  {"7", ref("vdb", "POOL1", gib4, true), proto.ErrDiskInUse},
+		"data tanpa konfirm": {"7", ref("vde", "OLD1", gib4, false), proto.ErrDiskHasData},
+		"GUID bukan angka":   {"7;rm", ref("vdd", "NEW1", gib4, false), proto.ErrInvalidParams},
+	} {
+		call, err := replace(z, tc.guid, tc.disk)
+		if !errors.As(err, &oe) || oe.Code != tc.code || call != "" {
+			t.Errorf("%s: err = %v, zpool = %q", name, err, call)
+		}
+	}
+	if _, err := replace(zpoolFake{names: "tank\n", status: "zpool-status.json", replaceExit: 1}, "7", ref("vdd", "NEW1", gib4, false)); !errors.As(err, &oe) || oe.Code != "pool_replace_failed" {
+		t.Fatalf("gagal: %v", err)
+	}
+}
+
+func TestPoolDestroy(t *testing.T) {
+	destroy := func(z zpoolFake, name string) (string, error) {
+		p, zpool := newTestPools(t, z)
+		raw, _ := json.Marshal(proto.PoolDestroyParams{Name: name})
+		_, err := p.PoolDestroyOp()(context.Background(), raw)
+		calls := zpoolCalls(t, zpool)
+		if len(calls) == 0 {
+			return "", err
+		}
+		return strings.Join(calls[len(calls)-1], " "), err
+	}
+	if call, err := destroy(zpoolFake{names: "tank\n"}, "tank"); err != nil || call != "destroy -- tank" {
+		t.Fatalf("%q %v", call, err)
+	}
+	var oe *OpError
+	if _, err := destroy(zpoolFake{names: "tank\n"}, "lain"); !errors.As(err, &oe) || oe.Code != proto.ErrNotFound {
+		t.Fatalf("pool tidak ada: %v", err)
+	}
+	if _, err := destroy(zpoolFake{names: "tank\n", destroyExit: 1, destroyErr: "cannot unmount '/srv/sapo/tank': pool or dataset is busy"}, "tank"); !errors.As(err, &oe) || oe.Code != proto.ErrPoolBusy {
+		t.Fatalf("sibuk: %v", err)
+	}
+	if _, err := destroy(zpoolFake{names: "tank\n"}, "-f"); !errors.As(err, &oe) || oe.Code != proto.ErrInvalidParams {
+		t.Fatalf("nama aneh: %v", err)
 	}
 }

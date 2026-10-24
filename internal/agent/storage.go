@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -38,6 +39,10 @@ type StorageTools struct {
 type Storage struct {
 	t   StorageTools
 	sem chan struct{}
+
+	// poolMembers mengembalikan perangkat anggota pool ZFS yang aktif (diisi
+	// Pools); ok=false bila tidak terbaca.
+	poolMembers func(ctx context.Context) (map[string]bool, bool)
 
 	mu      sync.Mutex
 	smart   map[string]*smartEntry
@@ -206,6 +211,15 @@ func (st *Storage) listDisks(ctx context.Context) ([]proto.Disk, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Label ZFS hanya berarti "dipakai" bila disk anggota pool aktif. Bila
+	// daftar anggota tidak terbaca, label tetap dianggap dipakai.
+	if st.poolMembers != nil {
+		if members, ok := st.poolMembers(ctx); ok {
+			for i := range disks {
+				releaseInactiveZFS(&disks[i], members)
+			}
+		}
+	}
 	st.mu.Lock()
 	st.disks, st.disksAt = disks, time.Now()
 	st.mu.Unlock()
@@ -264,7 +278,7 @@ func parseLsblk(data []byte, ignore []string) ([]proto.Disk, error) {
 			d.Path = "/dev/" + d.Name
 		}
 		appendChildren(&d.Partitions, b.Children)
-		d.Usage, d.UsageReason = diskUsage(b)
+		d.Usage, d.UsageReason, d.Reasons = diskUsage(b)
 		disks = append(disks, d)
 	}
 	sort.Slice(disks, func(i, j int) bool { return naturalLess(disks[i].Name, disks[j].Name) })
@@ -295,50 +309,85 @@ func appendChildren(dst *[]proto.Partition, children []lsblkDevice) {
 // diskUsage menilai apakah disk boleh dipakai pool baru, dari disk itu dan
 // seluruh turunannya. Urutan alasan penting: yang paling berbahaya bila
 // dihapus (sistem berkas terpasang, swap) didahulukan.
-func diskUsage(b lsblkDevice) (usage, reason string) {
+func diskUsage(b lsblkDevice) (usage, reason string, reasons []string) {
 	rank := map[string]int{proto.UsageMounted: 7, proto.UsageSwap: 6, proto.UsagePool: 5, proto.UsageRAID: 4, proto.UsageLVM: 3, proto.UsageCrypt: 2, proto.UsageHolder: 1}
 	hasData := str(b.FSType) != "" || str(b.PTType) != "" || len(b.Children) > 0
+	all := map[string]bool{}
+	add := func(r string) {
+		if r != "" {
+			all[r] = true
+			reason = pickReason(reason, r, rank)
+		}
+	}
 	var walk func(d lsblkDevice)
 	walk = func(d lsblkDevice) {
-		r := ""
 		for _, m := range d.Mountpoints {
 			switch {
 			case m == nil || *m == "":
 			case *m == "[SWAP]":
-				r = pickReason(r, proto.UsageSwap, rank)
+				add(proto.UsageSwap)
 			default:
-				r = pickReason(r, proto.UsageMounted, rank)
+				add(proto.UsageMounted)
 			}
 		}
 		switch fs := str(d.FSType); {
 		case fs == "zfs_member":
-			r = pickReason(r, proto.UsagePool, rank)
+			add(proto.UsagePool)
 		case strings.HasSuffix(fs, "_raid_member") || strings.HasPrefix(d.Type, "raid") || d.Type == "md":
 			// linux_raid_member, isw_raid_member (Intel), ddf_raid_member, …
-			r = pickReason(r, proto.UsageRAID, rank)
+			add(proto.UsageRAID)
 		case fs == "LVM2_member" || d.Type == "lvm":
-			r = pickReason(r, proto.UsageLVM, rank)
+			add(proto.UsageLVM)
 		case d.Type == "crypt":
-			r = pickReason(r, proto.UsageCrypt, rank)
+			add(proto.UsageCrypt)
 		}
-		reason = pickReason(reason, r, rank)
 		for _, c := range d.Children {
 			// Turunan selain partisi (dm, mpath, bcache, …) berarti ada
 			// perangkat lain yang memegang disk ini.
 			if c.Type != "part" {
-				reason = pickReason(reason, proto.UsageHolder, rank)
+				add(proto.UsageHolder)
 			}
 			walk(c)
 		}
 	}
 	walk(b)
+	for r := range all {
+		reasons = append(reasons, r)
+	}
+	sort.Strings(reasons)
 	switch {
 	case reason != "":
-		return proto.DiskInUse, reason
+		return proto.DiskInUse, reason, reasons
 	case hasData:
-		return proto.DiskHasData, ""
+		return proto.DiskHasData, "", reasons
 	}
-	return proto.DiskFree, ""
+	return proto.DiskFree, "", reasons
+}
+
+// releaseInactiveZFS: label ZFS di disk yang bukan anggota pool aktif
+// (members: nama perangkat kernel anggota pool yang sedang aktif) tidak
+// membuat disk "dipakai"; isinya data yang penghapusannya harus
+// dikonfirmasi. Alasan pakai lain tetap berlaku.
+func releaseInactiveZFS(d *proto.Disk, members map[string]bool) {
+	if !slices.Contains(d.Reasons, proto.UsagePool) {
+		return
+	}
+	if members[d.Name] {
+		return
+	}
+	for _, p := range d.Partitions {
+		if members[p.Name] {
+			return
+		}
+	}
+	rank := map[string]int{proto.UsageMounted: 7, proto.UsageSwap: 6, proto.UsageRAID: 4, proto.UsageLVM: 3, proto.UsageCrypt: 2, proto.UsageHolder: 1}
+	d.Reasons = slices.DeleteFunc(d.Reasons, func(r string) bool { return r == proto.UsagePool })
+	d.Usage, d.UsageReason = proto.DiskHasData, proto.UsageZFSLabel
+	for _, r := range d.Reasons {
+		if d.Usage != proto.DiskInUse || rank[r] > rank[d.UsageReason] {
+			d.Usage, d.UsageReason = proto.DiskInUse, r
+		}
+	}
 }
 
 func pickReason(cur, next string, rank map[string]int) string {

@@ -76,34 +76,88 @@ func (s *Server) handlePoolCreate(w http.ResponseWriter, r *http.Request) {
 		"pool": req.Name, "layout": req.Layout,
 		"disks": strings.Join(names, ","), "erase": strings.Join(erase, ","),
 	}
-	// Dicatat sebelum disk disentuh. Nilai dari pengguna (nama pool, nama
-	// disk) disimpan sebagai data JSON, jadi tidak bisa memalsukan baris lain.
-	if err := s.audit.Record(audit.Event{Time: s.now().UTC(), Actor: user.Username, Action: "storage.pool_create.request", IP: clientIP(r), OK: true, Detail: detail}); err != nil {
+	s.destructive(w, r, user, "storage.pool_create", detail, proto.OpStoragePoolCreate,
+		proto.PoolCreateParams{Name: req.Name, Layout: req.Layout, Disks: req.Disks})
+}
+
+// destructive menjalankan operasi sapod yang menghapus data, setelah
+// password diperiksa: permintaan dicatat di log audit lebih dulu (bila
+// gagal, operasi dibatalkan), operasi tidak ikut batal bila browser menutup
+// koneksi, lalu hasil nyatanya dicatat.
+func (s *Server) destructive(w http.ResponseWriter, r *http.Request, user auth.User, action string, detail map[string]string, op string, params any) {
+	// Nilai dari pengguna (nama pool, nama disk) disimpan sebagai data JSON,
+	// jadi tidak bisa memalsukan baris lain.
+	if err := s.audit.Record(audit.Event{Time: s.now().UTC(), Actor: user.Username, Action: action + ".request", IP: clientIP(r), OK: true, Detail: detail}); err != nil {
 		if s.log != nil {
-			s.log.Error("log audit tidak bisa ditulis; pool tidak dibuat", "err", err)
+			s.log.Error("log audit tidak bisa ditulis; operasi dibatalkan", "aksi", action, "err", err)
 		}
 		writeError(w, http.StatusInternalServerError, "audit_unavailable", "log audit tidak bisa ditulis")
 		return
 	}
-
-	// Membuat pool bisa lebih lama dari batas tulis server HTTP.
+	// Operasi pool bisa lebih lama dari batas tulis server HTTP.
 	timeout := time.Duration(s.cfg.Agent.Storage.Pools.CreateTimeoutSeconds)*time.Second + 15*time.Second
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(timeout + 15*time.Second))
-	// Tidak dibatalkan bila browser menutup koneksi: sapod tetap
-	// menyelesaikan pembuatan pool, jadi hasil di log audit harus hasil nyata.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), timeout)
 	defer cancel()
-	var pool json.RawMessage
-	err := s.agent.Call(ctx, proto.OpStoragePoolCreate, proto.PoolCreateParams{Name: req.Name, Layout: req.Layout, Disks: req.Disks}, &pool)
+	var out json.RawMessage
+	err := s.agent.Call(ctx, op, params, &out)
 	if err != nil {
 		detail["error"] = errorCode(err)
 	}
-	s.record(r, user.Username, "storage.pool_create", err == nil, detail)
+	s.record(r, user.Username, action, err == nil, detail)
 	if err != nil {
-		s.agentError(w, proto.OpStoragePoolCreate, err)
+		s.agentError(w, op, err)
 		return
 	}
-	writeRaw(w, pool)
+	writeRaw(w, out)
+}
+
+func (s *Server) handlePoolReplace(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		OldGUID  string        `json:"old_guid"`
+		Disk     proto.DiskRef `json:"disk"`
+		Password string        `json:"password"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	user, ok := s.reauth(w, r, req.Password)
+	if !ok {
+		return
+	}
+	name := r.PathValue("name")
+	detail := map[string]string{"pool": auditText(name), "old_guid": auditText(req.OldGUID), "disk": auditText(req.Disk.Name), "erase": strconv.FormatBool(req.Disk.Erase)}
+	s.destructive(w, r, user, "storage.pool_replace", detail, proto.OpStoragePoolReplace,
+		proto.PoolReplaceParams{Name: name, OldGUID: req.OldGUID, Disk: req.Disk})
+}
+
+func (s *Server) handlePoolDestroy(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ConfirmName string `json:"confirm_name"`
+		Password    string `json:"password"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	name := r.PathValue("name")
+	if req.ConfirmName != name {
+		writeErrorDetail(w, http.StatusBadRequest, "confirm_mismatch", "nama pool yang diketik ulang tidak sama", map[string]any{"field": "confirm_name"})
+		return
+	}
+	user, ok := s.reauth(w, r, req.Password)
+	if !ok {
+		return
+	}
+	s.destructive(w, r, user, "storage.pool_destroy", map[string]string{"pool": auditText(name)}, proto.OpStoragePoolDestroy,
+		proto.PoolDestroyParams{Name: name})
+}
+
+// auditText memotong nilai dari pengguna sebelum dicatat.
+func auditText(v string) string {
+	if len(v) > 64 {
+		return v[:64] + "…"
+	}
+	return v
 }
 
 func (s *Server) handlePoolScrub(w http.ResponseWriter, r *http.Request) {
@@ -120,10 +174,7 @@ func (s *Server) handlePoolScrub(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		detail["error"] = errorCode(err)
 	}
-	// Nama pool dari URL hanya dicatat bila bentuknya wajar.
-	if len(params.Name) > 64 {
-		detail["pool"] = params.Name[:64] + "…"
-	}
+	detail["pool"] = auditText(params.Name)
 	s.record(r, sess.Username, "storage.pool_scrub", err == nil, detail)
 	if err != nil {
 		s.agentError(w, proto.OpStoragePoolScrub, err)

@@ -2,7 +2,7 @@
 // Satu pool ZFS: kesehatan, kapasitas, disk penyusunnya, dan scrub.
 import { computed } from "vue"
 import { useI18n } from "vue-i18n"
-import { Database, LoaderCircle, Play, Square, TriangleAlert } from "@lucide/vue"
+import { Database, LoaderCircle, Play, RefreshCcw, Square, Trash2, TriangleAlert } from "@lucide/vue"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
@@ -11,7 +11,7 @@ import { formatBytes } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
 const props = defineProps<{ pool: Pool; busy: boolean }>()
-const emit = defineEmits<{ scrub: [action: "start" | "stop"] }>()
+const emit = defineEmits<{ scrub: [action: "start" | "stop"]; replace: [vdev: Vdev]; destroy: [] }>()
 const { t, locale } = useI18n()
 
 const size = (b: number) => formatBytes(b, locale.value, 1000)
@@ -51,6 +51,8 @@ const leaves = computed(() => {
   walk(props.pool.vdevs, "")
   return out
 })
+// Selama resilver, disk lain tidak diganti dulu (data sedang dibangun ulang).
+const resilvering = computed(() => scan.value?.function === "resilver" && running.value)
 const errors = (v: Vdev) => v.read_errors + v.write_errors + v.checksum_errors
 const vdevBad = (v: Vdev) => v.state !== "ONLINE" || errors(v) > 0
 </script>
@@ -98,9 +100,20 @@ const vdevBad = (v: Vdev) => v.state !== "ONLINE" || errors(v) > 0
       <ul class="divide-y rounded-lg border text-xs">
         <li v-for="{ vdev, group } in leaves" :key="`${group}/${vdev.name}`" :class="cn('flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 px-2.5 py-1.5', vdevBad(vdev) && 'bg-destructive/5')">
           <span class="font-mono">{{ vdev.disk || vdev.name }}</span>
-          <span :class="vdevBad(vdev) ? 'font-medium text-destructive' : 'text-muted-foreground'">
-            {{ t(`pool.vdevState.${vdev.state}`) !== `pool.vdevState.${vdev.state}` ? t(`pool.vdevState.${vdev.state}`) : vdev.state }}
-            <template v-if="errors(vdev)"> · {{ t("pool.errors", { r: vdev.read_errors, w: vdev.write_errors, c: vdev.checksum_errors }) }}</template>
+          <span class="flex items-center gap-2">
+            <span :class="vdevBad(vdev) ? 'font-medium text-destructive' : 'text-muted-foreground'">
+              {{ t(`pool.vdevState.${vdev.state}`) !== `pool.vdevState.${vdev.state}` ? t(`pool.vdevState.${vdev.state}`) : vdev.state }}
+              <template v-if="errors(vdev)"> · {{ t("pool.errors", { r: vdev.read_errors, w: vdev.write_errors, c: vdev.checksum_errors }) }}</template>
+            </span>
+            <Button
+              v-if="vdev.guid && !resilvering"
+              size="sm"
+              :variant="vdevBad(vdev) ? 'default' : 'ghost'"
+              class="h-6 px-2 text-xs"
+              @click="emit('replace', vdev)"
+            >
+              <RefreshCcw class="size-3" />{{ t("pool.replace") }}
+            </Button>
           </span>
         </li>
       </ul>
@@ -122,6 +135,11 @@ const vdevBad = (v: Vdev) => v.state !== "ONLINE" || errors(v) > 0
       <Button v-if="scan?.function !== 'resilver' || !running" size="sm" variant="outline" :disabled="busy" @click="emit('scrub', running ? 'stop' : 'start')">
         <LoaderCircle v-if="busy" class="animate-spin" /><Square v-else-if="running" /><Play v-else />
         {{ running ? t("pool.scan.stop") : t("pool.scan.start") }}
+      </Button>
+    </div>
+    <div class="flex justify-end border-t pt-3">
+      <Button size="sm" variant="ghost" class="text-destructive hover:text-destructive" @click="emit('destroy')">
+        <Trash2 />{{ t("pool.destroy") }}
       </Button>
     </div>
   </li>

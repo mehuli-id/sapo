@@ -3,7 +3,8 @@
 # sapo-api dan sapod sehat dan wizard setup awal siap. Setelah itu setup awal
 # dijalankan lewat API dan pool ZFS mirror dibuat di dua disk virtual
 # sementara (file di samping ISO, dihapus di akhir); disk ketiga berisi
-# ext4 dan harus ditolak tanpa konfirmasi penghapusan (ADR 0005).
+# ext4 dan harus ditolak tanpa konfirmasi penghapusan (ADR 0005). Setelah
+# scrub, satu disk diganti disk ketiga (resilver), lalu pool dihapus.
 # HTTPS wajib (ADR 0004): HTTP hanya boleh menyajikan halaman petunjuk, dan
 # sidik jari yang diumumkan panel harus sama dengan sertifikat yang dipakai.
 # Pemakaian: packaging/iso/smoke-test.sh dist/sapo-dev_<versi>_amd64.iso
@@ -159,4 +160,45 @@ done
 json 's=v["pools"][0]["scan"]; assert s["function"]=="scrub" and s["state"]=="finished" and s["errors"]==0, s' <<<"$pools" \
   || fail "scrub tidak selesai bersih: $pools"
 echo "scrub selesai tanpa kesalahan"
+
+# Ganti disk SAPOUJI2 dengan SAPOUJI3 (berisi ext4, penghapusan dikonfirmasi).
+disks_json="$(api GET /api/v1/storage/disks)"
+old_disk="$(json "print([x['name'] for x in v if x['serial']=='SAPOUJI2'][0])" <<<"$disks_json")"
+pools="$(api GET /api/v1/storage/pools)"
+old_guid="$(json "print([c['guid'] for t in v['pools'][0]['vdevs'] for c in t['children'] if c['disk']=='$old_disk'][0])" <<<"$pools")"
+new_ref="$(refs "('SAPOUJI3',True)" | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)[0]))')"
+res="$(api POST /api/v1/storage/pools/uji/replace "{\"old_guid\":\"$old_guid\",\"disk\":$new_ref,\"password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "ganti disk: $res"
+for _ in $(seq 1 60); do
+  pools="$(api GET /api/v1/storage/pools)"
+  json 'import sys
+p=v["pools"][0]; s=p.get("scan") or {}
+leaves=[c for t in p["vdevs"] for c in t.get("children",[])]
+sys.exit(0 if s.get("function")=="resilver" and s.get("state")=="finished" and len(leaves)==2 and p["health"]=="ONLINE" else 1)' <<<"$pools" && break
+  sleep 2
+done
+disks_json="$(api GET /api/v1/storage/disks)"
+new_disk="$(json "print([x['name'] for x in v if x['serial']=='SAPOUJI3'][0])" <<<"$disks_json")"
+json "p=v['pools'][0]; leaves=sorted(c['disk'] for t in p['vdevs'] for c in t['children'])
+assert p['health']=='ONLINE' and p['scan']['function']=='resilver' and p['scan']['state']=='finished', p
+assert '$new_disk' in leaves and '$old_disk' not in leaves, leaves" <<<"$pools" || fail "resilver tidak selesai dengan benar: $pools"
+# Disk lama yang dilepas tidak lagi dianggap anggota pool.
+json "u={x['serial']:(x['usage'],x.get('usage_reason','')) for x in v}
+assert u['SAPOUJI2'][0]!='in_use' and u['SAPOUJI3']==('in_use','pool'), u" <<<"$disks_json" \
+  || fail "status disk setelah ganti salah: $disks_json"
+echo "disk $old_disk diganti $new_disk, resilver selesai"
+
+# Hapus pool: nama salah ditolak, lalu dihapus sungguhan.
+res="$(api POST /api/v1/storage/pools/uji/destroy "{\"confirm_name\":\"ujj\",\"password\":\"$PASS\"}")"
+[[ "$res" == *'"confirm_mismatch"'*' 400' ]] || fail "nama salah harus ditolak: $res"
+res="$(api POST /api/v1/storage/pools/uji/destroy "{\"confirm_name\":\"uji\",\"password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "hapus pool: $res"
+pools="$(api GET /api/v1/storage/pools)"
+json 'assert v["pools"]==[], v' <<<"$pools" || fail "pool masih ada: $pools"
+# Label pool terhapus tersisa: disk tampil berisi data, boleh dipakai lagi.
+disks_json="$(api GET /api/v1/storage/disks)"
+json "u={x['serial']:(x['usage'],x.get('usage_reason','')) for x in v}
+assert u['SAPOUJI1']==('data','zfs_label') and u['SAPOUJI3']==('data','zfs_label'), u" <<<"$disks_json" \
+  || fail "disk pool terhapus harus berstatus data/zfs_label: $disks_json"
+echo "pool dihapus; disknya tampil berisi data (label ZFS lama)"
 echo "Uji asap lulus."

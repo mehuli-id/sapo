@@ -79,6 +79,8 @@ function validateField(f: WizardField): string {
   // Kotak centang kode cadangan punya pesan sendiri (bukan "wajib diisi").
   if (f.type === "recovery-codes") return v === "yes" ? "" : t("recovery.mustConfirm")
   if (f.type === "erase-confirm") return v === "yes" ? "" : t("pool.mustConfirmErase")
+  if (f.type === "acknowledge") return v === "yes" ? "" : t("wizard.mustAcknowledge")
+  if (f.type === "confirm" && f.match_context === "pool") return v === props.context?.pool?.name ? "" : t("wizard.mismatch")
   if (f.type === "disk-select" && f.required && !v) return t("pool.pickDisks")
   if (f.type === "pool-layout") {
     const l = props.context?.pools?.layouts.find((x) => x.id === v)
@@ -172,7 +174,7 @@ function onLanguage(code: string) {
 
 // Ringkasan berisi isian dari langkah biasa; isian di langkah ringkasan itu
 // sendiri (konfirmasi, password) tidak diulang.
-const hiddenInReview = new Set(["password-confirm", "confirm", "erase-confirm", "current-password"])
+const hiddenInReview = new Set(["password-confirm", "confirm", "erase-confirm", "current-password", "acknowledge"])
 const size = (b: number) => formatBytes(b, locale.value, 1000)
 
 const reviewRows = computed(() =>
@@ -245,7 +247,7 @@ const reviewRows = computed(() =>
 
     <form class="space-y-5" novalidate @submit.prevent="next">
       <template v-if="step.type === 'review'">
-        <dl class="divide-y rounded-xl border text-sm">
+        <dl v-if="reviewRows.length" class="divide-y rounded-xl border text-sm">
           <div v-for="row in reviewRows" :key="row.key" class="flex justify-between gap-4 px-4 py-3">
             <dt class="text-muted-foreground">{{ row.label }}</dt>
             <dd class="text-right font-medium break-all">{{ row.value }}</dd>
@@ -255,7 +257,7 @@ const reviewRows = computed(() =>
 
       <div v-for="f in step.fields ?? []" :key="f.key" class="space-y-1.5">
         <!-- Label kode cadangan ada di samping kotak centangnya. -->
-        <Label v-if="f.type !== 'recovery-codes' && f.type !== 'erase-confirm'" :for="`wz-${f.key}`">{{ pick(f.label, locale) }}</Label>
+        <Label v-if="f.type !== 'recovery-codes' && f.type !== 'erase-confirm' && f.type !== 'acknowledge'" :for="`wz-${f.key}`">{{ pick(f.label, locale) }}</Label>
 
         <!-- Bahasa -->
         <div v-if="f.type === 'language'" :id="`wz-${f.key}`" role="radiogroup" class="grid gap-2 sm:grid-cols-2">
@@ -311,6 +313,7 @@ const reviewRows = computed(() =>
           v-model="values[f.key]!"
           :disks="context?.disks ?? []"
           :allow-removable="!!context?.pools?.allow_removable"
+          :max="f.max"
           :input-id="`wz-${f.key}`"
           :invalid="!!errors[f.key]"
         />
@@ -333,6 +336,18 @@ const reviewRows = computed(() =>
           :label="pick(f.label, locale)"
           :input-id="`wz-${f.key}`"
         />
+
+        <!-- Kotak centang pernyataan (misalnya "saya mengerti data hilang") -->
+        <label v-else-if="f.type === 'acknowledge'" class="flex items-start gap-2 text-sm">
+          <input
+            :id="`wz-${f.key}`"
+            type="checkbox"
+            class="mt-0.5 size-4 accent-destructive"
+            :checked="values[f.key] === 'yes'"
+            @change="values[f.key] = ($event.target as HTMLInputElement).checked ? 'yes' : ''"
+          />
+          <span>{{ pick(f.label, locale) }}</span>
+        </label>
 
         <!-- Password -->
         <div v-else-if="f.type === 'password' || f.type === 'password-confirm' || f.type === 'current-password'" class="relative">

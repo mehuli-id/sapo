@@ -151,3 +151,49 @@ func mustRead(t *testing.T, p string) string {
 	}
 	return string(b)
 }
+
+func TestPoolReplaceAndDestroy(t *testing.T) {
+	agent := &fakeAgent{results: map[string]any{
+		proto.OpStoragePoolReplace: map[string]bool{"ok": true},
+		proto.OpStoragePoolDestroy: map[string]bool{"ok": true},
+	}}
+	h := newHarness(t, agent)
+	h.runSetup()
+	disk := proto.DiskRef{Name: "vdd", Serial: "X", SizeBytes: 1 << 32, Usage: proto.DiskFree}
+
+	// Ganti disk: password wajib.
+	if rec := h.do(http.MethodPost, "/api/v1/storage/pools/tank/replace", map[string]any{"old_guid": "7", "disk": disk, "password": "salah sekali ini"}); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("password salah: %d", rec.Code)
+	}
+	if rec := h.do(http.MethodPost, "/api/v1/storage/pools/tank/replace", map[string]any{"old_guid": "7", "disk": disk, "password": adminPassword}); rec.Code != http.StatusOK {
+		t.Fatalf("ganti disk: %d %s", rec.Code, rec.Body)
+	}
+	if p, _ := agent.params[proto.OpStoragePoolReplace].(proto.PoolReplaceParams); p.Name != "tank" || p.OldGUID != "7" || p.Disk.Name != "vdd" {
+		t.Fatalf("parameter = %+v", agent.params[proto.OpStoragePoolReplace])
+	}
+
+	// Hapus pool: nama diketik ulang dan password.
+	if rec := h.do(http.MethodPost, "/api/v1/storage/pools/tank/destroy", map[string]string{"confirm_name": "tnak", "password": adminPassword}); rec.Code != http.StatusBadRequest || errCode(rec) != "confirm_mismatch" {
+		t.Fatalf("konfirmasi salah: %d", rec.Code)
+	}
+	if _, called := agent.params[proto.OpStoragePoolDestroy]; called {
+		t.Fatal("sapod tidak boleh dipanggil")
+	}
+	if rec := h.do(http.MethodPost, "/api/v1/storage/pools/tank/destroy", map[string]string{"confirm_name": "tank", "password": adminPassword}); rec.Code != http.StatusOK {
+		t.Fatalf("hapus pool: %d %s", rec.Code, rec.Body)
+	}
+	b, _ := os.ReadFile(filepath.Join(h.data, "audit.log"))
+	for _, a := range []string{"storage.pool_replace.request", `"storage.pool_replace","ip"`, "storage.pool_destroy.request", `"storage.pool_destroy","ip"`} {
+		if !strings.Contains(string(b), a) {
+			t.Fatalf("log audit tanpa %s:\n%s", a, b)
+		}
+	}
+}
+
+func TestPoolReplaceAndDestroyWizardsLoad(t *testing.T) {
+	for _, id := range []string{"pool-replace", "pool-destroy"} {
+		if _, err := LoadWizard("../../wizards", id); err != nil {
+			t.Fatalf("%s: %v", id, err)
+		}
+	}
+}

@@ -20,7 +20,8 @@ Membuat pool adalah operasi pertama `sapod` yang menghapus data. Kesalahan memil
   - `storage.pools` membaca `zpool list -H -p` dan `zpool status -j --json-int` (OpenZFS 2.3). Hasilnya: kesehatan pool, kapasitas, pohon vdev dengan disk kernelnya, galat, dan scrub atau resilver.
   - `storage.pool_create` membuat pool.
   - `storage.pool_scrub` memulai atau menghentikan scrub.
-  - Ganti disk dan hapus pool menyusul dengan aturan konfirmasi yang sama.
+  - `storage.pool_replace` mengganti satu disk (ditunjuk dengan GUID ZFS, juga bila disknya hilang) dengan disk lain; ZFS lalu membangun ulang data (resilver).
+  - `storage.pool_destroy` menghapus pool (`zpool destroy` tanpa `-f`, jadi pool yang sedang dipakai tidak dihapus).
 - **`sapod` memeriksa ulang semuanya sebelum `zpool create`,** tanpa mempercayai panel atau `sapo-api`:
   - nama pool: huruf kecil, maksimal 32 karakter, bukan nama cadangan ZFS, dan belum ada;
   - susunan dan jumlah disk sesuai konfigurasi;
@@ -43,6 +44,8 @@ Membuat pool adalah operasi pertama `sapod` yang menghapus data. Kesalahan memil
   - konfirmasi penghapusan.
 
   Hanya administrator yang boleh. Permintaan dicatat di log audit sebelum disk disentuh, lalu hasilnya dicatat lagi. Bila log audit tidak bisa ditulis, pool tidak dibuat. `sapod` juga mencatat perintah dan perangkatnya di log-nya.
+- **Disk pengganti diperiksa seketat disk untuk pool baru** (identitas, status pakai, `O_EXCL`, konfirmasi penghapusan). Menghapus pool butuh nama pool diketik ulang dan password. Keduanya dicatat di log audit sebelum dijalankan, sama dengan membuat pool.
+- **Label ZFS hanya berarti "dipakai" bila disknya anggota pool yang aktif** (dibaca dari `zpool status`). Label dari pool yang sudah dihapus, disk lama yang dilepas setelah resilver, atau disk dari NAS lain membuat disk berstatus `data` (`zfs_label`): boleh dipakai lagi setelah penghapusan dikonfirmasi. Bila `zpool status` tidak terbaca, label tetap dianggap dipakai. Label tidak dihapus saat pool dihapus, sehingga pool yang terhapus tidak sengaja masih bisa dipulihkan (`zpool import -D`) selama disknya belum dipakai lagi.
 - **Wizard "Buat pool penyimpanan"** (`wizards/pool-create.yaml`) memakai jenis isian baru: `disk-select`, `pool-layout`, `erase-confirm`, `confirm`, dan `current-password`.
   - Panel menyarankan susunan menurut jumlah disk: 2 disk mirror, 3 disk RAID-Z1, 4 disk atau lebih RAID-Z2.
   - Panel memperkirakan kapasitas dan jumlah disk yang boleh rusak.
@@ -62,7 +65,7 @@ Membuat pool adalah operasi pertama `sapod` yang menghapus data. Kesalahan memil
 
 ## Konsekuensi
 
-- ZFS butuh `zfs-dkms` (contrib, CDDL), jadi modul dikompilasi di mesin pengguna (ADR 0001). ISO dev memasangnya dan memeriksa modulnya saat build. Uji asap QEMU membuat pool mirror sungguhan di disk virtual lewat API, lalu menjalankan scrub.
-- Disk dari pool ZFS lain (misalnya NAS lama) atau RAID mdadm yang berhenti belum bisa dipakai atau diimpor dari panel. Itu menunggu fitur impor pool dan dukungan mdadm.
+- ZFS butuh `zfs-dkms` (contrib, CDDL), jadi modul dikompilasi di mesin pengguna (ADR 0001). ISO dev memasangnya dan memeriksa modulnya saat build. Uji asap QEMU membuat pool mirror sungguhan di disk virtual lewat API, menjalankan scrub, mengganti satu disk sampai resilver selesai, lalu menghapus pool.
+- Pool dari NAS lain belum bisa diimpor dari panel (disknya hanya bisa dihapus dan dipakai ulang). RAID mdadm yang berhenti tetap dianggap dipakai sampai dukungan mdadm ada.
 - Disk tanpa nomor seri dan WWN (sebagian disk virtual dan adaptor USB murah) hanya dikenali dari nama, ukuran, dan status pakainya.
 - `storage.pools` bergantung pada format JSON OpenZFS 2.3 (Debian trixie). Bila formatnya berubah, daftar pool dan kapasitas tetap tampil dari `zpool list`.
