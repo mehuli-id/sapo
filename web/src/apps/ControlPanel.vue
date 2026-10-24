@@ -3,9 +3,10 @@
 // berbagi file (SMB, NFS), serta waktu dan tanggal.
 import { computed, onMounted, onUnmounted, reactive, ref } from "vue"
 import { useI18n } from "vue-i18n"
-import { CircleCheck, Clock, LoaderCircle, Share2, TriangleAlert } from "@lucide/vue"
+import { CircleCheck, Clock, LoaderCircle, PackageCheck, Share2, TriangleAlert } from "@lucide/vue"
 import { findApp, iconFor } from "@/apps/registry"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useLauncher } from "@/composables/useLauncher"
 import { api, ApiError } from "@/lib/api"
@@ -97,7 +98,54 @@ async function saveTime() {
   }
 }
 
+// --- Pembaruan sistem ---
+type Pkg = { name: string; from?: string; to: string }
+type UpdStatus = Awaited<ReturnType<typeof api.updatesStatus>>
+const upd = ref<UpdStatus | null>(null)
+const pkgs = ref<Pkg[] | null>(null)
+const checking = ref(false)
+const updError = ref("")
+const updPassword = ref("")
+const installing = ref(false)
+let updTimer: number | undefined
+onUnmounted(() => window.clearTimeout(updTimer))
+async function pollUpdates() {
+  try {
+    upd.value = await api.updatesStatus()
+  } catch {
+    // Panel mungkin sedang dinyalakan ulang (paket Sapo diperbarui): coba lagi.
+  }
+  // Selesai: unit tidak berjalan lagi dan hasilnya sudah ditulis.
+  if (installing.value && upd.value && !upd.value.running && upd.value.last?.finished_at) installing.value = false
+  if (installing.value || upd.value?.running) updTimer = window.setTimeout(pollUpdates, 3000)
+}
+async function check() {
+  checking.value = true
+  updError.value = ""
+  try {
+    pkgs.value = (await api.checkUpdates()).packages
+  } catch (e) {
+    updError.value = message(e)
+  } finally {
+    checking.value = false
+  }
+}
+const sapoUpdate = computed(() => pkgs.value?.some((p) => p.name === "sapo"))
+async function install() {
+  updError.value = ""
+  try {
+    await api.installUpdates(updPassword.value)
+    updPassword.value = ""
+    pkgs.value = null
+    installing.value = true
+    pollUpdates()
+  } catch (e) {
+    updError.value = message(e)
+  }
+}
+
 onMounted(async () => {
+  pollUpdates()
   api.services().then((s) => (services.value = s), (e) => (svcError.value = message(e)))
   loadTime()
   clock = window.setInterval(() => (tick.value = Date.now()), 30_000)
@@ -157,6 +205,40 @@ onMounted(async () => {
       </div>
       <p v-if="svcMsg" class="flex items-center gap-2 text-sm"><CircleCheck class="size-4 text-emerald-600" />{{ svcMsg }}</p>
       <p v-if="svcError" class="flex items-center gap-2 text-sm text-destructive" role="alert"><TriangleAlert class="size-4" />{{ svcError }}</p>
+    </section>
+
+    <!-- Pembaruan sistem -->
+    <section class="space-y-3 rounded-xl border p-4">
+      <h2 class="flex items-center gap-2 text-sm font-medium"><PackageCheck class="size-4 text-muted-foreground" />{{ t("controlPanel.updates") }}</h2>
+      <p class="text-xs text-muted-foreground">{{ t("controlPanel.updatesHelp") }}</p>
+      <div v-if="upd?.running || installing" class="space-y-2">
+        <p class="flex items-center gap-2 text-sm"><LoaderCircle class="size-4 animate-spin" />{{ t("controlPanel.installing") }}</p>
+      </div>
+      <p v-else-if="upd?.last?.finished_at" :class="['flex items-center gap-2 text-sm', upd.last.ok ? '' : 'text-destructive']">
+        <CircleCheck v-if="upd.last.ok" class="size-4 text-emerald-600" /><TriangleAlert v-else class="size-4" />
+        {{ upd.last.ok ? t("controlPanel.installed", { when: new Date(upd.last.finished_at).toLocaleString(locale) }) : t("controlPanel.installFailed", { code: upd.last.exit_code }) }}
+      </p>
+      <details v-if="upd?.log.length" class="text-xs" :open="installing || upd?.running">
+        <summary class="cursor-pointer text-muted-foreground">{{ t("controlPanel.updateLog") }}</summary>
+        <pre class="mt-1 max-h-48 overflow-auto rounded-lg bg-muted p-2 font-mono whitespace-pre-wrap">{{ upd.log.join("\n") }}</pre>
+      </details>
+      <template v-if="!upd?.running && !installing">
+        <Button size="sm" variant="outline" :disabled="checking" @click="check"><LoaderCircle v-if="checking" class="animate-spin" />{{ t("controlPanel.checkUpdates") }}</Button>
+        <p v-if="pkgs && !pkgs.length" class="flex items-center gap-2 text-sm"><CircleCheck class="size-4 text-emerald-600" />{{ t("controlPanel.upToDate") }}</p>
+        <form v-else-if="pkgs" class="space-y-3" @submit.prevent="install">
+          <p class="text-sm">{{ t("controlPanel.available", { count: pkgs.length }) }}</p>
+          <ul class="max-h-40 overflow-auto rounded-lg bg-muted p-2 font-mono text-xs">
+            <li v-for="p in pkgs" :key="p.name">{{ p.name }} {{ p.from ? `${p.from} → ` : "" }}{{ p.to }}</li>
+          </ul>
+          <p v-if="sapoUpdate" class="rounded-lg border border-amber-500/40 bg-amber-500/5 p-2.5 text-xs">{{ t("controlPanel.sapoUpdate") }}</p>
+          <div class="space-y-1.5">
+            <Label for="cp-upd-pw">{{ t("account.password") }}</Label>
+            <Input id="cp-upd-pw" v-model="updPassword" type="password" autocomplete="current-password" class="max-w-xs" />
+          </div>
+          <Button type="submit" size="sm" :disabled="!updPassword">{{ t("controlPanel.install") }}</Button>
+        </form>
+      </template>
+      <p v-if="updError" class="flex items-center gap-2 text-sm text-destructive" role="alert"><TriangleAlert class="size-4" />{{ updError }}</p>
     </section>
 
     <!-- Waktu dan tanggal -->

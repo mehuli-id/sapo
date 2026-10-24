@@ -26,6 +26,10 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "fs-helper" {
 		os.Exit(agent.FSHelperMain(os.Stdin, os.Stdout))
 	}
+	// Pemasangan pembaruan (dijalankan systemd-run oleh sapod sendiri).
+	if len(os.Args) > 1 && os.Args[1] == "apt-run" {
+		os.Exit(agent.AptRunMain(os.Args[2:]))
+	}
 	cfgPath := flag.String("config", config.DefaultPath, "lokasi sapo.yaml milik admin")
 	defaultsPath := flag.String("defaults", "", "lokasi nilai bawaan paket (misalnya "+config.DefaultsPath+")")
 	socket := flag.String("socket", "", "timpa agent.socket (untuk pengembangan)")
@@ -122,6 +126,15 @@ func main() {
 		Timeout: time.Duration(fc.TimeoutSeconds) * time.Second, DeleteTimeout: time.Duration(fc.DeleteTimeoutSeconds) * time.Second,
 		IDMin: ac.IDMin, IDMax: ac.IDMax,
 	}, shares, accounts.Managed)
+	uc := cfg.Agent.Updates
+	updates := agent.NewUpdates(agent.UpdatesTools{
+		AptGet: uc.AptGet, SystemdRun: uc.SystemdRun, Systemctl: cfg.Agent.Shares.Systemctl, Self: self,
+		Unit: uc.Unit, LogFile: uc.LogFile, ResultFile: uc.ResultFile,
+		CheckTimeout: time.Duration(uc.CheckTimeoutSeconds) * time.Second,
+	})
+	reg.Register(proto.OpUpdatesCheck, updates.CheckOp())
+	reg.Register(proto.OpUpdatesInstall, updates.InstallOp())
+	reg.Register(proto.OpUpdatesStatus, updates.StatusOp())
 	reg.Register(proto.OpFilesList, files.ListOp())
 	reg.Register(proto.OpFilesMkdir, files.MkdirOp())
 	reg.Register(proto.OpFilesRename, files.RenameOp())

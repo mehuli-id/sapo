@@ -43,6 +43,7 @@ Pengaturan jaringan dari panel (ADR 0009): nama host, DHCP/alamat tetap, DNS; `/
 Resource Monitor: `system.stats` di `sapod` (sampel /proc hanya selama ada yang membaca), grafik CPU, memori, jaringan, disk di panel.
 File Station (ADR 0010): operasi file dijalankan `sapod fs-helper` sebagai akun Linux pengguna (izin ditegakkan kernel), path lewat `openat2` di bawah akar folder, isi file lewat file descriptor (SCM_RIGHTS) ke `sapo-api`.
 Control Panel: pintasan aplikasi pengaturan, SMB/NFS menyala/mati (settings.json di sapo-api, `SMBOff`/`NFSOff` di shares.apply), zona waktu dan NTP (`time.*` lewat timedatectl).
-Berikutnya (urutan disepakati): pembaruan sistem (APT) di Control Panel, App Center, Sapo Drive; lalu:
+Pembaruan sistem (ADR 0011): periksa (`apt-get update` + simulasi) dan pasang (`apt-get upgrade --with-new-pkgs`, tanpa menghapus paket) lewat `systemd-run` di unit `sapo-updates` tersendiri (`sapod apt-run`), agar tidak terputus saat paket Sapo sendiri me-restart `sapod`.
+Berikutnya (urutan disepakati): App Center, Sapo Drive; lalu:
 1. Snapshot ZFS terjadwal untuk shared folder (dengan pemulihan file).
 2. Installer ke disk (ISO sekarang hanya berjalan dari RAM).

@@ -14,3 +14,4 @@ Setiap keputusan arsitektur penting dicatat di sini sebagai file bernomor (`NNNN
 | [0008](0008-console-recovery.md) | Menu darurat di konsol NAS (reset password admin, jaringan, restart) | Diterima |
 | [0009](0009-network-settings.md) | Pengaturan jaringan dari panel dengan konfirmasi dan pengembalian otomatis | Diterima |
 | [0010](0010-file-station.md) | File Station: operasi file sebagai akun pengguna, openat2, file descriptor | Diterima |
+| [0011](0011-system-updates.md) | Pembaruan sistem dari panel di unit systemd tersendiri | Diterima |

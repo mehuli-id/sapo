@@ -297,3 +297,20 @@ func TestControlPanelServices(t *testing.T) {
 		t.Fatalf("time.set = %+v", p)
 	}
 }
+
+func TestUpdatesAPI(t *testing.T) {
+	agent := shareAgent()
+	agent.results[proto.OpUpdatesCheck] = proto.UpdatesCheckResult{Packages: []proto.UpdatePackage{{Name: "curl", To: "8.14.1-2"}}}
+	agent.results[proto.OpUpdatesInstall] = map[string]bool{"ok": true}
+	h := newHarness(t, agent)
+	h.runSetup()
+	if rec := h.do(http.MethodPost, "/api/v1/updates/check", nil); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "curl") {
+		t.Fatalf("periksa: %d %s", rec.Code, rec.Body)
+	}
+	if rec := h.do(http.MethodPost, "/api/v1/updates/install", map[string]string{}); rec.Code != http.StatusUnauthorized || agent.called(proto.OpUpdatesInstall) {
+		t.Fatalf("pasang tanpa password: %d", rec.Code)
+	}
+	if rec := h.do(http.MethodPost, "/api/v1/updates/install", map[string]string{"admin_password": adminPassword}); rec.Code != http.StatusOK {
+		t.Fatalf("pasang: %d %s", rec.Code, rec.Body)
+	}
+}

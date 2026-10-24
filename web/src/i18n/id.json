@@ -325,7 +325,8 @@
     "system_sync_failed": "Perubahan tersimpan, tetapi belum bisa diterapkan ke sistem. Coba lagi sebentar.",
     "password_invalid": "Password tidak boleh berisi karakter kendali (misalnya tab atau baris baru).",
     "nfs_invalid": "Pengaturan NFS tidak valid: pilih pengguna dan isi alamat IP atau jaringan klien (misalnya 192.168.1.0/24). Nama komputer dan jaringan yang terlalu luas tidak diterima.",
-    "invalid_params": "Isian tidak valid: {message}"
+    "invalid_params": "Isian tidak valid: {message}",
+    "updates_failed": "Pembaruan gagal: {message}"
   },
   "pool": {
     "title": "Pool penyimpanan",
@@ -653,6 +654,17 @@
     "ntpOff": "Sinkronisasi jam otomatis mati.",
     "timeSaved": "Pengaturan waktu disimpan.",
     "confirmOff": "Matikan {name}? Semua komputer yang sedang membuka folder lewat layanan ini akan terputus.",
-    "turnOff": "Matikan"
+    "turnOff": "Matikan",
+    "updates": "Pembaruan sistem",
+    "updatesHelp": "Memperbarui paket Debian dan Sapo dari repo resmi. Paket tidak pernah dihapus, dan pengaturan yang diubah admin dipertahankan.",
+    "checkUpdates": "Periksa pembaruan",
+    "upToDate": "Sistem sudah terbaru.",
+    "available": "{count} paket bisa diperbarui:",
+    "sapoUpdate": "Sapo sendiri ikut diperbarui: panel berhenti sebentar dan tersambung lagi sendiri.",
+    "install": "Pasang pembaruan",
+    "installing": "Memasang pembaruan… Jendela ini boleh ditutup; pemasangan tetap berjalan.",
+    "installed": "Pembaruan terakhir dipasang {when}.",
+    "installFailed": "Pemasangan pembaruan terakhir gagal (kode {code}). Lihat log.",
+    "updateLog": "Log pemasangan"
   }
 }
