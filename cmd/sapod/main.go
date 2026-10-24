@@ -74,6 +74,8 @@ func main() {
 	reg.Register(proto.OpStoragePools, pools.PoolsOp())
 	reg.Register(proto.OpStoragePoolCreate, pools.PoolCreateOp())
 	reg.Register(proto.OpStoragePoolScrub, pools.PoolScrubOp())
+	reg.Register(proto.OpStoragePoolReplace, pools.PoolReplaceOp())
+	reg.Register(proto.OpStoragePoolDestroy, pools.PoolDestroyOp())
 	reg.Register(proto.OpConsolePanelAddress, agent.ConsolePanelAddressOp(agent.ConsoleTools{
 		IssueFile: cfg.Agent.Console.IssueFile,
 		Agetty:    cfg.Agent.Console.Agetty,

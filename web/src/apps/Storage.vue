@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useSession } from "@/composables/useSession"
-import type { Disk, PoolsResult, Smart, SmartStatus, Wizard } from "@/lib/api"
+import type { Disk, Pool, PoolsResult, Smart, SmartStatus, Vdev, Wizard } from "@/lib/api"
 import { api, ApiError, wizardActions } from "@/lib/api"
 import { formatBytes } from "@/lib/format"
 import { ineligibleReason } from "@/lib/pool"
@@ -20,9 +20,12 @@ const pools = ref<PoolsResult | null>(null)
 const poolsError = ref<string | null>(null)
 const scrubbing = reactive<Record<string, boolean>>({})
 const actionError = ref("")
-const created = ref("")
-// Wizard pool baru tampil menggantikan daftar selama dibuka.
+// Pesan berhasil terakhir (kunci i18n dan nama pool).
+const done = ref<{ key: string; name: string } | null>(null)
+// Wizard pool (buat, ganti disk, hapus) tampil menggantikan daftar selama
+// dibuka, beserta pool dan disk yang sedang dikerjakan.
 const wizard = ref<Wizard | null>(null)
+const target = ref<{ pool?: Pool; vdev?: Vdev }>({})
 const wizardFailed = ref(false)
 const error = ref<string | null>(null)
 const loading = ref(false)
@@ -86,27 +89,37 @@ async function scrub(name: string, action: "start" | "stop") {
   }
 }
 
-async function openWizard() {
+async function openWizard(id: "pool-create" | "pool-replace" | "pool-destroy", on: { pool?: Pool; vdev?: Vdev } = {}) {
   wizardFailed.value = false
-  created.value = ""
+  done.value = null
   try {
     // Daftar disk dibaca ulang: wizard harus memakai keadaan terbaru.
     await load()
-    wizard.value = await api.wizard("pool-create")
+    target.value = on
+    wizard.value = await api.wizard(id)
   } catch {
     wizardFailed.value = true
   }
 }
 
+const wizardContext = () => ({ disks: disks.value ?? [], pools: pools.value ?? undefined, ...target.value })
+
 async function submitWizard(values: Record<string, string>) {
   const action = wizardActions[wizard.value!.action]
   if (!action) throw new Error(`tindakan wizard tidak dikenal: ${wizard.value!.action}`)
-  return action(values, { disks: disks.value ?? [], pools: pools.value ?? undefined })
+  return action(values, wizardContext())
 }
 
-function wizardDone(name: string) {
+const doneKey: Record<string, string> = {
+  "storage.pool_create": "pool.created",
+  "storage.pool_replace": "pool.replaced",
+  "storage.pool_destroy": "pool.destroyed",
+}
+
+function wizardDone(values: Record<string, string>) {
+  done.value = { key: doneKey[wizard.value!.action] ?? "pool.created", name: values.name || target.value.pool?.name || "" }
   wizard.value = null
-  created.value = name
+  target.value = {}
   load()
 }
 
@@ -155,15 +168,19 @@ const num = (n: number) => new Intl.NumberFormat(locale.value).format(n)
 
 <template>
   <div v-if="wizard" class="p-4">
-    <h2 class="mb-4 text-sm font-medium text-muted-foreground">{{ wizard.title[locale] ?? wizard.title.en }}</h2>
+    <h2 class="mb-4 text-sm font-medium text-muted-foreground">
+      <template v-if="target.vdev && target.pool">{{ t("pool.replaceTitle", { disk: target.vdev.disk || target.vdev.name, pool: target.pool.name }) }}</template>
+      <template v-else-if="target.pool">{{ t("pool.destroyTitle", { pool: target.pool.name }) }}</template>
+      <template v-else>{{ wizard.title[locale] ?? wizard.title.en }}</template>
+    </h2>
     <WizardRunner
       :wizard="wizard"
       :policy="policy"
       :submit="submitWizard"
-      :context="{ disks: disks ?? [], pools: pools ?? undefined }"
+      :context="wizardContext()"
       cancelable
       @cancel="wizard = null"
-      @done="(v) => wizardDone(v.name ?? '')"
+      @done="wizardDone"
     />
   </div>
 
@@ -179,10 +196,10 @@ const num = (n: number) => new Intl.NumberFormat(locale.value).format(n)
     <section class="space-y-3">
       <div class="flex items-center justify-between gap-3">
         <h3 class="text-sm font-semibold">{{ t("pool.title") }}</h3>
-        <Button v-if="pools?.available" size="sm" :disabled="!usableDisks()" @click="openWizard"><Plus />{{ t("pool.create") }}</Button>
+        <Button v-if="pools?.available" size="sm" :disabled="!usableDisks()" @click="openWizard('pool-create')"><Plus />{{ t("pool.create") }}</Button>
       </div>
-      <p v-if="created" class="flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/5 p-3 text-sm">
-        <CircleCheck class="size-4 shrink-0 text-emerald-600" />{{ t("pool.created", { name: created }) }}
+      <p v-if="done" class="flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/5 p-3 text-sm">
+        <CircleCheck class="size-4 shrink-0 text-emerald-600" />{{ t(done.key, { name: done.name }) }}
       </p>
       <p v-if="wizardFailed || actionError" class="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm">{{ actionError || t("errors.generic") }}</p>
       <p v-if="poolsError" class="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm">{{ poolsError }}</p>
@@ -194,7 +211,15 @@ const num = (n: number) => new Intl.NumberFormat(locale.value).format(n)
         {{ usableDisks() ? t("pool.none") : t("pool.noneNoDisks") }}
       </p>
       <ul v-if="pools?.pools.length" class="space-y-3">
-        <PoolCard v-for="p in pools.pools" :key="p.name" :pool="p" :busy="!!scrubbing[p.name]" @scrub="(a) => scrub(p.name, a)" />
+        <PoolCard
+          v-for="p in pools.pools"
+          :key="p.name"
+          :pool="p"
+          :busy="!!scrubbing[p.name]"
+          @scrub="(a) => scrub(p.name, a)"
+          @replace="(v) => openWizard('pool-replace', { pool: p, vdev: v })"
+          @destroy="openWizard('pool-destroy', { pool: p })"
+        />
       </ul>
       <Skeleton v-if="!pools && !poolsError" class="h-24 rounded-xl" />
     </section>

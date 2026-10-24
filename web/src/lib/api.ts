@@ -49,7 +49,8 @@ export interface Disk {
   partitions: Partition[]
   // Apakah disk boleh dipakai pool baru (dinilai sapod).
   usage: DiskUsage
-  usage_reason?: "mounted" | "swap" | "pool" | "raid" | "lvm" | "crypt" | "holder"
+  // Untuk "data": zfs_label = label pool ZFS yang tidak aktif (pool terhapus, NAS lain).
+  usage_reason?: "mounted" | "swap" | "pool" | "raid" | "lvm" | "crypt" | "holder" | "zfs_label"
 }
 
 export type DiskUsage = "free" | "data" | "in_use"
@@ -64,6 +65,7 @@ export interface PoolLayout {
 
 export interface Vdev {
   name: string
+  guid?: string
   type: string
   state: string
   path?: string
@@ -215,6 +217,7 @@ export interface WizardField {
     | "pool-layout"
     | "erase-confirm"
     | "confirm"
+    | "acknowledge"
   label: Localized
   help?: Localized
   placeholder?: Localized
@@ -225,6 +228,10 @@ export interface WizardField {
   source?: string
   // Pola isian teks (ekspresi reguler); pemeriksaan sebenarnya di server.
   pattern?: string
+  // confirm: harus sama dengan nilai dari konteks wizard (misalnya nama pool).
+  match_context?: "pool"
+  // disk-select: jumlah disk paling banyak (1 = pilih satu).
+  max?: number
   autocomplete?: string
   secret?: boolean
 }
@@ -316,6 +323,10 @@ export const api = {
   createPool: (req: PoolCreateRequest) => post<Pool>("/api/v1/storage/pools", req),
   scrubPool: (name: string, action: "start" | "stop") =>
     post<{ ok: boolean }>(`/api/v1/storage/pools/${encodeURIComponent(name)}/scrub`, { action }),
+  replacePoolDisk: (name: string, req: { old_guid: string; disk: DiskRef; password: string }) =>
+    post<{ ok: boolean }>(`/api/v1/storage/pools/${encodeURIComponent(name)}/replace`, req),
+  destroyPool: (name: string, req: { confirm_name: string; password: string }) =>
+    post<{ ok: boolean }>(`/api/v1/storage/pools/${encodeURIComponent(name)}/destroy`, req),
   uiConfig: () => get<UIConfig>("/api/v1/ui/config"),
   authStatus: () => get<AuthStatus>("/api/v1/auth/status"),
   wizard: (id: string) => get<Wizard>(`/api/v1/wizards/${encodeURIComponent(id)}`),
@@ -334,24 +345,46 @@ export const api = {
 export interface WizardContext {
   disks?: Disk[]
   pools?: PoolsResult
+  // Pool dan disk yang sedang dikerjakan (ganti disk, hapus pool).
+  pool?: Pool
+  vdev?: Vdev
 }
 
 // Daftar nama dari isian disk-select (dipisah koma).
 export const splitList = (v: string | undefined) => (v ?? "").split(",").filter(Boolean)
 
 // Tindakan akhir wizard (nilai `action` di YAML) → pemanggilan API.
+// diskRefs menyusun identitas disk yang dipilih (seperti yang dilihat
+// pengguna). Konfirmasi penghapusan hanya untuk disk yang tampil berisi data
+// saat dipilih; disk lain dikirim tanpa izin hapus, sehingga sapod menolak
+// bila ternyata kini berisi data.
+function diskRefs(names: string[], ctx: WizardContext, eraseOk: boolean): DiskRef[] {
+  const byName = new Map((ctx.disks ?? []).map((d) => [d.name, d]))
+  return names.map((name) => {
+    const d = byName.get(name)
+    if (!d) throw new ApiError(409, "disk_changed", name)
+    return { name, serial: d.serial, wwn: d.wwn, size_bytes: d.size_bytes, usage: d.usage, erase: eraseOk && d.usage === "data" }
+  })
+}
+
+// Tindakan akhir wizard (nilai `action` di YAML) → pemanggilan API.
 export const wizardActions: Record<string, (values: Record<string, string>, ctx: WizardContext) => Promise<unknown>> = {
   "setup.complete": (v) => api.setup(v),
-  "storage.pool_create": (v, ctx) => {
-    const byName = new Map((ctx.disks ?? []).map((d) => [d.name, d]))
-    const disks = splitList(v.disks).map((name) => {
-      const d = byName.get(name)
-      if (!d) throw new ApiError(409, "disk_changed", name)
-      // Konfirmasi penghapusan hanya untuk disk yang tampil berisi data saat
-      // dipilih; disk lain dikirim tanpa izin hapus, sehingga sapod menolak
-      // bila ternyata kini berisi data.
-      return { name, serial: d.serial, wwn: d.wwn, size_bytes: d.size_bytes, usage: d.usage, erase: v.erase_ok === "yes" && d.usage === "data" }
-    })
-    return api.createPool({ name: v.name ?? "", layout: v.layout ?? "", disks, confirm_name: v.confirm_name ?? "", password: v.password ?? "" })
+  "storage.pool_create": (v, ctx) =>
+    api.createPool({
+      name: v.name ?? "",
+      layout: v.layout ?? "",
+      disks: diskRefs(splitList(v.disks), ctx, v.erase_ok === "yes"),
+      confirm_name: v.confirm_name ?? "",
+      password: v.password ?? "",
+    }),
+  "storage.pool_replace": (v, ctx) => {
+    const [disk] = diskRefs(splitList(v.disk), ctx, v.erase_ok === "yes")
+    if (!ctx.pool || !ctx.vdev?.guid || !disk) throw new ApiError(409, "disk_changed", "")
+    return api.replacePoolDisk(ctx.pool.name, { old_guid: ctx.vdev.guid, disk, password: v.password ?? "" })
+  },
+  "storage.pool_destroy": (v, ctx) => {
+    if (!ctx.pool) throw new ApiError(404, "not_found", "")
+    return api.destroyPool(ctx.pool.name, { confirm_name: v.confirm_name ?? "", password: v.password ?? "" })
   },
 }

@@ -57,7 +57,44 @@ func NewPools(st *Storage, t PoolTools) *Pools {
 	if t.ByIDDir == "" {
 		t.ByIDDir = "/dev/disk/by-id"
 	}
-	return &Pools{st: st, t: t, openExcl: openExclusive}
+	p := &Pools{st: st, t: t, openExcl: openExclusive}
+	st.poolMembers = p.memberDevices
+	return p
+}
+
+// memberDevices mengembalikan nama perangkat kernel (disk atau partisi)
+// anggota pool yang sedang aktif. ok=false bila tidak bisa dipastikan.
+func (p *Pools) memberDevices(ctx context.Context) (map[string]bool, bool) {
+	status, err := p.readStatus(ctx)
+	if err != nil {
+		return nil, false
+	}
+	out := map[string]bool{}
+	var walk func(vs map[string]zpoolVdev)
+	walk = func(vs map[string]zpoolVdev) {
+		for _, v := range vs {
+			if v.Path != "" {
+				out[devName(v.Path)] = true
+			}
+			walk(v.Vdevs)
+		}
+	}
+	for _, pool := range status {
+		walk(pool.Vdevs)
+	}
+	return out, true
+}
+
+// readStatus membaca zpool status -j. Tanpa pool, hasilnya kosong.
+func (p *Pools) readStatus(ctx context.Context) (map[string]zpoolStatusPool, error) {
+	res, err := p.st.run(ctx, p.t.Zpool, []string{"status", "-j", "--json-int", "-p"})
+	if err != nil {
+		return nil, err
+	}
+	if res.ExitCode != 0 {
+		return nil, fmt.Errorf("zpool status keluar dengan kode %d: %s", res.ExitCode, firstLine(res.Stderr))
+	}
+	return parseZpoolStatus(res.Stdout)
 }
 
 // poolNamePattern membatasi nama pool baru: huruf kecil, angka, garis bawah,
@@ -133,14 +170,9 @@ func (p *Pools) listPools(ctx context.Context) (proto.PoolsResult, error) {
 
 	// Pohon vdev, scrub, dan pesan kesehatan. Bila gagal dibaca, daftar
 	// pool dan kapasitasnya tetap ditampilkan.
-	res, err = p.st.run(ctx, p.t.Zpool, []string{"status", "-j", "--json-int", "-p"})
-	if err != nil || res.ExitCode != 0 {
-		p.logWarn("zpool status tidak terbaca", "err", err, "stderr", firstLine(res.Stderr))
-		return out, nil
-	}
-	status, err := parseZpoolStatus(res.Stdout)
+	status, err := p.readStatus(ctx)
 	if err != nil {
-		p.logWarn("keluaran zpool status tidak bisa dibaca", "err", err)
+		p.logWarn("zpool status tidak terbaca", "err", err)
 		return out, nil
 	}
 	disks, _ := p.st.cachedDisks(ctx)
@@ -194,6 +226,7 @@ type zpoolStatusPool struct {
 
 type zpoolVdev struct {
 	Name           string               `json:"name"`
+	GUID           flexUint             `json:"guid"`
 	VdevType       string               `json:"vdev_type"`
 	State          string               `json:"state"`
 	Path           string               `json:"path"`
@@ -268,6 +301,9 @@ func convertVdevs(in map[string]zpoolVdev, owner map[string]string, budget *int)
 		}
 		if pv.Name == "" {
 			pv.Name = clip(k)
+		}
+		if v.GUID != 0 {
+			pv.GUID = strconv.FormatUint(uint64(v.GUID), 10)
 		}
 		if v.Path != "" {
 			pv.Disk = owner[devName(v.Path)]
@@ -711,5 +747,139 @@ func (p *Pools) logInfo(msg string, args ...any) {
 func (p *Pools) logWarn(msg string, args ...any) {
 	if p.t.Log != nil {
 		p.t.Log.Warn(msg, args...)
+	}
+}
+
+var guidPattern = regexp.MustCompile(`^[0-9]{1,20}$`)
+
+// PoolReplaceOp mengembalikan handler storage.pool_replace: disk lama
+// (ditunjuk dengan GUID ZFS, juga bila disknya hilang) diganti disk baru,
+// lalu ZFS membangun ulang datanya (resilver). Disk baru diperiksa sama
+// ketatnya dengan disk untuk pool baru, karena isinya dihapus.
+func (p *Pools) PoolReplaceOp() Handler {
+	return func(ctx context.Context, raw json.RawMessage) (any, error) {
+		var req proto.PoolReplaceParams
+		if err := decodeParams(raw, &req); err != nil {
+			return nil, err
+		}
+		if !poolNamePattern.MatchString(req.Name) || !guidPattern.MatchString(req.OldGUID) || !deviceNamePattern.MatchString(req.Disk.Name) {
+			return nil, &OpError{Code: proto.ErrInvalidParams, Message: "parameter penggantian disk tidak valid"}
+		}
+		if !p.write.TryLock() {
+			return nil, &OpError{Code: proto.ErrBusy, Message: "operasi pool lain sedang berjalan"}
+		}
+		defer p.write.Unlock()
+
+		checkCtx, cancel := context.WithTimeout(ctx, p.st.t.Timeout)
+		defer cancel()
+		status, err := p.readStatus(checkCtx)
+		if err != nil {
+			return nil, &OpError{Code: proto.ErrUnavailable, Message: err.Error()}
+		}
+		pool, ok := status[req.Name]
+		if !ok {
+			return nil, &OpError{Code: proto.ErrNotFound, Message: "pool " + req.Name + " tidak ditemukan"}
+		}
+		if !hasLeaf(pool.Vdevs, req.OldGUID) {
+			return nil, &OpError{Code: proto.ErrNotFound, Message: "disk yang diganti tidak ada di pool " + req.Name}
+		}
+		disks, err := p.st.listDisks(checkCtx)
+		if err != nil {
+			return nil, err
+		}
+		force, err := p.checkDisks([]proto.DiskRef{req.Disk}, disks)
+		if err != nil {
+			return nil, err
+		}
+		if err := p.checkNotClaimed([]proto.DiskRef{req.Disk}, disks); err != nil {
+			return nil, err
+		}
+		dev, err := p.stablePath(req.Disk)
+		if err != nil {
+			return nil, err
+		}
+
+		flags := []string{"replace"}
+		if force {
+			flags = append(flags, "-f")
+		}
+		flags = append(flags, "-o", "ashift="+strconv.Itoa(p.t.Ashift))
+		p.logInfo("mengganti disk pool", "pool", req.Name, "lama", req.OldGUID, "baru", dev, "paksa", force)
+		runCtx, cancelRun := context.WithTimeout(context.WithoutCancel(ctx), p.t.CreateTimeout)
+		defer cancelRun()
+		res, err := p.st.run(runCtx, p.t.Zpool, flags, req.Name, req.OldGUID, dev)
+		p.st.forgetDisks()
+		if err != nil {
+			return nil, err
+		}
+		if res.ExitCode != 0 {
+			msg := clipTo(strings.TrimSpace(string(res.Stderr)), maxErrorText)
+			p.logWarn("disk gagal diganti", "pool", req.Name, "kode", res.ExitCode, "stderr", msg)
+			return nil, &OpError{Code: "pool_replace_failed", Message: msg}
+		}
+		p.logInfo("disk diganti, resilver dimulai", "pool", req.Name)
+		return map[string]bool{"ok": true}, nil
+	}
+}
+
+// hasLeaf: guid adalah disk (bukan grup mirror/raidz) di pohon vdev.
+func hasLeaf(vs map[string]zpoolVdev, guid string) bool {
+	for _, v := range vs {
+		if len(v.Vdevs) == 0 && v.VdevType != "root" && strconv.FormatUint(uint64(v.GUID), 10) == guid {
+			return true
+		}
+		if hasLeaf(v.Vdevs, guid) {
+			return true
+		}
+	}
+	return false
+}
+
+// PoolDestroyOp mengembalikan handler storage.pool_destroy. Tanpa -f: pool
+// yang sedang dipakai (misalnya folder yang sedang dibuka lewat jaringan)
+// tidak dihapus. Label ZFS di disk dibiarkan, jadi pool yang terhapus tidak
+// sengaja masih bisa dipulihkan (zpool import -D) selama disknya belum
+// dipakai lagi; disk itu tampil sebagai "berisi data".
+func (p *Pools) PoolDestroyOp() Handler {
+	return func(ctx context.Context, raw json.RawMessage) (any, error) {
+		var req proto.PoolDestroyParams
+		if err := decodeParams(raw, &req); err != nil {
+			return nil, err
+		}
+		if !poolNamePattern.MatchString(req.Name) {
+			return nil, &OpError{Code: proto.ErrInvalidParams, Message: "nama pool tidak valid"}
+		}
+		if !p.write.TryLock() {
+			return nil, &OpError{Code: proto.ErrBusy, Message: "operasi pool lain sedang berjalan"}
+		}
+		defer p.write.Unlock()
+		checkCtx, cancel := context.WithTimeout(ctx, p.st.t.Timeout)
+		defer cancel()
+		names, err := p.poolNames(checkCtx)
+		if err != nil {
+			return nil, err
+		}
+		if !names[req.Name] {
+			return nil, &OpError{Code: proto.ErrNotFound, Message: "pool " + req.Name + " tidak ditemukan"}
+		}
+		p.logInfo("menghapus pool", "pool", req.Name)
+		runCtx, cancelRun := context.WithTimeout(context.WithoutCancel(ctx), p.t.CreateTimeout)
+		defer cancelRun()
+		res, err := p.st.run(runCtx, p.t.Zpool, []string{"destroy"}, req.Name)
+		p.st.forgetDisks()
+		if err != nil {
+			return nil, err
+		}
+		if res.ExitCode != 0 {
+			msg := clipTo(strings.TrimSpace(string(res.Stderr)), maxErrorText)
+			p.logWarn("pool gagal dihapus", "pool", req.Name, "kode", res.ExitCode, "stderr", msg)
+			code := "pool_destroy_failed"
+			if strings.Contains(strings.ToLower(msg), "busy") {
+				code = proto.ErrPoolBusy
+			}
+			return nil, &OpError{Code: code, Message: msg}
+		}
+		p.logInfo("pool dihapus", "pool", req.Name)
+		return map[string]bool{"ok": true}, nil
 	}
 }

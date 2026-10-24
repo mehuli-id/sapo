@@ -1,0 +1,52 @@
+# Wizard menghapus pool beserta seluruh isinya (ADR 0005).
+id: pool-destroy
+action: storage.pool_destroy
+destructive: true
+title:
+  id: Hapus pool
+  en: Delete pool
+finish_label:
+  id: Hapus pool dan semua isinya
+  en: Delete pool and everything in it
+
+steps:
+  - id: confirm
+    title: { id: "Hapus pool dan semua isinya?", en: "Delete the pool and everything in it?" }
+    description:
+      id: >-
+        Semua folder dan file di pool ini hilang, dan disknya bisa dipakai
+        untuk pool lain. Pastikan data penting sudah disalin ke tempat lain.
+      en: >-
+        All folders and files in this pool are lost, and its disks can be
+        used for another pool. Make sure important data has been copied
+        elsewhere.
+    help:
+      id: >-
+        Pool yang sedang dipakai (misalnya folder yang sedang dibuka lewat
+        jaringan) tidak akan dihapus; tutup dulu pemakaiannya. Selama disknya
+        belum dipakai untuk pool lain, pool yang terhapus tidak sengaja
+        mungkin masih bisa dipulihkan oleh teknisi.
+      en: >-
+        A pool that is in use (for example a folder open over the network)
+        won't be deleted; close it first. As long as its disks haven't been
+        reused for another pool, an accidentally deleted pool may still be
+        recoverable by a technician.
+    fields:
+      - key: understood
+        type: acknowledge
+        required: true
+        label:
+          id: Saya mengerti semua data di pool ini akan hilang
+          en: I understand all data in this pool will be lost
+      - key: confirm_name
+        type: confirm
+        match_context: pool
+        required: true
+        autocomplete: "off"
+        label: { id: Ketik nama pool, en: Type the pool name }
+      - key: password
+        type: current-password
+        required: true
+        secret: true
+        autocomplete: current-password
+        label: { id: Password Anda, en: Your password }

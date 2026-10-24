@@ -155,7 +155,8 @@
       "lvm": "Dipakai LVM",
       "crypt": "Volume terenkripsi yang sedang terbuka",
       "removable": "Disk lepas-pasang (flashdisk) tidak dipakai untuk pool",
-      "holder": "Dipegang perangkat lain (device-mapper, multipath, atau sejenisnya)"
+      "holder": "Dipegang perangkat lain (device-mapper, multipath, atau sejenisnya)",
+      "zfs_label": "Berisi label pool ZFS yang tidak aktif (pool terhapus atau dari NAS lain)"
     }
   },
   "about": {
@@ -183,7 +184,8 @@
     "codeHint": "Masukkan 6 digit kode yang tampil di aplikasi.",
     "twofaOn": "Aktif",
     "hidden": "(disembunyikan)",
-    "strength": "Panjang password: {n} karakter"
+    "strength": "Panjang password: {n} karakter",
+    "mustAcknowledge": "Centang untuk melanjutkan."
   },
   "login": {
     "title": "Masuk ke {name}",
@@ -274,11 +276,13 @@
     "disk_has_data": "Ada disk berisi data yang penghapusannya belum dikonfirmasi.",
     "disk_removable": "Disk lepas-pasang tidak bisa dipakai untuk pool.",
     "pool_exists": "Sudah ada pool dengan nama ini.",
-    "pool_busy": "Pool sedang membangun ulang data (resilver). Coba lagi setelah selesai.",
+    "pool_busy": "Pool sedang sibuk (misalnya membangun ulang data, atau ada folder yang sedang dibuka). Coba lagi nanti.",
     "pool_create_failed": "ZFS gagal membuat pool: {message}",
     "pool_scrub_failed": "Scrub gagal: {message}",
     "forbidden": "Hanya administrator yang bisa melakukan ini.",
-    "audit_unavailable": "Log audit tidak bisa ditulis, jadi tindakan ini dibatalkan demi keamanan."
+    "audit_unavailable": "Log audit tidak bisa ditulis, jadi tindakan ini dibatalkan demi keamanan.",
+    "pool_replace_failed": "ZFS gagal mengganti disk: {message}",
+    "pool_destroy_failed": "ZFS gagal menghapus pool: {message}"
   },
   "pool": {
     "title": "Pool penyimpanan",
@@ -363,6 +367,12 @@
     "eraseWarning": "Semua data di disk berikut akan dihapus permanen:",
     "mustConfirmErase": "Centang untuk mengonfirmasi penghapusan.",
     "pickDisks": "Pilih minimal satu disk.",
-    "pickLayout": "Pilih susunan yang cocok dengan jumlah disk."
+    "pickLayout": "Pilih susunan yang cocok dengan jumlah disk.",
+    "replace": "Ganti",
+    "replaceTitle": "Ganti disk {disk} di pool {pool}",
+    "replaced": "Disk sedang diganti. ZFS membangun ulang data ke disk baru (resilver); pool tetap bisa dipakai selama proses ini.",
+    "destroy": "Hapus pool",
+    "destroyTitle": "Hapus pool {pool}",
+    "destroyed": "Pool {name} sudah dihapus."
   }
 }

@@ -155,7 +155,8 @@
       "lvm": "Used by LVM",
       "crypt": "Open encrypted volume",
       "removable": "Removable disks (USB sticks) are not used for pools",
-      "holder": "Held by another device (device-mapper, multipath, or similar)"
+      "holder": "Held by another device (device-mapper, multipath, or similar)",
+      "zfs_label": "Has a label from an inactive ZFS pool (deleted, or from another NAS)"
     }
   },
   "about": {
@@ -183,7 +184,8 @@
     "codeHint": "Enter the 6-digit code shown in the app.",
     "twofaOn": "On",
     "hidden": "(hidden)",
-    "strength": "Password length: {n} characters"
+    "strength": "Password length: {n} characters",
+    "mustAcknowledge": "Tick to continue."
   },
   "login": {
     "title": "Sign in to {name}",
@@ -274,11 +276,13 @@
     "disk_has_data": "A disk with data hasn’t been confirmed for erasing.",
     "disk_removable": "Removable disks can’t be used for a pool.",
     "pool_exists": "A pool with this name already exists.",
-    "pool_busy": "The pool is rebuilding data (resilver). Try again when it finishes.",
+    "pool_busy": "The pool is busy (for example rebuilding data, or a folder is open). Try again later.",
     "pool_create_failed": "ZFS couldn’t create the pool: {message}",
     "pool_scrub_failed": "Scrub failed: {message}",
     "forbidden": "Only administrators can do this.",
-    "audit_unavailable": "The audit log can’t be written, so this action was cancelled for safety."
+    "audit_unavailable": "The audit log can’t be written, so this action was cancelled for safety.",
+    "pool_replace_failed": "ZFS couldn’t replace the disk: {message}",
+    "pool_destroy_failed": "ZFS couldn’t delete the pool: {message}"
   },
   "pool": {
     "title": "Storage pools",
@@ -363,6 +367,12 @@
     "eraseWarning": "All data on these disks will be permanently erased:",
     "mustConfirmErase": "Tick to confirm erasing.",
     "pickDisks": "Choose at least one disk.",
-    "pickLayout": "Choose a layout that fits the number of disks."
+    "pickLayout": "Choose a layout that fits the number of disks.",
+    "replace": "Replace",
+    "replaceTitle": "Replace disk {disk} in pool {pool}",
+    "replaced": "The disk is being replaced. ZFS is rebuilding data onto the new disk (resilver); the pool stays usable meanwhile.",
+    "destroy": "Delete pool",
+    "destroyTitle": "Delete pool {pool}",
+    "destroyed": "Pool {name} has been deleted."
   }
 }
