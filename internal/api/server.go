@@ -87,7 +87,11 @@ type Server struct {
 	syncLastAt    time.Time
 	// syncShares: hasil shares.apply terakhir per folder (galat folder dan
 	// ekspor NFS untuk panel).
-	syncShares  map[string]proto.ShareState
+	syncShares map[string]proto.ShareState
+
+	hostnameMu  sync.Mutex
+	hostnameAt  time.Time
+	hostname    string
 	resyncDelay time.Duration
 	// smbLocks: satu perubahan password Samba per pengguna pada satu waktu.
 	smbMu    sync.Mutex
@@ -383,15 +387,32 @@ func (s *Server) allowedHost(hostport string) bool {
 	if _, err := netip.ParseAddr(host); err == nil {
 		return true
 	}
-	// Nama host mesin dibaca setiap kali: bisa diganti dari pengaturan
-	// jaringan tanpa sapo-api dinyalakan ulang.
-	if h, err := os.Hostname(); err == nil && h != "" {
-		h = strings.ToLower(h)
-		if host == h || host == h+".local" {
-			return true
-		}
+	// Nama host mesin bisa diganti dari pengaturan jaringan tanpa sapo-api
+	// dinyalakan ulang.
+	if h := s.machineHostname(); h != "" && (host == h || host == h+".local") {
+		return true
 	}
 	return s.hosts[host]
+}
+
+// machineHostname dibaca dari /etc/hostname (sapo-api berjalan dengan
+// ProtectHostname, jadi nama host prosesnya tetap nama saat menyala),
+// di-cache beberapa detik.
+func (s *Server) machineHostname() string {
+	s.hostnameMu.Lock()
+	defer s.hostnameMu.Unlock()
+	if now := time.Now(); now.Sub(s.hostnameAt) > 5*time.Second {
+		s.hostnameAt = now
+		h := ""
+		if data, err := os.ReadFile(s.cfg.Agent.Network.HostnameFile); err == nil {
+			h = strings.TrimSpace(string(data))
+		}
+		if h == "" {
+			h, _ = os.Hostname()
+		}
+		s.hostname = strings.ToLower(h)
+	}
+	return s.hostname
 }
 
 // handleHealth publik, jadi hasilnya di-cache beberapa detik agar tidak bisa

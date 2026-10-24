@@ -119,6 +119,7 @@ agent:
     interfaces_file: /etc/network/interfaces
     resolv_conf: /etc/resolv.conf
     hosts_file: /etc/hosts
+    hostname_file: /etc/hostname
     net_dir: /sys/class/net
     state_file: /var/lib/sapod/network.json
     pending_file: /var/lib/sapod/network-pending.json
@@ -219,6 +220,10 @@ recovery:
   systemctl: /usr/bin/systemctl
   api_service: sapo-api.service
   network_service: networking.service
+  # Reset jaringan menghentikan sapod sebentar dan membuang perubahan
+  # jaringan dari panel yang menunggu konfirmasi (ADR 0009).
+  agent_service: sapod.service
+  network_pending_file: /var/lib/sapod/network-pending.json
   # Reset jaringan: file ini ditulis ulang (semua antarmuka fisik DHCP);
   # file lama disimpan di sampingnya sebagai cadangan.
   interfaces_file: /etc/network/interfaces

@@ -57,11 +57,12 @@ func (s *Server) handleNetworkToken(op, action string) http.HandlerFunc {
 			return
 		}
 		err := s.agent.Call(r.Context(), op, req, nil)
-		detail := map[string]string{}
-		if err != nil {
-			detail["error"] = errorCode(err)
+		// Hanya yang berhasil dicatat: tanpa login, siapa pun di jaringan
+		// yang diizinkan bisa mengirim token salah, dan itu tidak boleh
+		// membanjiri log audit.
+		if err == nil {
+			s.record(r, "", action, true, nil)
 		}
-		s.record(r, "", action, err == nil, detail)
 		if err != nil {
 			s.agentError(w, op, err)
 			return
