@@ -35,7 +35,8 @@ go test -race ./...
 ## Commit
 - `git commit -s` (DCO). Pesan: kalimat perintah singkat, Bahasa Indonesia.
 
-## Status & langkah berikutnya (per 23 Okt 2026)
-Sudah: kerangka, login + wizard setup awal + 2FA, paket `.deb`, tiga ronde review keamanan (`docs/security/2026-10-23-review.md`), repo publik `mehuli-id/sapo`, ISO live dev (`packaging/iso/`, workflow **ISO dev**: build + uji boot QEMU, artifact `sapo-iso-dev`), Storage Manager baca saja (`storage.disks`/`storage.smart` di `sapod`, program eksternal hanya lewat `runTool` di `internal/agent/tool.go`), HTTPS wajib di LAN (ADR 0004: sertifikat self-signed, HTTP hanya halaman petunjuk, sidik jari di layar konsol lewat `sapod`), pemulihan 2FA (kode cadangan + aplikasi Keamanan Akun), repo APT bertanda tangan di GitHub Pages (`packaging/apt/`, workflow **Rilis**: tag `v*` → stable, manual → dev).
+## Status & langkah berikutnya (per 24 Okt 2026)
+Sudah: kerangka, login + wizard setup awal + 2FA, paket `.deb`, tiga ronde review keamanan (`docs/security/2026-10-23-review.md`), repo publik `mehuli-id/sapo`, ISO live dev (`packaging/iso/`, workflow **ISO dev**: build + uji boot QEMU, artifact `sapo-iso-dev`), Storage Manager baca saja (`storage.disks`/`storage.smart` di `sapod`, program eksternal hanya lewat `runTool` di `internal/agent/tool.go`), HTTPS wajib di LAN (ADR 0004: sertifikat self-signed, HTTP hanya halaman petunjuk, sidik jari di layar konsol lewat `sapod`), pemulihan 2FA (kode cadangan + aplikasi Keamanan Akun), repo APT bertanda tangan di GitHub Pages (`packaging/apt/`, workflow **Rilis**: tag `v*` → stable, manual → dev). Pool ZFS dari panel (ADR 0005): buat pool (wizard), status, scrub, ganti disk, hapus pool; operasi destruktif di `internal/agent/pool.go` wajib lolos pemeriksaan identitas disk, status pakai, `O_EXCL`, konfirmasi hapus, password, dan log audit; uji asap ISO menjalankan semuanya di ZFS sungguhan.
 Berikutnya:
-1. Menu darurat di konsol NAS (reset jaringan, reset password admin, restart) untuk pemulihan bila password dan kode cadangan hilang.
+1. Shared folder + SMB/NFS di atas pool (wizard shared folder), lalu user dan izin.
+2. Menu darurat di konsol NAS (reset jaringan, reset password admin, restart) untuk pemulihan bila password dan kode cadangan hilang.
