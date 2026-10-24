@@ -461,7 +461,9 @@
     "disable": "Disable",
     "delete": "Delete user",
     "deleteHelp": "The account {name} is deleted and can no longer sign in. This cannot be undone.",
-    "typeName": "Type the username"
+    "typeName": "Type the username",
+    "notActivated": "Not activated",
+    "enableHelp": "This user can sign in again with their last password."
   },
   "groups": {
     "new": "New group",

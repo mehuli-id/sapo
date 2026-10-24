@@ -3,6 +3,7 @@
 # sapod memeriksa ulang semua isian sebelum menyentuh disk.
 id: pool-create
 action: storage.pool_create
+admin_only: true
 destructive: true
 title:
   id: Buat pool penyimpanan

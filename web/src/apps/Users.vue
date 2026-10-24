@@ -64,7 +64,7 @@ function wizardDone(values: Record<string, string>) {
 }
 
 // --- Tindakan per pengguna ---
-type Mode = "" | "edit" | "role" | "password" | "delete"
+type Mode = "" | "edit" | "role" | "enable" | "password" | "delete"
 const open = ref("")
 const mode = ref<Mode>("")
 const busy = ref(false)
@@ -100,8 +100,10 @@ async function run(fn: () => Promise<unknown>, done: string) {
 
 const saveEdit = (u: UserAccount) =>
   run(() => api.updateUser(u.username, { description: form.description, groups: form.groups }), t("users.saved", { name: u.username }))
-const setDisabled = (u: UserAccount, disabled: boolean) =>
-  run(() => api.updateUser(u.username, { disabled }), t(disabled ? "users.disabledDone" : "users.enabledDone", { name: u.username }))
+const disable = (u: UserAccount) => run(() => api.updateUser(u.username, { disabled: true }), t("users.disabledDone", { name: u.username }))
+// Mengaktifkan lagi memberi akses, jadi butuh password admin.
+const enable = (u: UserAccount) =>
+  run(() => api.updateUser(u.username, { disabled: false, admin_password: form.adminPassword }), t("users.enabledDone", { name: u.username }))
 const setRole = (u: UserAccount) =>
   run(
     () => api.updateUser(u.username, { role: u.role === "admin" ? "user" : "admin", admin_password: form.adminPassword }),
@@ -194,7 +196,7 @@ const deleteGroup = (g: UserGroup) =>
                 <span class="font-medium">{{ u.username }}</span>
                 <Badge v-if="u.role === 'admin'" variant="secondary"><ShieldCheck />{{ t("users.role.admin") }}</Badge>
                 <Badge v-if="u.disabled" variant="destructive">{{ t("users.disabled") }}</Badge>
-                <Badge v-if="u.must_change_password" variant="outline">{{ t("users.mustChange") }}</Badge>
+                <Badge v-if="u.pending.length" variant="outline" class="border-amber-500/60 text-amber-700 dark:text-amber-400">{{ t("users.notActivated") }}</Badge>
                 <Badge v-if="u.two_factor" variant="outline">2FA</Badge>
                 <Badge v-if="u.username === me" variant="outline">{{ t("users.you") }}</Badge>
               </div>
@@ -209,7 +211,8 @@ const deleteGroup = (g: UserGroup) =>
             <template v-if="u.username !== me">
               <Button size="sm" variant="outline" @click="start(u, 'password')">{{ t("users.resetPassword") }}</Button>
               <Button size="sm" variant="outline" @click="start(u, 'role')">{{ u.role === "admin" ? t("users.makeUser") : t("users.makeAdmin") }}</Button>
-              <Button size="sm" variant="outline" :disabled="busy" @click="setDisabled(u, !u.disabled)">{{ u.disabled ? t("users.enable") : t("users.disable") }}</Button>
+              <Button v-if="u.disabled" size="sm" variant="outline" @click="start(u, 'enable')">{{ t("users.enable") }}</Button>
+              <Button v-else size="sm" variant="outline" :disabled="busy" @click="disable(u)">{{ t("users.disable") }}</Button>
               <Button size="sm" variant="ghost" class="text-destructive hover:text-destructive" @click="start(u, 'delete')"><Trash2 /></Button>
             </template>
           </div>
@@ -252,6 +255,19 @@ const deleteGroup = (g: UserGroup) =>
             <Button type="submit" size="sm" :disabled="busy || !form.adminPassword">
               <LoaderCircle v-if="busy" class="animate-spin" />{{ u.role === "admin" ? t("users.makeUser") : t("users.makeAdmin") }}
             </Button>
+            <Button type="button" size="sm" variant="ghost" @click="close">{{ t("common.cancel") }}</Button>
+          </div>
+        </form>
+
+        <!-- Aktifkan lagi -->
+        <form v-else-if="open === u.username && mode === 'enable'" class="space-y-3 border-t pt-3" @submit.prevent="enable(u)">
+          <p class="text-sm">{{ t("users.enableHelp") }}</p>
+          <div class="space-y-1.5">
+            <Label :for="`ape-${u.username}`">{{ t("account.password") }}</Label>
+            <Input :id="`ape-${u.username}`" v-model="form.adminPassword" type="password" autocomplete="current-password" />
+          </div>
+          <div class="flex gap-2">
+            <Button type="submit" size="sm" :disabled="busy || !form.adminPassword"><LoaderCircle v-if="busy" class="animate-spin" />{{ t("users.enable") }}</Button>
             <Button type="button" size="sm" variant="ghost" @click="close">{{ t("common.cancel") }}</Button>
           </div>
         </form>

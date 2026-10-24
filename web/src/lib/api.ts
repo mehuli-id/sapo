@@ -216,6 +216,8 @@ export interface UserAccount {
   must_change_password: boolean
   created_at: string
   last_login_at?: string
+  // Langkah wajib yang belum diselesaikan pemilik akun.
+  pending: ("password" | "totp")[]
 }
 
 export interface UserGroup {

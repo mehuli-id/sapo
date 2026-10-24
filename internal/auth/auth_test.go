@@ -301,3 +301,16 @@ func TestStoreGroupMembership(t *testing.T) {
 		t.Fatalf("anggota tidak dikenal: %v", err)
 	}
 }
+
+func TestStoreAdminWithPendingStepsIsNotActive(t *testing.T) {
+	s, _ := OpenStore(t.TempDir())
+	s.RequireTOTPForAdmin = true
+	_ = s.CompleteSetup(User{Username: "arthur", Role: RoleAdmin, TOTPSecret: "RAHASIA"}, "id", time.Now())
+	// Admin baru belum memasang 2FA dan belum mengganti password: belum
+	// dihitung, jadi admin pertama tetap tidak bisa diturunkan.
+	_ = s.CreateUser(User{Username: "sari", Role: RoleAdmin, MustChangePassword: true})
+	user := RoleUser
+	if err := s.UpdateUser("arthur", UserChange{Role: &user}); !errors.Is(err, ErrLastAdmin) {
+		t.Fatalf("admin yang belum siap tidak boleh dihitung: %v", err)
+	}
+}

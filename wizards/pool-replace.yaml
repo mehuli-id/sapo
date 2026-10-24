@@ -3,6 +3,7 @@
 # disk untuk pool baru, karena isinya dihapus.
 id: pool-replace
 action: storage.pool_replace
+admin_only: true
 destructive: true
 title:
   id: Ganti disk

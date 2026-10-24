@@ -73,6 +73,10 @@ var ErrSetupDone = errors.New("setup awal sudah selesai")
 // Ini penyimpanan sementara untuk Fase 1 (data sangat kecil). Antarmukanya
 // sengaja sempit agar bisa diganti SQLite tanpa mengubah pemanggilnya.
 type Store struct {
+	// RequireTOTPForAdmin: administrator tanpa 2FA belum dihitung sebagai
+	// administrator aktif (ia belum bisa memakai panel).
+	RequireTOTPForAdmin bool
+
 	path  string
 	mu    sync.Mutex
 	state State
@@ -279,7 +283,7 @@ func (s *Store) UpdateUser(username string, c UserChange) error {
 		if c.Description != nil {
 			u.Description = *c.Description
 		}
-		return requireActiveAdmin(st)
+		return requireActiveAdmin(st, s.RequireTOTPForAdmin)
 	})
 }
 
@@ -307,7 +311,7 @@ func (s *Store) DeleteUser(username string) error {
 		for i, u := range st.Users {
 			if u.Username == username {
 				st.Users = append(st.Users[:i:i], st.Users[i+1:]...)
-				return requireActiveAdmin(st)
+				return requireActiveAdmin(st, s.RequireTOTPForAdmin)
 			}
 		}
 		return ErrUserNotFound
@@ -438,13 +442,14 @@ func uniqueSorted(in []string) []string {
 }
 
 // requireActiveAdmin: setelah setup, harus selalu ada administrator yang
-// aktif, agar NAS tidak terkunci dari panel.
-func requireActiveAdmin(st *State) error {
+// benar-benar bisa memakai panel (aktif, tanpa langkah wajib yang tertunda),
+// agar NAS tidak terkunci dari panel.
+func requireActiveAdmin(st *State, requireTOTP bool) error {
 	if st.SetupCompletedAt == nil {
 		return nil
 	}
 	for _, u := range st.Users {
-		if u.Role == RoleAdmin && !u.Disabled {
+		if u.Role == RoleAdmin && !u.Disabled && !u.MustChangePassword && (u.TOTPSecret != "" || !requireTOTP) {
 			return nil
 		}
 	}

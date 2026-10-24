@@ -1,6 +1,7 @@
 # Wizard menghapus pool beserta seluruh isinya (ADR 0005).
 id: pool-destroy
 action: storage.pool_destroy
+admin_only: true
 destructive: true
 title:
   id: Hapus pool

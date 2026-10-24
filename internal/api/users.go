@@ -32,9 +32,11 @@ type userView struct {
 	MustChangePassword bool       `json:"must_change_password"`
 	CreatedAt          time.Time  `json:"created_at"`
 	LastLoginAt        *time.Time `json:"last_login_at,omitempty"`
+	// Pending: langkah wajib yang belum diselesaikan pemilik akun.
+	Pending []string `json:"pending"`
 }
 
-func viewOf(u auth.User) userView {
+func (s *Server) viewOf(u auth.User) userView {
 	groups := u.Groups
 	if groups == nil {
 		groups = []string{}
@@ -42,6 +44,7 @@ func viewOf(u auth.User) userView {
 	return userView{
 		Username: u.Username, Role: u.Role, Description: u.Description, Disabled: u.Disabled, Groups: groups,
 		TwoFactor: u.TOTPSecret != "", MustChangePassword: u.MustChangePassword, CreatedAt: u.CreatedAt, LastLoginAt: u.LastLoginAt,
+		Pending: s.pendingSteps(u),
 	}
 }
 
@@ -55,7 +58,7 @@ type groupView struct {
 func (s *Server) handleUsers(w http.ResponseWriter, _ *http.Request) {
 	out := []userView{}
 	for _, u := range s.store.Users() {
-		out = append(out, viewOf(u))
+		out = append(out, s.viewOf(u))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -82,7 +85,9 @@ func validDescription(d string) bool {
 	if utf8.RuneCountInString(d) > maxDescription || !utf8.ValidString(d) {
 		return false
 	}
-	return !strings.ContainsFunc(d, unicode.IsControl)
+	// Karakter kendali dan format (misalnya pembalik arah teks U+202E)
+	// ditolak: keterangan tidak boleh menyamar sebagai akun lain.
+	return !strings.ContainsFunc(d, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) })
 }
 
 func validGroups(groups []string) bool {
@@ -153,9 +158,11 @@ func (s *Server) handleUserCreate(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Password yang dibuat admin untuk administrator lain selalu wajib
+	// diganti, agar pembuatnya tidak memegang password admin orang lain.
 	u := auth.User{
 		Username: req.Username, Role: req.Role, PasswordHash: hash, CreatedAt: s.now().UTC(),
-		Description: req.Description, Groups: req.Groups, MustChangePassword: req.MustChangePassword,
+		Description: req.Description, Groups: req.Groups, MustChangePassword: req.MustChangePassword || req.Role == auth.RoleAdmin,
 	}
 	if err := s.store.CreateUser(u); err != nil {
 		userStoreError(w, err)
@@ -163,7 +170,7 @@ func (s *Server) handleUserCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	s.record(r, admin.Username, "users.create", true, map[string]string{"user": u.Username, "role": string(u.Role), "groups": strings.Join(u.Groups, ",")})
 	created, _ := s.store.Get(u.Username)
-	writeJSON(w, http.StatusOK, viewOf(created))
+	writeJSON(w, http.StatusOK, s.viewOf(created))
 }
 
 func (s *Server) handleUserUpdate(w http.ResponseWriter, r *http.Request) {
@@ -188,14 +195,18 @@ func (s *Server) handleUserUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sess, _, _ := s.currentSession(r)
-	roleChange := req.Role != nil && *req.Role != target.Role
-	disabling := req.Disabled != nil && *req.Disabled && !target.Disabled
-	if name == sess.Username && (roleChange || disabling) {
-		writeError(w, http.StatusConflict, "self_change", "tidak bisa mengubah peran atau menonaktifkan akun sendiri")
+	// Peran selalu dianggap berubah bila dikirim (tidak dibandingkan dengan
+	// bacaan lama yang bisa basi), dan mengaktifkan akun memberi akses lagi:
+	// keduanya butuh password admin.
+	roleChange := req.Role != nil
+	disabling := req.Disabled != nil && *req.Disabled
+	enabling := req.Disabled != nil && !*req.Disabled && target.Disabled
+	if name == sess.Username && (roleChange || req.Disabled != nil) {
+		writeError(w, http.StatusConflict, "self_change", "tidak bisa mengubah peran atau status akun sendiri")
 		return
 	}
 	actor := sess.Username
-	if roleChange {
+	if roleChange || enabling {
 		admin, ok := s.reauthField(w, r, req.AdminPassword, "admin_password")
 		if !ok {
 			return
@@ -211,7 +222,7 @@ func (s *Server) handleUserUpdate(w http.ResponseWriter, r *http.Request) {
 		detail["disabled"] = boolText(*req.Disabled)
 	}
 	if req.Groups != nil {
-		detail["groups"] = strings.Join(*req.Groups, ",")
+		detail["groups"] = auditText(strings.Join(*req.Groups, ","))
 	}
 	if err != nil {
 		detail["error"] = err.Error()
@@ -225,7 +236,7 @@ func (s *Server) handleUserUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	s.record(r, actor, "users.update", true, detail)
 	updated, _ := s.store.Get(name)
-	writeJSON(w, http.StatusOK, viewOf(updated))
+	writeJSON(w, http.StatusOK, s.viewOf(updated))
 }
 
 func (s *Server) handleUserPassword(w http.ResponseWriter, r *http.Request) {
@@ -245,11 +256,12 @@ func (s *Server) handleUserPassword(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "self_change", "ganti password sendiri lewat Keamanan Akun")
 		return
 	}
-	if _, exists := s.store.Get(name); !exists {
+	target, exists := s.store.Get(name)
+	if !exists {
 		writeError(w, http.StatusNotFound, "not_found", "user tidak ditemukan")
 		return
 	}
-	if code, msg := s.validateNewUser(name, req.Password, req.PasswordConfirm); code != "" {
+	if code, msg := s.validatePassword(name, req.Password, req.PasswordConfirm); code != "" {
 		writeErrorDetail(w, http.StatusBadRequest, code, msg, map[string]any{"field": fieldFor(code)})
 		return
 	}
@@ -261,7 +273,7 @@ func (s *Server) handleUserPassword(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := s.store.SetPassword(name, hash, req.MustChangePassword); err != nil {
+	if err := s.store.SetPassword(name, hash, req.MustChangePassword || target.Role == auth.RoleAdmin); err != nil {
 		userStoreError(w, err)
 		return
 	}
@@ -308,8 +320,12 @@ func (s *Server) validGroupName(name string) (string, bool) {
 	switch {
 	case !s.groupRe.MatchString(name) || len(name) > 32:
 		return "group_invalid", false
-	case slices.Contains(s.cfg.Auth.ReservedGroupNames, name):
+	case slices.Contains(s.cfg.Auth.ReservedGroupNames, name) || slices.Contains(s.cfg.Auth.ReservedUsernames, name):
 		return "group_reserved", false
+	}
+	// Satu ruang nama dengan pengguna (nantinya grup pribadi akun sistem).
+	if _, exists := s.store.Get(name); exists {
+		return "group_taken", false
 	}
 	return "", true
 }
@@ -360,7 +376,7 @@ func (s *Server) handleGroupUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	detail := map[string]string{"group": name}
 	if req.Members != nil {
-		detail["members"] = strings.Join(*req.Members, ",")
+		detail["members"] = auditText(strings.Join(*req.Members, ","))
 	}
 	s.record(r, sess.Username, "groups.update", true, detail)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -389,7 +405,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sess, _, _ := s.currentSession(r)
-	if code, msg := s.validateNewUser(sess.Username, req.Password, req.PasswordConfirm); code != "" {
+	if code, msg := s.validatePassword(sess.Username, req.Password, req.PasswordConfirm); code != "" {
 		writeErrorDetail(w, http.StatusBadRequest, code, msg, map[string]any{"field": fieldFor(code)})
 		return
 	}
@@ -422,3 +438,7 @@ func boolText(b bool) string {
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+func (s *Server) groupExists(name string) bool {
+	return slices.ContainsFunc(s.store.Groups(), func(g auth.Group) bool { return g.Name == name })
+}
