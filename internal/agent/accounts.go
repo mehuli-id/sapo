@@ -218,6 +218,30 @@ func readGroup(path string) (map[string]groupEntry, error) {
 
 func (a *Accounts) inRange(id int) bool { return id >= a.t.IDMin && id <= a.t.IDMax }
 
+// Managed mengembalikan UID dan GID akun name bila akun itu buatan sapod:
+// tercatat dengan UID yang sama, di rentang ID, dan bergrup utama Sapo.
+func (a *Accounts) Managed(name string) (uid, gid int, ok bool) {
+	st, err := a.loadState()
+	if err != nil {
+		return 0, 0, false
+	}
+	users, err := readPasswd(a.t.PasswdFile)
+	if err != nil {
+		return 0, 0, false
+	}
+	groups, err := readGroup(a.t.GroupFile)
+	if err != nil {
+		return 0, 0, false
+	}
+	pg, hasPG := groups[a.t.PrimaryGroup]
+	rec, isRec := st.Users[name]
+	e, exists := users[name]
+	if !hasPG || pg.GID != st.Primary || !a.inRange(pg.GID) || !isRec || !exists || e.UID != rec.UID || e.GID != pg.GID || !a.inRange(e.UID) {
+		return 0, 0, false
+	}
+	return e.UID, e.GID, true
+}
+
 func (a *Accounts) run(ctx context.Context, prog string, flags []string, operands ...string) error {
 	res, err := runTool(ctx, a.t.Timeout, prog, flags, operands...)
 	if err != nil {

@@ -50,6 +50,9 @@ type Pools struct {
 	// openExcl memeriksa bahwa perangkat blok tidak sedang dipakai (diganti
 	// di test; nil = tidak diperiksa).
 	openExcl func(dev string) error
+	// beforeDestroy dijalankan sebelum pool dihapus (mencabut ekspor NFS
+	// folder di pool itu; diisi NewShares).
+	beforeDestroy func(ctx context.Context, pool string) error
 }
 
 // NewPools menyiapkan operasi pool di atas st.
@@ -911,9 +914,14 @@ func (p *Pools) PoolDestroyOp() Handler {
 		if !names[req.Name] {
 			return nil, &OpError{Code: proto.ErrNotFound, Message: "pool " + req.Name + " tidak ditemukan"}
 		}
-		p.logInfo("menghapus pool", "pool", req.Name)
 		runCtx, cancelRun := context.WithTimeout(context.WithoutCancel(ctx), p.t.CreateTimeout)
 		defer cancelRun()
+		if p.beforeDestroy != nil {
+			if err := p.beforeDestroy(runCtx, req.Name); err != nil {
+				return nil, &OpError{Code: "pool_destroy_failed", Message: clipTo(err.Error(), maxErrorText)}
+			}
+		}
+		p.logInfo("menghapus pool", "pool", req.Name)
 		res, runErr := p.st.run(runCtx, p.t.Zpool, []string{"destroy"}, req.Name)
 		p.st.forgetDisks()
 		if runErr != nil || res.ExitCode != 0 {

@@ -196,6 +196,7 @@ func TestShareNFS(t *testing.T) {
 		"semua orang":    map[string]any{"user": "ani", "clients": []string{"0.0.0.0/0"}},
 		"terlalu luas":   map[string]any{"user": "ani", "clients": []string{"10.0.0.0/7"}},
 		"nama host":      map[string]any{"user": "ani", "clients": []string{"pc-ani.lan"}},
+		"alamat publik":  map[string]any{"user": "ani", "clients": []string{"8.8.8.8"}},
 		"tanpa klien":    map[string]any{"user": "ani", "clients": []string{}},
 		"pengguna asing": map[string]any{"user": "hantu", "clients": []string{"10.0.0.0/8"}},
 	} {

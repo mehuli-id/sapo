@@ -266,3 +266,16 @@ func TestAccountsDisableFailureIsRetried(t *testing.T) {
 		t.Fatalf("akun tanpa entri Samba: %+v %v", res, err)
 	}
 }
+
+func TestAccountsManaged(t *testing.T) {
+	a, _ := testAccounts(t)
+	if uid, gid, ok := a.Managed("lama"); !ok || uid != 20001 || gid != 20000 {
+		t.Fatalf("lama = %d %d %v", uid, gid, ok)
+	}
+	// Akun di rentang yang tidak dibuat sapod, akun sistem, dan akun tidak ada.
+	for _, name := range []string{"asing", "root", "admin", "hantu"} {
+		if _, _, ok := a.Managed(name); ok {
+			t.Errorf("%s bukan akun Sapo", name)
+		}
+	}
+}

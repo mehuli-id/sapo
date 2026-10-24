@@ -37,6 +37,13 @@ EOF
       chmod 0644 "$CONF"
     fi
 
+    # 3b. NFS hanya versi 4 (ADR 0007, /etc/nfs.conf.d/sapo.conf): rpcbind
+    #     tidak dibutuhkan dan tidak dibuka di jaringan. Hanya saat pasang
+    #     pertama, agar keputusan admin setelahnya dihormati.
+    if [ -z "$2" ]; then
+      systemctl mask rpcbind.socket rpcbind.service >/dev/null 2>&1 || true
+    fi
+
     # 4. Layanan. Diaktifkan pada instalasi pertama dan saat dipasang ulang
     #    setelah "remove" (status disimpan oleh deb-systemd-helper), tetapi
     #    keputusan admin untuk menonaktifkan layanan tetap dihormati.

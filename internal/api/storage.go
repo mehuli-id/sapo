@@ -153,7 +153,8 @@ func (s *Server) handlePoolDestroy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.destructive(w, r, user, "storage.pool_destroy", map[string]string{"pool": auditText(name)}, proto.OpStoragePoolDestroy,
-		proto.PoolDestroyParams{Name: name}, nil)
+		// Folder di pool yang dihapus tidak lagi dibagikan (Samba dan NFS).
+		proto.PoolDestroyParams{Name: name}, func() { s.syncAfterChange(r) })
 }
 
 // auditText memotong nilai dari pengguna sebelum dicatat.

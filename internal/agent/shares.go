@@ -56,6 +56,8 @@ type Shares struct {
 	isMount func(path string) bool
 	// aclTree memasang ACL ke isi folder (diganti di test).
 	aclTree func(ctx context.Context, root string, acl shareACL) error
+	// managed: UID dan GID akun buatan sapod (Accounts.Managed); nil di test.
+	managed func(name string) (uid, gid int, ok bool)
 
 	jobsMu sync.Mutex
 	jobs   map[string]*aclJob
@@ -73,8 +75,15 @@ type aclJob struct {
 
 // NewShares menyiapkan operasi shared folder di atas pool p.
 func NewShares(p *Pools, t ShareTools) *Shares {
-	return &Shares{p: p, t: t, chown: os.Lchown, isMount: isMountPoint, aclTree: applyACLTree, jobs: map[string]*aclJob{}}
+	s := &Shares{p: p, t: t, chown: os.Lchown, isMount: isMountPoint, aclTree: applyACLTree, jobs: map[string]*aclJob{}}
+	// Ekspor NFS folder di pool dicabut sebelum pool dihapus.
+	p.beforeDestroy = s.unexportPool
+	return s
 }
+
+// SetAccounts menghubungkan catatan akun sapod: klien NFS hanya dipetakan
+// ke akun yang tercatat dibuat sapod.
+func (s *Shares) SetAccounts(a *Accounts) { s.managed = a.Managed }
 
 // isMountPoint: path berada di perangkat yang berbeda dengan induknya.
 func isMountPoint(path string) bool {
@@ -229,12 +238,12 @@ func (s *Shares) ApplyOp() Handler {
 			}
 			out.Shares = append(out.Shares, st)
 		}
-		out.SMB, err = s.writeSMBConf(ctx, active)
-		if err != nil {
-			return nil, err
-		}
-		out.NFS, err = s.writeExports(ctx, exports)
-		if err != nil {
+		// NFS dulu dan selalu, agar pencabutan akses NFS tidak tertahan oleh
+		// galat Samba.
+		var nfsErr, smbErr error
+		out.NFS, nfsErr = s.writeExports(ctx, exports)
+		out.SMB, smbErr = s.writeSMBConf(ctx, active)
+		if err := errors.Join(nfsErr, smbErr); err != nil {
 			return nil, err
 		}
 		return out, nil
@@ -670,7 +679,8 @@ func (s *Shares) DeleteOp() Handler {
 		// menghapus snapshot sebelum melepas folder).
 		_, _ = s.p.st.run(ctx, s.t.Smbcontrol, []string{"smbd", "close-share"}, req.Name)
 		// Ekspor NFS dicabut sebelum folder dilepas.
-		if err := s.unexport(ctx, filepath.Join(s.t.MountBase, req.Pool, req.Name)); err != nil {
+		path := filepath.Join(s.t.MountBase, req.Pool, req.Name)
+		if err := s.unexport(ctx, func(p string) bool { return p == path }); err != nil {
 			return nil, &OpError{Code: "share_delete_failed", Message: clipTo(err.Error(), maxErrorText)}
 		}
 		res, err = s.p.st.run(ctx, s.t.Zfs, []string{"unmount"}, ds)

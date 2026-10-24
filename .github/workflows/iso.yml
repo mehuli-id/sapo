@@ -70,7 +70,11 @@ jobs:
         run: packaging/iso/smoke-test.sh dist/*.iso
       - name: log konsol VM
         if: always()
-        run: tail -n 200 dist/smoke-test-console.log || true
+        run: |
+          echo "--- baris NFS/overlay ---"
+          grep -aiE 'nfs|mountd|exportfs|overlay|rpcbind' dist/smoke-test-console.log | tail -n 60 || true
+          echo "--- 200 baris terakhir ---"
+          tail -n 200 dist/smoke-test-console.log || true
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sapo-iso-dev
