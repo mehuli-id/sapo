@@ -376,6 +376,15 @@ PY
 console_chat '' '\n' '\(1-5\): ' '' >/dev/null || fail "menu darurat tidak tampil di konsol serial"
 temp="$(console_chat '' '\n' '\(1-5\): ' '1\n' 'penguji untuk melanjutkan: ' 'penguji\n' \
   '\n    ([a-z2-9]{4}(?:-[a-z2-9]{4}){3})\r?\n' '')" || fail "reset password admin lewat menu darurat"
+# Panel dinyalakan ulang oleh menu; ditunggu sampai menjawab lagi.
+wait_panel() { # wait_panel DETIK
+  local deadline=$((SECONDS + $1))
+  until curl -kfsS --max-time 5 "$HTTPS/api/v1/health" 2>/dev/null | grep -q '"agent":true'; do
+    (( SECONDS <= deadline )) || return 1
+    sleep 3
+  done
+}
+wait_panel 120 || fail "panel tidak kembali setelah reset password admin"
 old_jar="$JAR"
 res="$(api GET /api/v1/storage/pools)"
 [[ "$res" == *' 401' ]] || fail "sesi lama harus berakhir setelah reset admin: $res"
@@ -391,11 +400,8 @@ res="$(api GET /api/v1/storage/pools)"
 echo "menu darurat: password admin di-reset (sesi lama berakhir, password lama ditolak, wajib ganti password dan 2FA)"
 
 console_chat '' '\n' '\(1-5\): ' '2\n' 'RESET[^\n]*: ' 'RESET\n' '(sudah di-reset)' '' >/dev/null || fail "reset jaringan lewat menu darurat"
-deadline=$((SECONDS + 120))
-until curl -kfsS --max-time 5 "$HTTPS/api/v1/health" 2>/dev/null | grep -q '"agent":true'; do
-  (( SECONDS <= deadline )) || fail "panel tidak kembali setelah reset jaringan"
-  sleep 3
-done
-echo "menu darurat: jaringan di-reset (DHCP), panel kembali dalam $((SECONDS + 120 - deadline)) detik"
+start=$SECONDS
+wait_panel 120 || fail "panel tidak kembali setelah reset jaringan"
+echo "menu darurat: jaringan di-reset (DHCP), panel kembali dalam $((SECONDS - start)) detik"
 JAR="$old_jar"
 echo "Uji asap lulus."
