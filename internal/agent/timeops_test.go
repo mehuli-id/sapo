@@ -41,7 +41,7 @@ esac
 		t.Fatal(err)
 	}
 	b, _ := os.ReadFile(log)
-	if !strings.Contains(string(b), "set-timezone -- Asia/Makassar\nset-ntp -- false") {
+	if !strings.Contains(string(b), "set-ntp -- false\nset-timezone -- Asia/Makassar") {
 		t.Fatalf("panggilan:\n%s", b)
 	}
 	var oe *OpError

@@ -651,6 +651,8 @@
     "ntpSynced": "The clock is synchronized automatically.",
     "ntpWaiting": "Waiting for automatic clock synchronization…",
     "ntpOff": "Automatic clock synchronization is off.",
-    "timeSaved": "Time settings saved."
+    "timeSaved": "Time settings saved.",
+    "confirmOff": "Turn off {name}? Every computer using folders through this service will be disconnected.",
+    "turnOff": "Turn off"
   }
 }
