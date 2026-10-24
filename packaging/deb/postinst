@@ -74,14 +74,16 @@ EOF
 
     # 5. Menu darurat di tty1 (ADR 0008) menggantikan layar login tty1.
     #    Sekali saja (penanda di /var/lib/sapod), agar keputusan admin untuk
-    #    mematikannya tetap dihormati saat upgrade.
+    #    mematikannya tetap dihormati saat upgrade. Saat upgrade, layar
+    #    login tty1 tidak dihentikan sekarang (admin mungkin sedang menjalankan
+    #    apt di sana); menu tampil setelah boot berikutnya.
     CONSOLE_MARK=/var/lib/sapod/console-menu-enabled
     if [ ! -e "$CONSOLE_MARK" ]; then
       systemctl mask getty@tty1.service >/dev/null 2>&1 || true
       systemctl enable sapo-console@tty1.service >/dev/null 2>&1 || true
       install -d -m 0700 /var/lib/sapod
       : > "$CONSOLE_MARK"
-      if [ -d /run/systemd/system ]; then
+      if [ -d /run/systemd/system ] && [ -z "$2" ]; then
         systemctl stop getty@tty1.service >/dev/null 2>&1 || true
         systemctl start sapo-console@tty1.service || true
       fi

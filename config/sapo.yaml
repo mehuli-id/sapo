@@ -204,6 +204,7 @@ recovery:
   interfaces_file: /etc/network/interfaces
   net_dir: /sys/class/net
   # Kunci api.* di /etc/sapo/sapo.yaml yang dikembalikan ke bawaan saat
-  # reset jaringan (siapa dan lewat alamat apa panel boleh dibuka).
-  reset_api_keys: [listen, allowed_networks, denied_networks, hostnames]
+  # reset jaringan (siapa dan lewat alamat apa panel boleh dibuka). File
+  # admin yang rusak dipindah utuh ke cadangan.
+  reset_api_keys: [listen, allowed_networks, denied_networks, hostnames, tls]
   temp_password_length: 16
