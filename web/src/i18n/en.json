@@ -48,7 +48,7 @@
     },
     "control-panel": {
       "title": "Control Panel",
-      "description": "Network, users, services, and system"
+      "description": "Services, users, and system"
     },
     "sapo-drive": {
       "title": "Sapo Drive",
@@ -77,6 +77,10 @@
     "shared-folders": {
       "title": "Shared Folder",
       "description": "Shared folders and their access"
+    },
+    "network": {
+      "title": "Network",
+      "description": "Host name, IP addresses, and DNS"
     }
   },
   "systemInfo": {
@@ -320,7 +324,8 @@
     "conflict": "Conflicts with the system state.",
     "system_sync_failed": "Saved, but not yet applied to the system. Try again shortly.",
     "password_invalid": "The password can’t contain control characters (such as tab or newline).",
-    "nfs_invalid": "Invalid NFS settings: pick a user and enter client IP addresses or networks (for example 192.168.1.0/24). Host names and overly wide networks aren’t accepted."
+    "nfs_invalid": "Invalid NFS settings: pick a user and enter client IP addresses or networks (for example 192.168.1.0/24). Host names and overly wide networks aren’t accepted.",
+    "invalid_params": "Invalid input: {message}"
   },
   "pool": {
     "title": "Storage pools",
@@ -535,5 +540,38 @@
     "nfsPickUser": "Pick a user",
     "nfsSaved": "NFS settings for {name} saved.",
     "nfsMount": "Mount from Linux or Mac (NFS version 4):"
+  },
+  "network": {
+    "intro": "The NAS host name, the IP address of each network port (automatic from the router via DHCP, or a fixed address), and DNS.",
+    "unmanaged": "Network settings haven’t been set from the panel (or were reset from the console recovery menu): every port uses DHCP.",
+    "hostname": "Host name",
+    "hostnameHelp": "Lowercase letters, digits, and hyphens. The panel is also reachable at https://{name}.local.",
+    "up": "connected · {speed} Mb/s",
+    "down": "not connected",
+    "current": "Current address",
+    "mode": {
+      "dhcp": "Automatic (DHCP)",
+      "static": "Fixed address"
+    },
+    "address": "IP address / prefix",
+    "gateway": "Gateway (router)",
+    "dns": "DNS servers",
+    "dnsHelp": "One per line, up to three. Usually the router’s address.",
+    "dnsDhcp": "DNS from DHCP: {dns}",
+    "warning": "After applying, the new settings must be confirmed from the panel within a few minutes. If the panel can’t be opened at the new address, the old settings come back automatically. If you’re still locked out, use the recovery menu on the NAS console (reset network).",
+    "apply": "Apply",
+    "confirming": "New settings applied. Waiting for confirmation, {seconds} seconds left before they’re reverted…",
+    "confirmHelp": "The panel confirms by itself if it can still be reached at this address. If the NAS address changed, open one of the new addresses below to confirm (the browser will warn about the certificate again).",
+    "cancel": "Cancel and revert",
+    "saved": "Network settings saved.",
+    "cancelled": "Cancelled; the old settings were restored.",
+    "reverted": "The new settings weren’t confirmed, so the old settings were restored.",
+    "pendingElsewhere": "A network change is waiting for confirmation. If it isn’t confirmed, it will be reverted automatically.",
+    "confirmPage": {
+      "working": "Confirming network settings…",
+      "ok": "The new network settings were confirmed and saved.",
+      "failed": "No network change is waiting for confirmation (it may already be confirmed, cancelled, or expired).",
+      "open": "Open the panel"
+    }
   }
 }

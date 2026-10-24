@@ -9,6 +9,7 @@ import {
   HardDrive,
   Info,
   LayoutGrid,
+  Network,
   Package,
   Settings,
   ShieldCheck,
@@ -54,6 +55,7 @@ const icons: Record<string, Component> = {
   "hard-drive": HardDrive,
   "info": Info,
   "layout-grid": LayoutGrid,
+  "network": Network,
   "package": Package,
   "settings": Settings,
   "shield-check": ShieldCheck,
@@ -72,6 +74,7 @@ const components: Record<string, Component> = {
   AccountSecurity: defineAsyncComponent(() => import("./AccountSecurity.vue")),
   Users: defineAsyncComponent(() => import("./Users.vue")),
   SharedFolders: defineAsyncComponent(() => import("./SharedFolders.vue")),
+  Network: defineAsyncComponent(() => import("./Network.vue")),
   About: defineAsyncComponent(() => import("./About.vue")),
   Planned: defineAsyncComponent(() => import("./Planned.vue")),
 }

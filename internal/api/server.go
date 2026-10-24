@@ -228,6 +228,13 @@ func New(o Options) (*Server, error) {
 	s.mux.Handle("POST /api/v1/storage/pools/{name}/scrub", s.requireAdmin(http.HandlerFunc(s.handlePoolScrub)))
 	s.mux.Handle("POST /api/v1/storage/pools/{name}/replace", s.requireAdmin(http.HandlerFunc(s.handlePoolReplace)))
 	s.mux.Handle("POST /api/v1/storage/pools/{name}/destroy", s.requireAdmin(http.HandlerFunc(s.handlePoolDestroy)))
+	s.mux.Handle("GET /api/v1/network", s.requireAdmin(s.proxyRead(proto.OpNetworkStatus)))
+	s.mux.Handle("POST /api/v1/network", s.requireAdmin(http.HandlerFunc(s.handleNetworkApply)))
+	// Konfirmasi dan pembatalan cukup dengan token dari network.apply (256
+	// bit, hanya diketahui browser admin): setelah alamat NAS berubah, admin
+	// belum login di alamat baru.
+	s.mux.HandleFunc("POST /api/v1/network/confirm", s.handleNetworkToken(proto.OpNetworkConfirm, "network.confirm"))
+	s.mux.HandleFunc("POST /api/v1/network/cancel", s.handleNetworkToken(proto.OpNetworkCancel, "network.cancel"))
 
 	s.mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "endpoint tidak ada")
@@ -351,15 +358,11 @@ func (s *Server) allowedClient(r *http.Request) bool {
 	return false
 }
 
-// allowedHosts menyusun nama host yang sah untuk panel: localhost, nama host
-// mesin, <nama host>.local, dan daftar tambahan dari konfigurasi.
+// allowedHosts menyusun nama host tetap yang sah untuk panel: localhost dan
+// daftar tambahan dari konfigurasi (nama host mesin diperiksa di
+// allowedHost, karena bisa berubah).
 func allowedHosts(extra []string) map[string]bool {
 	out := map[string]bool{"localhost": true}
-	if h, err := os.Hostname(); err == nil && h != "" {
-		h = strings.ToLower(h)
-		out[h] = true
-		out[h+".local"] = true
-	}
 	for _, h := range extra {
 		out[strings.ToLower(strings.TrimSuffix(h, "."))] = true
 	}
@@ -379,6 +382,14 @@ func (s *Server) allowedHost(hostport string) bool {
 	}
 	if _, err := netip.ParseAddr(host); err == nil {
 		return true
+	}
+	// Nama host mesin dibaca setiap kali: bisa diganti dari pengaturan
+	// jaringan tanpa sapo-api dinyalakan ulang.
+	if h, err := os.Hostname(); err == nil && h != "" {
+		h = strings.ToLower(h)
+		if host == h || host == h+".local" {
+			return true
+		}
 	}
 	return s.hosts[host]
 }
