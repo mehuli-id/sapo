@@ -461,7 +461,9 @@
     "disable": "Nonaktifkan",
     "delete": "Hapus pengguna",
     "deleteHelp": "Akun {name} dihapus dan tidak bisa masuk lagi. Tindakan ini tidak bisa dibatalkan.",
-    "typeName": "Ketik nama pengguna"
+    "typeName": "Ketik nama pengguna",
+    "notActivated": "Belum aktivasi",
+    "enableHelp": "Pengguna ini bisa masuk lagi dengan password terakhirnya."
   },
   "groups": {
     "new": "Grup baru",

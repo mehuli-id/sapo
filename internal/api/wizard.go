@@ -21,6 +21,8 @@ type Wizard struct {
 	Action string            `yaml:"action" json:"action"`
 	// FinishLabel: teks tombol terakhir (bawaan panel: Selesai).
 	FinishLabel map[string]string `yaml:"finish_label" json:"finish_label,omitempty"`
+	// AdminOnly: wizard hanya untuk administrator.
+	AdminOnly bool `yaml:"admin_only" json:"admin_only,omitempty"`
 	// Destructive: tindakan akhir menghapus data (tombol terakhir berwarna bahaya).
 	Destructive bool         `yaml:"destructive" json:"destructive,omitempty"`
 	Steps       []WizardStep `yaml:"steps" json:"steps"`
@@ -152,14 +154,6 @@ func LoadWizard(dir, id string) (*Wizard, error) {
 
 func (s *Server) handleWizard(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	// Wizard setup boleh dibaca tanpa login (dibutuhkan sebelum ada akun);
-	// wizard lain hanya untuk pengguna yang sudah login.
-	if id != "setup" {
-		if _, _, ok := s.currentSession(r); !ok {
-			writeError(w, http.StatusUnauthorized, "unauthenticated", "silakan login")
-			return
-		}
-	}
 	wz, err := LoadWizard(s.cfg.API.WizardsDir, id)
 	if errors.Is(err, fs.ErrNotExist) {
 		writeError(w, http.StatusNotFound, "not_found", "wizard tidak ada")
@@ -170,6 +164,18 @@ func (s *Server) handleWizard(w http.ResponseWriter, r *http.Request) {
 			s.log.Error("wizard tidak valid", "id", id, "err", err)
 		}
 		writeError(w, http.StatusInternalServerError, "wizard_invalid", "definisi wizard tidak valid")
+		return
+	}
+	// Wizard setup boleh dibaca tanpa login (dibutuhkan sebelum ada akun).
+	// Wizard lain mengikuti aturan API biasa: login tanpa langkah wajib yang
+	// tertunda, dan administrator untuk wizard admin_only.
+	if id != "setup" {
+		next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, wz) })
+		if wz.AdminOnly {
+			s.requireAdmin(next).ServeHTTP(w, r)
+		} else {
+			s.requireAuth(next).ServeHTTP(w, r)
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, wz)

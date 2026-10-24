@@ -246,8 +246,20 @@ func (s *Server) validateNewUser(username, password, confirm string) (string, st
 	switch {
 	case !s.validUsername(username):
 		return "username_invalid", "nama pengguna tidak sesuai aturan"
-	case slices.Contains(s.cfg.Auth.ReservedUsernames, username):
+	// Nama pengguna dan grup satu ruang nama (nantinya juga akun dan grup
+	// sistem): nama grup sistem, grup Sapo, dan akun sistem tidak boleh dipakai.
+	case slices.Contains(s.cfg.Auth.ReservedUsernames, username) || slices.Contains(s.cfg.Auth.ReservedGroupNames, username):
 		return "username_reserved", "nama pengguna ini dipakai sistem"
+	case s.groupExists(username):
+		return "username_taken", "nama ini sudah dipakai grup"
+	}
+	return s.validatePassword(username, password, confirm)
+}
+
+// validatePassword memeriksa aturan password saja (untuk akun yang sudah
+// ada, agar perubahan daftar nama yang dicadangkan tidak mengunci pemiliknya).
+func (s *Server) validatePassword(username, password, confirm string) (string, string) {
+	switch {
 	case utf8.RuneCountInString(password) < s.cfg.Auth.PasswordMinLength:
 		return "password_too_short", "password terlalu pendek"
 	case len(password) > 1024:
@@ -439,12 +451,6 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// Password benar tidak pernah dihitung sebagai percobaan gagal.
 	s.limiter.Refund(ipKey)
 	s.limiter.Refund(userKey)
-	if user.Disabled {
-		// Baru diberi tahu setelah password terbukti benar.
-		s.record(r, user.Username, "auth.login", false, map[string]string{"reason": "disabled"})
-		writeError(w, http.StatusForbidden, "account_disabled", "akun ini dinonaktifkan administrator")
-		return
-	}
 
 	if hasTOTP {
 		if code == "" {
@@ -498,6 +504,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+	}
+
+	// Baru diberi tahu setelah password (dan kode 2FA) terbukti benar, agar
+	// jawaban saat akun terkunci tetap seragam.
+	if user.Disabled {
+		s.record(r, user.Username, "auth.login", false, map[string]string{"reason": "disabled"})
+		writeError(w, http.StatusForbidden, "account_disabled", "akun ini dinonaktifkan administrator")
+		return
 	}
 
 	s.limiter.Reset(ipKey)

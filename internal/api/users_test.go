@@ -117,7 +117,13 @@ func TestUserLifecycle(t *testing.T) {
 
 	// Reset password oleh admin: wajib ganti lagi.
 	h.cookie = admin
-	h.do(http.MethodPost, "/api/v1/users/budi", map[string]any{"disabled": false})
+	// Mengaktifkan lagi memberi akses: butuh password admin.
+	if rec := h.do(http.MethodPost, "/api/v1/users/budi", map[string]any{"disabled": false}); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("aktifkan tanpa password: %d", rec.Code)
+	}
+	if rec := h.do(http.MethodPost, "/api/v1/users/budi", map[string]any{"disabled": false, "admin_password": adminPassword}); rec.Code != http.StatusOK {
+		t.Fatalf("aktifkan: %d %s", rec.Code, rec.Body)
+	}
 	if rec := h.do(http.MethodPost, "/api/v1/users/budi/password", map[string]any{"password": userPassword, "password_confirm": userPassword, "must_change_password": true, "admin_password": adminPassword}); rec.Code != http.StatusOK {
 		t.Fatalf("reset password: %d %s", rec.Code, rec.Body)
 	}
@@ -153,14 +159,19 @@ func TestNewAdminMustEnrollTOTPAndRoleChanges(t *testing.T) {
 	h.runSetup()
 	h.createUser("sari", "admin", false)
 	admin := h.loginAs("sari", userPassword)
-	if p := pending(h); len(p) != 1 || p[0] != "totp" {
-		t.Fatalf("admin baru tanpa 2FA: %v", p)
+	// Admin baru selalu wajib mengganti password dari pembuatnya, lalu 2FA.
+	if p := pending(h); strings.Join(p, ",") != "password,totp" {
+		t.Fatalf("admin baru: %v", p)
+	}
+	sariPass := "kebun teh di lereng gunung"
+	if rec := h.do(http.MethodPost, "/api/v1/account/password", map[string]string{"current_password": userPassword, "password": sariPass, "password_confirm": sariPass}); rec.Code != http.StatusOK {
+		t.Fatalf("ganti password admin baru: %d %s", rec.Code, rec.Body)
 	}
 	if rec := h.do(http.MethodGet, "/api/v1/users", nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("admin tanpa 2FA harus ditolak dulu: %d", rec.Code)
 	}
 	// Pendaftaran 2FA tetap bisa dilakukan, lalu panel terbuka.
-	rec := h.do(http.MethodPost, "/api/v1/account/totp/begin", map[string]string{"password": userPassword})
+	rec := h.do(http.MethodPost, "/api/v1/account/totp/begin", map[string]string{"password": sariPass})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("mulai 2FA: %d %s", rec.Code, rec.Body)
 	}
@@ -170,7 +181,7 @@ func TestNewAdminMustEnrollTOTPAndRoleChanges(t *testing.T) {
 	if rec := h.do(http.MethodPost, "/api/v1/account/totp/confirm", map[string]string{"token": en.Token, "code": code}); rec.Code != http.StatusOK {
 		t.Fatalf("konfirmasi 2FA: %d %s", rec.Code, rec.Body)
 	}
-	if rec := h.do(http.MethodPost, "/api/v1/account/recovery-codes", map[string]string{"password": userPassword}); rec.Code != http.StatusOK {
+	if rec := h.do(http.MethodPost, "/api/v1/account/recovery-codes", map[string]string{"password": sariPass}); rec.Code != http.StatusOK {
 		t.Fatalf("kode cadangan: %d %s", rec.Code, rec.Body)
 	}
 	if p := pending(h); len(p) != 0 {
@@ -240,5 +251,37 @@ func TestUserWizardLoads(t *testing.T) {
 	wz, err := LoadWizard("../../wizards", "user-create")
 	if err != nil || wz.Action != "users.create" {
 		t.Fatalf("%+v %v", wz, err)
+	}
+}
+
+func TestUserGroupNamespaceAndWizardAccess(t *testing.T) {
+	h := newHarness(t, &fakeAgent{})
+	h.runSetup()
+	h.do(http.MethodPost, "/api/v1/groups", map[string]string{"name": "keuangan"})
+	// Nama grup tidak boleh dipakai pengguna, nama grup sistem juga tidak.
+	for _, name := range []string{"keuangan", "sudo", "disk"} {
+		rec := h.do(http.MethodPost, "/api/v1/users", map[string]any{"username": name, "password": userPassword, "password_confirm": userPassword, "role": "user", "admin_password": adminPassword})
+		if rec.Code == http.StatusOK {
+			t.Errorf("pengguna %q harus ditolak", name)
+		}
+	}
+	h.createUser("budi", "user", false)
+	for _, name := range []string{"budi", "games"} {
+		if rec := h.do(http.MethodPost, "/api/v1/groups", map[string]string{"name": name}); rec.Code == http.StatusOK {
+			t.Errorf("grup %q harus ditolak", name)
+		}
+	}
+	if rec := h.do(http.MethodPost, "/api/v1/users/budi", map[string]any{"description": "Budi\u202emoc.knab"}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("karakter pembalik arah harus ditolak: %d", rec.Code)
+	}
+	// Wizard admin hanya untuk admin; pengguna biasa ditolak.
+	if rec := h.do(http.MethodGet, "/api/v1/wizards/user-create", nil); rec.Code != http.StatusOK {
+		t.Fatalf("wizard untuk admin: %d", rec.Code)
+	}
+	h.loginAs("budi", userPassword)
+	for _, id := range []string{"user-create", "pool-create"} {
+		if rec := h.do(http.MethodGet, "/api/v1/wizards/"+id, nil); rec.Code != http.StatusForbidden {
+			t.Errorf("wizard %s untuk pengguna biasa: %d", id, rec.Code)
+		}
 	}
 }

@@ -160,6 +160,7 @@ func New(o Options) (*Server, error) {
 		_, exists := s.store.Get(name)
 		return exists
 	}
+	s.store.RequireTOTPForAdmin = cfg.Auth.RequireTOTPForAdmin
 	s.limiter.Protected = protect
 	s.totpLimiter.Protected = protect
 

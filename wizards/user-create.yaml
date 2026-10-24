@@ -2,6 +2,7 @@
 # sapo.yaml; server memeriksa ulang semuanya.
 id: user-create
 action: users.create
+admin_only: true
 title:
   id: Tambah pengguna
   en: Add a user
