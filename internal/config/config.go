@@ -66,6 +66,7 @@ type Agent struct {
 	Console        Console  `yaml:"console"`
 	Accounts       Accounts `yaml:"accounts"`
 	Shares         Shares   `yaml:"shares"`
+	Network        Network  `yaml:"network"`
 }
 
 // Accounts mengatur akun sistem untuk berbagi file. sapod hanya menyentuh
@@ -88,6 +89,43 @@ type Accounts struct {
 	IDMax        int    `yaml:"id_max"`
 	PrimaryGroup string `yaml:"primary_group"`
 	Shell        string `yaml:"shell"`
+}
+
+// Network mengatur pengaturan jaringan dari panel (ADR 0009).
+type Network struct {
+	IP          string `yaml:"ip"`
+	Systemctl   string `yaml:"systemctl"`
+	Hostnamectl string `yaml:"hostnamectl"`
+	// File yang ditulis utuh oleh sapod.
+	InterfacesFile string `yaml:"interfaces_file"`
+	ResolvConf     string `yaml:"resolv_conf"`
+	HostsFile      string `yaml:"hosts_file"`
+	NetDir         string `yaml:"net_dir"`
+	StateFile      string `yaml:"state_file"`
+	PendingFile    string `yaml:"pending_file"`
+	NetworkService string `yaml:"network_service"`
+	AvahiService   string `yaml:"avahi_service"`
+	// Pengaturan baru berlaku setelah apply_delay_seconds dan harus
+	// dikonfirmasi dalam confirm_seconds; bila tidak, dikembalikan.
+	ApplyDelaySeconds int `yaml:"apply_delay_seconds"`
+	ConfirmSeconds    int `yaml:"confirm_seconds"`
+}
+
+func (n Network) validate() error {
+	for _, p := range []string{n.IP, n.Systemctl, n.Hostnamectl, n.InterfacesFile, n.ResolvConf, n.HostsFile, n.NetDir, n.StateFile, n.PendingFile} {
+		if !filepath.IsAbs(p) {
+			return fmt.Errorf("agent.network: %q harus path absolut", p)
+		}
+	}
+	for _, u := range []string{n.NetworkService, n.AvahiService} {
+		if !serviceName.MatchString(u) {
+			return fmt.Errorf("agent.network: %q bukan nama unit systemd", u)
+		}
+	}
+	if n.ApplyDelaySeconds < 1 || n.ApplyDelaySeconds > 30 || n.ConfirmSeconds < 30 || n.ConfirmSeconds > 900 {
+		return errors.New("agent.network: apply_delay_seconds 1-30, confirm_seconds 30-900")
+	}
+	return nil
 }
 
 // Shares mengatur shared folder dan Samba.
@@ -256,6 +294,13 @@ func Default() Config {
 				SMBConf: "/etc/samba/smb.conf", Workgroup: "WORKGROUP", ServerString: "Sapo NAS", MinProtocol: "SMB2",
 				Exportfs: "/usr/sbin/exportfs", Systemctl: "/usr/bin/systemctl", ExportsFile: "/etc/exports.d/sapo.exports",
 				NFSService: "nfs-server.service",
+			},
+			Network: Network{
+				IP: "/usr/sbin/ip", Systemctl: "/usr/bin/systemctl", Hostnamectl: "/usr/bin/hostnamectl",
+				InterfacesFile: "/etc/network/interfaces", ResolvConf: "/etc/resolv.conf", HostsFile: "/etc/hosts",
+				NetDir: "/sys/class/net", StateFile: "/var/lib/sapod/network.json", PendingFile: "/var/lib/sapod/network-pending.json",
+				NetworkService: "networking.service", AvahiService: "avahi-daemon.service",
+				ApplyDelaySeconds: 3, ConfirmSeconds: 120,
 			},
 			Storage: Storage{
 				Lsblk:                 "/usr/bin/lsblk",
@@ -450,6 +495,9 @@ func (c Config) Validate() error {
 		return err
 	}
 	if err := c.Agent.Accounts.validate(); err != nil {
+		return err
+	}
+	if err := c.Agent.Network.validate(); err != nil {
 		return err
 	}
 	if err := c.Recovery.validate(); err != nil {

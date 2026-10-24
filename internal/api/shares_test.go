@@ -240,3 +240,33 @@ func TestShareNFS(t *testing.T) {
 		t.Fatalf("NFS harus mati: %+v", sh.NFS)
 	}
 }
+
+func TestNetworkAPI(t *testing.T) {
+	agent := shareAgent()
+	agent.results[proto.OpNetworkApply] = proto.NetworkApplyResult{Token: strings.Repeat("a", 64)}
+	agent.results[proto.OpNetworkConfirm] = map[string]bool{"ok": true}
+	h := newHarness(t, agent)
+	h.runSetup()
+	body := map[string]any{"config": map[string]any{"hostname": "nas", "interfaces": []any{}, "dns": []string{}}}
+	if rec := h.do(http.MethodPost, "/api/v1/network", body); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("tanpa password admin: %d", rec.Code)
+	}
+	body["admin_password"] = adminPassword
+	if rec := h.do(http.MethodPost, "/api/v1/network", body); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), strings.Repeat("a", 64)) {
+		t.Fatalf("apply: %d %s", rec.Code, rec.Body)
+	}
+	if p, _ := agent.param(proto.OpNetworkApply).(proto.NetworkApplyParams); p.Config.Hostname != "nas" {
+		t.Fatalf("network.apply = %+v", p)
+	}
+	// Konfirmasi tanpa login (alamat baru), cukup dengan token.
+	h.cookie = nil
+	if rec := h.do(http.MethodPost, "/api/v1/network/confirm", map[string]string{"token": "pendek"}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("token pendek: %d", rec.Code)
+	}
+	if rec := h.do(http.MethodPost, "/api/v1/network/confirm", map[string]string{"token": strings.Repeat("a", 64)}); rec.Code != http.StatusOK {
+		t.Fatalf("konfirmasi: %d %s", rec.Code, rec.Body)
+	}
+	if rec := h.do(http.MethodGet, "/api/v1/network", nil); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status jaringan tanpa login: %d", rec.Code)
+	}
+}
