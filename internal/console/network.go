@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"os"
@@ -99,13 +100,24 @@ func renderInterfaces(ifaces []string, stamp string) []byte {
 	return b.Bytes()
 }
 
-// backupAndWrite menyalin file lama ke backup (bila ada), lalu menulis isi
-// baru secara atomik.
+// backupAndWrite menyalin file lama ke backup (bila ada, tidak pernah
+// menimpa cadangan lain), lalu menulis isi baru secara atomik. Mode dan
+// pemilik file lama dipertahankan di keduanya (file bisa berisi rahasia,
+// misalnya wpa-psk).
 func backupAndWrite(path, backup string, data []byte) error {
+	mode, uid, gid := os.FileMode(0o644), -1, -1
 	old, err := os.ReadFile(path)
 	switch {
 	case err == nil:
-		if err := os.WriteFile(backup, old, 0o644); err != nil {
+		fi, err := os.Lstat(path)
+		if err != nil {
+			return err
+		}
+		mode = fi.Mode().Perm()
+		if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+			uid, gid = int(st.Uid), int(st.Gid)
+		}
+		if err := writeExclusive(backup, old, mode, uid, gid); err != nil {
 			return err
 		}
 	case !errors.Is(err, fs.ErrNotExist):
@@ -120,9 +132,15 @@ func backupAndWrite(path, backup string, data []byte) error {
 		tmp.Close()
 		return err
 	}
-	if err := tmp.Chmod(0o644); err != nil {
+	if err := tmp.Chmod(mode); err != nil {
 		tmp.Close()
 		return err
+	}
+	if uid >= 0 {
+		if err := tmp.Chown(uid, gid); err != nil {
+			tmp.Close()
+			return err
+		}
 	}
 	if err := tmp.Sync(); err != nil {
 		tmp.Close()
@@ -134,9 +152,42 @@ func backupAndWrite(path, backup string, data []byte) error {
 	return os.Rename(tmp.Name(), path)
 }
 
+// writeExclusive membuat file baru (O_EXCL); bila nama sudah dipakai
+// (reset kedua dalam detik yang sama), akhiran -2, -3, … dipakai.
+func writeExclusive(path string, data []byte, mode os.FileMode, uid, gid int) error {
+	for n := 1; n < 100; n++ {
+		p := path
+		if n > 1 {
+			p = fmt.Sprintf("%s-%d", path, n)
+		}
+		f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, mode)
+		if errors.Is(err, fs.ErrExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		_, err = f.Write(data)
+		if err == nil {
+			err = f.Chmod(mode)
+		}
+		if err == nil && uid >= 0 {
+			err = f.Chown(uid, gid)
+		}
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+		return err
+	}
+	return fmt.Errorf("terlalu banyak cadangan %s", path)
+}
+
 // resetAPIKeys menghapus kunci api.<key> dari file konfigurasi admin, jadi
 // nilai bawaan paket berlaku lagi. Isi lain (dan komentarnya) tetap. File
-// yang tidak ada atau tanpa kunci itu tidak diubah.
+// yang tidak ada atau tanpa kunci itu tidak diubah. File yang tidak bisa
+// diubah dengan aman (YAML rusak, alias, lebih dari satu dokumen) dipindah
+// utuh ke cadangan: semua nilai bawaan paket berlaku lagi, karena justru
+// file rusak bisa jadi penyebab panel tidak bisa dibuka.
 func resetAPIKeys(path, backup string, keys []string) error {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -145,12 +196,34 @@ func resetAPIKeys(path, backup string, keys []string) error {
 	if err != nil {
 		return err
 	}
+	moveAside := func() error {
+		fi, err := os.Lstat(path)
+		if err != nil {
+			return err
+		}
+		uid, gid := -1, -1
+		if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+			uid, gid = int(st.Uid), int(st.Gid)
+		}
+		if err := writeExclusive(backup, data, fi.Mode().Perm(), uid, gid); err != nil {
+			return err
+		}
+		return os.Remove(path)
+	}
+	dec := yaml.NewDecoder(bytes.NewReader(data))
 	var doc yaml.Node
-	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return fmt.Errorf("format %s tidak valid: %w", path, err)
+	if err := dec.Decode(&doc); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		return moveAside()
+	}
+	var extra yaml.Node
+	if dec.Decode(&extra) != io.EOF || hasAlias(&doc) {
+		return moveAside()
 	}
 	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
-		return nil
+		return moveAside()
 	}
 	root := doc.Content[0]
 	changed := false
@@ -182,6 +255,20 @@ func resetAPIKeys(path, backup string, keys []string) error {
 		return err
 	}
 	return backupAndWrite(path, backup, out.Bytes())
+}
+
+// hasAlias: dokumen memakai alias atau kunci gabungan (<<), yang membuat
+// kunci api.* bisa datang dari tempat lain.
+func hasAlias(n *yaml.Node) bool {
+	if n.Kind == yaml.AliasNode || n.Value == "<<" || n.Anchor != "" {
+		return true
+	}
+	for _, c := range n.Content {
+		if hasAlias(c) {
+			return true
+		}
+	}
+	return false
 }
 
 // --- Bantuan sistem ----------------------------------------------------------
@@ -226,16 +313,4 @@ func localAddrs() []string {
 		}
 	}
 	return append(v4, v6...)
-}
-
-func owner(path string) (int, int, error) {
-	fi, err := os.Stat(path)
-	if err != nil {
-		return 0, 0, err
-	}
-	st, ok := fi.Sys().(*syscall.Stat_t)
-	if !ok {
-		return 0, 0, errors.New("pemilik file tidak diketahui")
-	}
-	return int(st.Uid), int(st.Gid), nil
 }

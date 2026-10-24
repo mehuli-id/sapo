@@ -9,10 +9,13 @@ UNITS="sapod.service sapo-api.service"
 
 case "$1" in
   remove)
-    # Layar login tty1 dikembalikan (menu darurat ikut terhapus).
+    # Layar login tty1 dikembalikan (menu darurat ikut terhapus), hanya
+    # bila postinst yang me-mask-nya.
     systemctl disable sapo-console@tty1.service >/dev/null 2>&1 || true
-    systemctl unmask getty@tty1.service >/dev/null 2>&1 || true
-    rm -f /var/lib/sapod/console-menu-enabled
+    if [ -e /var/lib/sapod/console-menu-enabled ]; then
+      systemctl unmask getty@tty1.service >/dev/null 2>&1 || true
+      rm -f /var/lib/sapod/console-menu-enabled
+    fi
     if [ -d /run/systemd/system ]; then
       systemctl daemon-reload || true
       systemctl start getty@tty1.service >/dev/null 2>&1 || true

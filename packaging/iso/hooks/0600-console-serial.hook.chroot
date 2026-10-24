@@ -1,7 +1,8 @@
 #!/bin/sh
 # Hook live-build (di dalam chroot): ISO dev juga menampilkan menu darurat
 # (ADR 0008) di port serial, menggantikan login serial. Uji asap di CI
-# memakainya lewat port serial QEMU. Port serial setara konsol fisik.
+# memakainya lewat port serial QEMU. Port serial setara konsol fisik; hook
+# ini hanya untuk ISO dev (packaging/iso), tidak untuk image produksi.
 set -e
 systemctl mask serial-getty@ttyS0.service
 systemctl enable sapo-console@ttyS0.service

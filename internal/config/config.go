@@ -335,7 +335,7 @@ func Default() Config {
 		Recovery: Recovery{
 			Systemctl: "/usr/bin/systemctl", APIService: "sapo-api.service", NetworkService: "networking.service",
 			InterfacesFile: "/etc/network/interfaces", NetDir: "/sys/class/net",
-			ResetAPIKeys:       []string{"listen", "allowed_networks", "denied_networks", "hostnames"},
+			ResetAPIKeys:       []string{"listen", "allowed_networks", "denied_networks", "hostnames", "tls"},
 			TempPasswordLength: 16,
 		},
 	}

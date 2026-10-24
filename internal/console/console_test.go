@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mehuli-id/sapo/internal/audit"
 	"github.com/mehuli-id/sapo/internal/auth"
 	"github.com/mehuli-id/sapo/internal/config"
 )
@@ -158,5 +159,103 @@ func TestScreenRefreshesWhileIdle(t *testing.T) {
 	_ = m.Loop(ctx)
 	if n := strings.Count(out.String(), "menu darurat konsol"); n < 3 {
 		t.Fatalf("layar harus digambar ulang saat menganggur, %d kali", n)
+	}
+}
+
+func TestHelperMain(t *testing.T) {
+	m, _, _ := testMenu(t, "")
+	dir := m.Cfg.API.DataDir
+	var out, errOut bytes.Buffer
+	if code := HelperMain([]string{"-data", dir, "admins"}, strings.NewReader(""), &out, &errOut); code != 0 || !strings.Contains(out.String(), `"admins":["arthur"]`) {
+		t.Fatalf("admins: %d %s %s", code, out.String(), errOut.String())
+	}
+	if code := HelperMain([]string{"-data", dir, "reset"}, strings.NewReader(`{"name":"budi","hash":"x"}`), &out, &errOut); code == 0 {
+		t.Fatal("pengguna biasa tidak boleh di-reset")
+	}
+	if code := HelperMain([]string{"-data", dir, "reset"}, strings.NewReader(`{"name":"arthur","hash":"h"}`), &out, &errOut); code != 0 {
+		t.Fatalf("reset: %s", errOut.String())
+	}
+	st, _ := auth.OpenStore(dir)
+	if u, _ := st.Get("arthur"); u.PasswordHash != "h" || !u.MustChangePassword {
+		t.Fatalf("admin = %+v", u)
+	}
+	if code := HelperMain([]string{"-data", dir, "hapus"}, strings.NewReader(""), &out, &errOut); code == 0 {
+		t.Fatal("perintah tidak dikenal harus ditolak")
+	}
+}
+
+func TestResetAdminSkipsUnsafeNames(t *testing.T) {
+	m, out, calls := testMenu(t, "1\n")
+	m.Data = fakeData{admins: []string{"\033[2Jjahat"}}
+	_ = m.Loop(context.Background())
+	if strings.Contains(out.String(), "\033[2Jjahat") || len(*calls) != 0 || !strings.Contains(out.String(), "Belum ada administrator") {
+		t.Fatalf("nama tidak sah harus dilewati:\n%q", out)
+	}
+}
+
+type fakeData struct{ admins []string }
+
+func (f fakeData) Admins() ([]string, string, error) { return f.admins, "id", nil }
+func (f fakeData) ResetAdmin(string, string) error   { return nil }
+func (f fakeData) Audit(audit.Event)                 {}
+
+func TestResetAPIKeysMovesBrokenFileAside(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sapo.yaml")
+	for name, body := range map[string]string{
+		"rusak":         "api:\n  allowed_networks: [10.0.0.0/8\n",
+		"alias":         "x: &a\n  listen: \":1\"\napi: *a\n",
+		"dua dokumen":   "api:\n  audit_max_mb: 5\n---\napi:\n  listen: \":1\"\n",
+		"bukan mapping": "- satu\n",
+	} {
+		_ = os.WriteFile(path, []byte(body), 0o640)
+		backup := filepath.Join(dir, name+".bak")
+		if err := resetAPIKeys(path, backup, []string{"listen"}); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if _, err := os.Stat(path); err == nil {
+			t.Errorf("%s: file harus dipindah", name)
+		}
+		if b, _ := os.ReadFile(backup); string(b) != body {
+			t.Errorf("%s: cadangan = %q", name, b)
+		}
+	}
+}
+
+func TestBackupKeepsModeAndNeverOverwrites(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "interfaces")
+	_ = os.WriteFile(path, []byte("wpa-psk rahasia\n"), 0o600)
+	backup := path + ".sapo-1"
+	if err := backupAndWrite(path, backup, []byte("baru\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := backupAndWrite(path, backup, []byte("baru lagi\n")); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{path, backup, backup + "-2"} {
+		fi, err := os.Stat(p)
+		if err != nil || fi.Mode().Perm() != 0o600 {
+			t.Fatalf("%s: %v %v", p, fi, err)
+		}
+	}
+	if b, _ := os.ReadFile(backup); string(b) != "wpa-psk rahasia\n" {
+		t.Fatalf("cadangan pertama tertimpa: %q", b)
+	}
+}
+
+func TestSecretClearedAfterTimeout(t *testing.T) {
+	pr, pw, _ := os.Pipe()
+	defer pw.Close()
+	m, out, _ := testMenu(t, "")
+	m.In, m.SecretTimeout = bufio.NewReader(pr), 50*time.Millisecond
+	go func() { _, _ = pw.WriteString("1\narthur\n") }()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_ = m.Loop(ctx)
+	s := out.String()
+	i := strings.Index(s, "Password sementara")
+	if i < 0 || !strings.Contains(s[i:], "\033[2J") {
+		t.Fatalf("layar harus dibersihkan setelah password tampil:\n%q", s)
 	}
 }

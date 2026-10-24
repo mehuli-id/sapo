@@ -10,12 +10,11 @@ import (
 	"crypto/rand"
 	_ "embed"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"math/big"
 	"os"
-	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -44,6 +43,13 @@ type Menu struct {
 	// Addrs: alamat IP NAS untuk ditampilkan.
 	Addrs func() []string
 	Now   func() time.Time
+	// Data: akun dan log audit panel (NewHelperData di NAS).
+	Data Data
+	// Warning tampil di atas menu (misalnya konfigurasi admin rusak).
+	Warning string
+	// SecretTimeout: password sementara dihapus dari layar setelah selang
+	// ini bila tidak ada yang menekan Enter.
+	SecretTimeout time.Duration
 
 	msg   map[string]string
 	lines chan lineResult
@@ -57,7 +63,8 @@ type lineResult struct {
 // NewMenu menyiapkan menu dengan bahasa setup awal (bawaan Indonesia).
 func NewMenu(cfg config.Config, adminConfig string, in io.Reader, out io.Writer) *Menu {
 	m := &Menu{Cfg: cfg, AdminConfig: adminConfig, In: bufio.NewReader(in), Out: out, Run: runProgram,
-		Hostname: os.Hostname, Addrs: localAddrs, Now: time.Now, Refresh: 30 * time.Second}
+		Hostname: os.Hostname, Addrs: localAddrs, Now: time.Now, Refresh: 30 * time.Second, SecretTimeout: 10 * time.Minute,
+		Data: localData{dir: cfg.API.DataDir, auditMax: int64(cfg.API.AuditMaxMB) << 20}}
 	m.setLanguage("id")
 	return m
 }
@@ -106,6 +113,25 @@ func (m *Menu) readLines() {
 	}
 }
 
+// waitEnter menunggu Enter, paling lama SecretTimeout (lalu layar
+// dibersihkan, misalnya agar password sementara tidak terus tampil).
+func (m *Menu) waitEnter(ctx context.Context) error {
+	var tick <-chan time.Time
+	if m.SecretTimeout > 0 {
+		t := time.NewTimer(m.SecretTimeout)
+		defer t.Stop()
+		tick = t.C
+	}
+	select {
+	case r := <-m.lines:
+		return r.err
+	case <-tick:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // readChoice menunggu pilihan menu; ok = false bila waktunya menggambar
 // ulang layar.
 func (m *Menu) readChoice(ctx context.Context) (string, bool, error) {
@@ -127,11 +153,11 @@ func (m *Menu) readChoice(ctx context.Context) (string, bool, error) {
 
 // Loop menampilkan menu sampai terminal ditutup.
 func (m *Menu) Loop(ctx context.Context) error {
-	if st, err := auth.OpenStore(m.Cfg.API.DataDir); err == nil {
-		m.setLanguage(st.Language())
-	}
 	m.lines = make(chan lineResult)
 	go m.readLines()
+	if _, lang, err := m.Data.Admins(); err == nil {
+		m.setLanguage(lang)
+	}
 	for ctx.Err() == nil {
 		m.screen()
 		choice, ok, err := m.readChoice(ctx)
@@ -159,7 +185,7 @@ func (m *Menu) Loop(ctx context.Context) error {
 		}
 		if done {
 			m.printf("\n%s\n", m.t("pressEnter"))
-			if _, err := m.readLine(); err != nil {
+			if err := m.waitEnter(ctx); err != nil {
 				return err
 			}
 		}
@@ -175,7 +201,10 @@ func (m *Menu) screen() {
 	if len(addrs) > 0 {
 		addr = strings.Join(addrs, ", ")
 	}
-	m.printf("\033[H\033[2J%s\n\n%s\n", m.t("title"), m.t("host", host, addr))
+	m.printf("\033[H\033[3J\033[2J%s\n\n%s\n", m.t("title"), m.t("host", printable(host), addr))
+	if m.Warning != "" {
+		m.printf("\n!! %s\n", printable(m.Warning))
+	}
 	// Alamat panel dan sidik jari sertifikat (ditulis sapod untuk layar
 	// login; \4 = alamat IPv4, \n = nama host seperti di agetty).
 	if data, err := os.ReadFile(m.Cfg.Agent.Console.IssueFile); err == nil {
@@ -208,14 +237,19 @@ func (m *Menu) fail(err error) bool {
 // --- Reset password admin ----------------------------------------------------
 
 func (m *Menu) resetAdmin(ctx context.Context) bool {
-	st, err := auth.OpenStore(m.Cfg.API.DataDir)
+	all, _, err := m.Data.Admins()
+	if err != nil {
+		return m.fail(err)
+	}
+	// Nama dari data panel tampil di layar root: hanya nama yang sah.
+	userRe, err := regexp.Compile(m.Cfg.Auth.UsernamePattern)
 	if err != nil {
 		return m.fail(err)
 	}
 	var admins []string
-	for _, u := range st.Users() {
-		if u.Role == auth.RoleAdmin {
-			admins = append(admins, u.Username)
+	for _, a := range all {
+		if len(a) <= 64 && userRe.MatchString(a) && printable(a) == a {
+			admins = append(admins, a)
 		}
 	}
 	if len(admins) == 0 {
@@ -272,19 +306,11 @@ func (m *Menu) resetAdmin(ctx context.Context) bool {
 }
 
 // applyAdminReset mengubah data akun (panel sudah berhenti) dan mencatatnya
-// di log audit. File data tetap milik user panel.
+// di log audit.
 func (m *Menu) applyAdminReset(name, hash string) error {
-	dir := m.Cfg.API.DataDir
-	st, err := auth.OpenStore(dir)
-	if err != nil {
-		return err
-	}
-	resetErr := st.RecoveryReset(name, hash)
-	m.audit("recovery.reset_admin", resetErr == nil, map[string]string{"user": name})
-	if err := keepOwner(dir, "users.json", "audit.log", "audit.log.1"); err != nil && resetErr == nil {
-		resetErr = err
-	}
-	return resetErr
+	err := m.Data.ResetAdmin(name, hash)
+	m.audit("recovery.reset_admin", err == nil, map[string]string{"user": name})
+	return err
 }
 
 // tempPassword membuat password sementara dari huruf dan angka yang tidak
@@ -305,32 +331,10 @@ func tempPassword(n int) (string, error) {
 	return b.String(), nil
 }
 
-// keepOwner menyamakan pemilik file data dengan pemilik direktorinya (user
-// panel), karena menu berjalan sebagai root.
-func keepOwner(dir string, names ...string) error {
-	uid, gid, err := owner(dir)
-	if err != nil {
-		return err
-	}
-	for _, n := range names {
-		p := filepath.Join(dir, n)
-		if err := os.Lchown(p, uid, gid); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-	}
-	return nil
-}
-
 // audit mencatat aksi menu darurat (pelaku "console"). Kegagalan menulis
 // tidak membatalkan pemulihan: tanpa menu ini NAS tidak bisa dipulihkan.
 func (m *Menu) audit(action string, ok bool, detail map[string]string) {
-	l, err := audit.Open(m.Cfg.API.DataDir, int64(m.Cfg.API.AuditMaxMB)<<20)
-	if err != nil {
-		return
-	}
-	defer l.Close()
-	_ = l.Record(audit.Event{Time: m.Now().UTC(), Actor: "console", Action: action, IP: "console", OK: ok, Detail: detail})
-	_ = keepOwner(m.Cfg.API.DataDir, "audit.log", "audit.log.1")
+	m.Data.Audit(audit.Event{Time: m.Now().UTC(), Actor: "console", Action: action, IP: "console", OK: ok, Detail: detail})
 }
 
 // --- Restart dan matikan -----------------------------------------------------

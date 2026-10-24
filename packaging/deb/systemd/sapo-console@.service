@@ -6,7 +6,10 @@ Description=Menu darurat Sapo di %I
 Documentation=https://github.com/mehuli-id/sapo
 After=systemd-user-sessions.service sapod.service
 Before=getty.target
-Conflicts=getty@%i.service serial-getty@%i.service
+Conflicts=getty@%i.service autovt@%i.service serial-getty@%i.service
+# Menu selalu dicoba dinyalakan lagi (tanpa batas start), karena tanpa menu
+# terminal ini kosong.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -18,12 +21,25 @@ TTYPath=/dev/%I
 TTYReset=yes
 TTYVHangup=yes
 TTYVTDisallocate=yes
-# Terminal ditutup atau program berhenti: menu ditampilkan lagi.
 Restart=always
 RestartSec=1s
 UtmpIdentifier=%I
 IgnoreSIGPIPE=no
 KillMode=process
+# Yang ditulis menu hanya pengaturan jaringan dan konfigurasi Sapo; data
+# panel ditulis proses pembantu sebagai pemilik direktorinya.
+ProtectSystem=strict
+ReadWritePaths=/etc/network -/etc/sapo -/var/lib/sapo
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
 
 [Install]
 WantedBy=getty.target
