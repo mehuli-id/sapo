@@ -1,12 +1,13 @@
 <script setup lang="ts">
 // Mode Desktop: desktop berjendela ala DSM dengan taskbar dan menu utama.
-import { computed, onMounted, onUnmounted, ref } from "vue"
+import { computed, onMounted, onUnmounted, ref, watch } from "vue"
 import { useI18n } from "vue-i18n"
 import { onClickOutside, onKeyStroke, useElementSize } from "@vueuse/core"
 import type { AppDef } from "@/apps/registry"
 import { findApp, iconFor, useVisibleApps } from "@/apps/registry"
 import SapoLogo from "@/components/SapoLogo.vue"
 import { Kbd } from "@/components/ui/kbd"
+import { useLauncher } from "@/composables/useLauncher"
 import { useShell } from "@/composables/useShell"
 import { useWindows } from "@/composables/useWindows"
 import { cn } from "@/lib/utils"
@@ -39,6 +40,13 @@ function launch(app: AppDef) {
   menuOpen.value = false
   open(app, area.value)
 }
+
+const { request } = useLauncher()
+watch(request, (id) => {
+  const app = id ? findApp(id) : undefined
+  if (app) launch(app)
+  request.value = null
+})
 
 const desktopApps = useVisibleApps()
 const now = ref(new Date())

@@ -333,6 +333,21 @@ json 'assert "arsip" not in [e["name"] for e in v["entries"]], v' <<<"$res" || f
 JAR="$admin_jar"
 echo "File Station: daftar, unduh, unggah, folder baru, pindah, hapus sebagai budi; ani (baca) ditolak; file terbaca lewat SMB"
 
+# --- Control Panel ---------------------------------------------------------------
+res="$(api POST /api/v1/settings/services '{"smb":false}')"
+[[ "$res" == *' 200' && "$res" != *'system_sync_failed'* ]] || fail "matikan SMB: $res"
+out="$(smb budi "ls")"
+[[ "$out" != *"halo.txt"* ]] || fail "SMB yang dimatikan tidak boleh melayani: $out"
+res="$(api POST /api/v1/settings/services '{"smb":true}')"
+[[ "$res" == *' 200' ]] || fail "nyalakan SMB: $res"
+for _ in $(seq 1 10); do out="$(smb budi "ls")"; [[ "$out" == *"halo.txt"* ]] && break; sleep 2; done
+[[ "$out" == *"halo.txt"* ]] || fail "SMB yang dinyalakan lagi harus melayani: $out"
+res="$(api POST /api/v1/settings/time '{"timezone":"Asia/Makassar","ntp":true}')"
+[[ "$res" == *' 200' ]] || fail "atur zona waktu: $res"
+res="$(api GET /api/v1/settings/time)"
+json 'assert v["timezone"]=="Asia/Makassar" and v["ntp"], v' <<<"$res" || fail "zona waktu: $res"
+echo "Control Panel: SMB dimatikan lalu dinyalakan lagi, zona waktu Asia/Makassar"
+
 # Pengguna yang dinonaktifkan tidak bisa masuk lewat SMB, dan sesinya yang
 # sedang terbuka ikut diputus.
 # Perintah dikirim lewat stdin dengan jeda, agar sesi tetap terbuka saat ani

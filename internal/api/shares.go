@@ -202,7 +202,8 @@ func (s *Server) syncSystem(ctx context.Context) (res proto.SharesApplyResult, e
 		// tertutup), agar pencabutan izin di panel tetap berlaku.
 		var pe *proto.Error
 		if errors.As(err, &pe) {
-			closed := proto.SharesApplyParams{Shares: []proto.ShareSpec{}}
+			v := s.settings.get()
+			closed := proto.SharesApplyParams{Shares: []proto.ShareSpec{}, SMBOff: v.SMBOff, NFSOff: v.NFSOff}
 			for _, sh := range s.shares.list() {
 				closed.Shares = append(closed.Shares, proto.ShareSpec{Name: sh.Name, Pool: sh.Pool, Description: sh.Description, Read: []string{}, Write: []string{}})
 			}
@@ -229,7 +230,8 @@ func (s *Server) syncSystem(ctx context.Context) (res proto.SharesApplyResult, e
 		s.log.Warn("nama pengguna atau grup bentrok dengan akun sistem", "bentrok", accRes.Conflicts)
 	}
 
-	params := proto.SharesApplyParams{Shares: []proto.ShareSpec{}}
+	v := s.settings.get()
+	params := proto.SharesApplyParams{Shares: []proto.ShareSpec{}, SMBOff: v.SMBOff, NFSOff: v.NFSOff}
 	for _, sh := range s.shares.list() {
 		spec := proto.ShareSpec{Name: sh.Name, Pool: sh.Pool, Description: sh.Description, Read: []string{}, Write: []string{}}
 		for p, level := range sh.Permissions {

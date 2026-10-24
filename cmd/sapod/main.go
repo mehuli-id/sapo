@@ -47,6 +47,10 @@ func main() {
 
 	reg := agent.NewRegistry()
 	reg.Register(proto.OpSystemInfo, agent.SystemInfoOp(agent.DefaultProcFS, version))
+	timeTools := agent.TimeTools{Timedatectl: cfg.Agent.Time.Timedatectl, Timeout: 20 * time.Second}
+	reg.Register(proto.OpTimeStatus, agent.TimeStatusOp(timeTools))
+	reg.Register(proto.OpTimeZones, agent.TimeZonesOp(timeTools))
+	reg.Register(proto.OpTimeSet, agent.TimeSetOp(timeTools))
 	stc := cfg.Agent.Stats
 	stats := agent.NewStats(agent.StatsTools{
 		ProcStat: "/proc/stat", MemInfo: "/proc/meminfo", NetDev: "/proc/net/dev", DiskStats: "/proc/diskstats",
@@ -103,7 +107,7 @@ func main() {
 		Zfs: shc.Zfs, Setfacl: shc.Setfacl, Testparm: shc.Testparm, Smbcontrol: shc.Smbcontrol, SMBConf: shc.SMBConf,
 		Workgroup: shc.Workgroup, ServerString: shc.ServerString, MinProtocol: shc.MinProtocol,
 		MountBase: pc.MountBase, PasswdFile: ac.PasswdFile, GroupFile: ac.GroupFile,
-		Exportfs: shc.Exportfs, Systemctl: shc.Systemctl, ExportsFile: shc.ExportsFile, NFSService: shc.NFSService,
+		Exportfs: shc.Exportfs, Systemctl: shc.Systemctl, ExportsFile: shc.ExportsFile, NFSService: shc.NFSService, SMBService: shc.SMBService,
 		IDMin: ac.IDMin, IDMax: ac.IDMax,
 	})
 	shares.SetAccounts(accounts)

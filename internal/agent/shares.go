@@ -39,6 +39,9 @@ type ShareTools struct {
 	// NFS: file ekspor yang ditulis utuh oleh sapod, exportfs, dan layanan
 	// server NFS (dijalankan hanya selama ada folder yang diekspor).
 	Exportfs, Systemctl, ExportsFile, NFSService string
+	// SMBService: layanan Samba, dimatikan bila SMB dimatikan di Control
+	// Panel.
+	SMBService string
 	// Rentang ID akun Sapo (agent.accounts): klien NFS hanya boleh
 	// dipetakan ke akun di rentang ini.
 	IDMin, IDMax int
@@ -64,6 +67,7 @@ type Shares struct {
 	// nfsState: keadaan server NFS terakhir yang diterapkan ("start",
 	// "stop", atau "" = belum diketahui). Dilindungi kunci pool.
 	nfsState string
+	smbState string
 }
 
 // aclJob adalah penerapan izin ke isi satu folder yang berjalan di latar
@@ -243,14 +247,48 @@ func (s *Shares) ApplyOp() Handler {
 		}
 		// NFS dulu dan selalu, agar pencabutan akses NFS tidak tertahan oleh
 		// galat Samba.
+		// Layanan yang dimatikan di Control Panel tidak membagikan apa pun.
+		if req.NFSOff {
+			exports = nil
+		}
+		if req.SMBOff {
+			active = nil
+		}
 		var nfsErr, smbErr error
 		out.NFS, nfsErr = s.writeExports(ctx, exports)
 		out.SMB, smbErr = s.writeSMBConf(ctx, active)
+		if smbErr == nil && out.SMB == "applied" {
+			smbErr = s.smbService(ctx, req.SMBOff)
+		}
 		if err := errors.Join(nfsErr, smbErr); err != nil {
 			return nil, err
 		}
 		return out, nil
 	}
+}
+
+// smbService menyalakan atau mematikan Samba (termasuk saat boot), hanya
+// bila keadaannya berubah sejak sapod menyala.
+func (s *Shares) smbService(ctx context.Context, off bool) error {
+	if s.t.SMBService == "" {
+		return nil
+	}
+	flags, state := []string{"enable", "--now"}, "start"
+	if off {
+		flags, state = []string{"disable", "--now"}, "stop"
+	}
+	if s.smbState == state {
+		return nil
+	}
+	res, err := s.p.st.run(ctx, s.t.Systemctl, flags, s.t.SMBService)
+	if err != nil {
+		return err
+	}
+	if res.ExitCode != 0 {
+		return fmt.Errorf("systemctl %s %s: %s", strings.Join(flags, " "), s.t.SMBService, firstLine(res.Stderr))
+	}
+	s.smbState = state
+	return nil
 }
 
 // ensureDataset membuat <pool>/<nama> bila belum ada (dengan penanda

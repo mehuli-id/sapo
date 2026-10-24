@@ -77,6 +77,7 @@ const components: Record<string, Component> = {
   Network: defineAsyncComponent(() => import("./Network.vue")),
   ResourceMonitor: defineAsyncComponent(() => import("./ResourceMonitor.vue")),
   FileStation: defineAsyncComponent(() => import("./FileStation.vue")),
+  ControlPanel: defineAsyncComponent(() => import("./ControlPanel.vue")),
   About: defineAsyncComponent(() => import("./About.vue")),
   Planned: defineAsyncComponent(() => import("./Planned.vue")),
 }

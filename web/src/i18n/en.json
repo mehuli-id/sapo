@@ -48,7 +48,7 @@
     },
     "control-panel": {
       "title": "Control Panel",
-      "description": "Services, users, and system"
+      "description": "Services, time, and system settings"
     },
     "sapo-drive": {
       "title": "Sapo Drive",
@@ -630,5 +630,27 @@
       "invalid_params": "Invalid name or location.",
       "network_error": "Lost the connection to the NAS."
     }
+  },
+  "controlPanel": {
+    "settings": "Settings",
+    "services": "File sharing services",
+    "servicesHelp": "Turning a service off disconnects every computer using it. Folder permissions don’t change; you can turn the service back on at any time.",
+    "smb": "SMB (Windows, Mac, Linux, phones)",
+    "smbHelp": "Opens shared folders from File Explorer, Finder, or file apps.",
+    "nfs": "NFS (Linux, Mac)",
+    "nfsHelp": "NFS exports set per folder in Shared Folders.",
+    "on": "On",
+    "off": "Off",
+    "smbOn": "SMB turned on.",
+    "smbOff": "SMB turned off.",
+    "nfsOn": "NFS turned on.",
+    "nfsOff": "NFS turned off.",
+    "time": "Date and time",
+    "timezone": "Time zone",
+    "ntp": "Set the clock automatically from the internet (NTP)",
+    "ntpSynced": "The clock is synchronized automatically.",
+    "ntpWaiting": "Waiting for automatic clock synchronization…",
+    "ntpOff": "Automatic clock synchronization is off.",
+    "timeSaved": "Time settings saved."
   }
 }

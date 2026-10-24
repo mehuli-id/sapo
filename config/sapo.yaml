@@ -106,6 +106,12 @@ agent:
     systemctl: /usr/bin/systemctl
     exports_file: /etc/exports.d/sapo.exports
     nfs_service: nfs-server.service
+    # Samba dimatikan (juga saat boot) bila SMB dimatikan di Control Panel.
+    smb_service: smbd.service
+
+  # Waktu dan tanggal (Control Panel): zona waktu dan NTP lewat timedatectl.
+  time:
+    timedatectl: /usr/bin/timedatectl
 
   # File Station (ADR 0010): operasi file dijalankan sebagai akun pengguna.
   # Penghapusan folder besar dibatasi delete_timeout_seconds (di bawah batas

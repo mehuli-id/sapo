@@ -82,6 +82,7 @@ type Server struct {
 	setup       pendingTOTP
 	reenroll    pendingTOTP // pendaftaran ulang 2FA dari panel (per user)
 	shares      *shareStore
+	settings    *settingsStore
 	// syncMu: satu sinkronisasi akun dan shared folder ke sapod pada satu waktu.
 	syncMu        sync.Mutex
 	resyncRunning atomic.Bool
@@ -148,6 +149,10 @@ func New(o Options) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	settings, err := openSettingsStore(cfg.API.DataDir)
+	if err != nil {
+		return nil, err
+	}
 	argon := auth.Argon2Params{MemoryKiB: cfg.Auth.Argon2.MemoryKiB, Iterations: cfg.Auth.Argon2.Iterations, Parallelism: cfg.Auth.Argon2.Parallelism}
 	dummy, err := auth.HashPassword("sapo-dummy-password", argon)
 	if err != nil {
@@ -171,6 +176,7 @@ func New(o Options) (*Server, error) {
 		setup:    pendingTOTP{entries: map[string]pendingEntry{}},
 		reenroll: pendingTOTP{entries: map[string]pendingEntry{}},
 		shares:   shares,
+		settings: settings,
 
 		resyncDelay: 30 * time.Second,
 
@@ -244,6 +250,12 @@ func New(o Options) (*Server, error) {
 	s.mux.Handle("POST /api/v1/files/mkdir", s.requireAuth(s.handleFileChange(proto.OpFilesMkdir, "files.mkdir")))
 	s.mux.Handle("POST /api/v1/files/rename", s.requireAuth(s.handleFileChange(proto.OpFilesRename, "files.rename")))
 	s.mux.Handle("POST /api/v1/files/delete", s.requireAuth(s.handleFileChange(proto.OpFilesDelete, "files.delete")))
+	// Control Panel.
+	s.mux.Handle("GET /api/v1/settings/services", s.requireAdmin(http.HandlerFunc(s.handleServices)))
+	s.mux.Handle("POST /api/v1/settings/services", s.requireAdmin(http.HandlerFunc(s.handleServicesUpdate)))
+	s.mux.Handle("GET /api/v1/settings/time", s.requireAdmin(s.proxyRead(proto.OpTimeStatus)))
+	s.mux.Handle("GET /api/v1/settings/timezones", s.requireAdmin(s.proxyRead(proto.OpTimeZones)))
+	s.mux.Handle("POST /api/v1/settings/time", s.requireAdmin(http.HandlerFunc(s.handleTimeSet)))
 	s.mux.Handle("GET /api/v1/network", s.requireAdmin(s.proxyRead(proto.OpNetworkStatus)))
 	s.mux.Handle("POST /api/v1/network", s.requireAdmin(http.HandlerFunc(s.handleNetworkApply)))
 	// Konfirmasi dan pembatalan cukup dengan token dari network.apply (256

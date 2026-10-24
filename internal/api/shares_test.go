@@ -270,3 +270,30 @@ func TestNetworkAPI(t *testing.T) {
 		t.Fatalf("status jaringan tanpa login: %d", rec.Code)
 	}
 }
+
+func TestControlPanelServices(t *testing.T) {
+	agent := shareAgent()
+	agent.results[proto.OpTimeSet] = map[string]bool{"ok": true}
+	h := newHarness(t, agent)
+	h.runSetup()
+	if rec := h.do(http.MethodGet, "/api/v1/settings/services", nil); rec.Body.String() != `{"nfs":true,"smb":true}`+"\n" {
+		t.Fatalf("bawaan: %s", rec.Body)
+	}
+	if rec := h.do(http.MethodPost, "/api/v1/settings/services", map[string]bool{"smb": false}); rec.Code != http.StatusOK {
+		t.Fatalf("matikan SMB: %d %s", rec.Code, rec.Body)
+	}
+	if p, _ := agent.param(proto.OpSharesApply).(proto.SharesApplyParams); !p.SMBOff || p.NFSOff {
+		t.Fatalf("shares.apply = %+v", p)
+	}
+	// Tersimpan di file (bertahan setelah sapo-api dinyalakan ulang).
+	st, _ := openSettingsStore(h.s.cfg.API.DataDir)
+	if !st.get().SMBOff {
+		t.Fatal("pengaturan tidak tersimpan")
+	}
+	if rec := h.do(http.MethodPost, "/api/v1/settings/time", map[string]any{"timezone": "Asia/Jakarta", "ntp": true}); rec.Code != http.StatusOK {
+		t.Fatalf("waktu: %d %s", rec.Code, rec.Body)
+	}
+	if p, _ := agent.param(proto.OpTimeSet).(proto.TimeSetParams); p.Timezone != "Asia/Jakarta" || !p.NTP {
+		t.Fatalf("time.set = %+v", p)
+	}
+}

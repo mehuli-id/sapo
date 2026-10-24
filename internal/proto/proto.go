@@ -99,6 +99,12 @@ const (
 	// OpConsolePanelAddress memperbarui alamat panel (dan sidik jari
 	// sertifikat) di layar login konsol NAS.
 	OpConsolePanelAddress = "console.panel_address"
+	// OpTimeStatus membaca zona waktu, jam, dan status NTP; OpTimeZones
+	// daftar zona waktu; OpTimeSet mengubah zona waktu dan NTP.
+	OpTimeStatus = "time.status"
+	OpTimeZones  = "time.zones"
+	OpTimeSet    = "time.set"
+
 	// Operasi File Station (ADR 0010). Semua dijalankan sebagai akun Linux
 	// pengguna (proses pembantu), jadi izinnya ditegakkan kernel (ACL).
 	OpFilesList   = "files.list"
@@ -441,9 +447,12 @@ type SMBPasswordParams struct {
 	Password string `json:"password"`
 }
 
-// SharesApplyParams adalah daftar lengkap shared folder.
+// SharesApplyParams adalah daftar lengkap shared folder. SMBOff/NFSOff
+// mematikan layanan itu (Control Panel); nilai kosong = menyala.
 type SharesApplyParams struct {
 	Shares []ShareSpec `json:"shares"`
+	SMBOff bool        `json:"smb_off,omitempty"`
+	NFSOff bool        `json:"nfs_off,omitempty"`
 }
 
 // ShareSpec adalah satu shared folder: dataset <Pool>/<Name>. Read dan Write
@@ -655,4 +664,20 @@ type FilesOpenResult struct {
 	ModTime time.Time `json:"mtime"`
 	// Temp: nama file sementara unggahan (files.open_write).
 	Temp string `json:"temp,omitempty"`
+}
+
+// TimeStatus adalah hasil time.status.
+type TimeStatus struct {
+	Timezone string    `json:"timezone"`
+	Now      time.Time `json:"now"`
+	// NTP: sinkronisasi waktu otomatis menyala; Synchronized: jam sudah
+	// tersinkron.
+	NTP          bool `json:"ntp"`
+	Synchronized bool `json:"synchronized"`
+}
+
+// TimeSetParams adalah parameter time.set.
+type TimeSetParams struct {
+	Timezone string `json:"timezone"`
+	NTP      bool   `json:"ntp"`
 }

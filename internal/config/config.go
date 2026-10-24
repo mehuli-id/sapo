@@ -70,6 +70,7 @@ type Agent struct {
 	Console        Console  `yaml:"console"`
 	Accounts       Accounts `yaml:"accounts"`
 	Shares         Shares   `yaml:"shares"`
+	Time           Time     `yaml:"time"`
 	Network        Network  `yaml:"network"`
 	Stats          Stats    `yaml:"stats"`
 	Files          Files    `yaml:"files"`
@@ -95,6 +96,11 @@ type Accounts struct {
 	IDMax        int    `yaml:"id_max"`
 	PrimaryGroup string `yaml:"primary_group"`
 	Shell        string `yaml:"shell"`
+}
+
+// Time mengatur zona waktu dan NTP dari Control Panel.
+type Time struct {
+	Timedatectl string `yaml:"timedatectl"`
 }
 
 // Files mengatur File Station (ADR 0010).
@@ -185,6 +191,7 @@ type Shares struct {
 	Systemctl   string `yaml:"systemctl"`
 	ExportsFile string `yaml:"exports_file"`
 	NFSService  string `yaml:"nfs_service"`
+	SMBService  string `yaml:"smb_service"`
 }
 
 // Console mengatur alamat panel di layar login konsol NAS. File ditulis sapod
@@ -331,9 +338,10 @@ func Default() Config {
 				Zfs: "/usr/sbin/zfs", Setfacl: "/usr/bin/setfacl", Testparm: "/usr/bin/testparm", Smbcontrol: "/usr/bin/smbcontrol",
 				SMBConf: "/etc/samba/smb.conf", Workgroup: "WORKGROUP", ServerString: "Sapo NAS", MinProtocol: "SMB2",
 				Exportfs: "/usr/sbin/exportfs", Systemctl: "/usr/bin/systemctl", ExportsFile: "/etc/exports.d/sapo.exports",
-				NFSService: "nfs-server.service",
+				NFSService: "nfs-server.service", SMBService: "smbd.service",
 			},
 			Stats: Stats{IntervalSeconds: 2, History: 300, IdleStopSeconds: 60},
+			Time:  Time{Timedatectl: "/usr/bin/timedatectl"},
 			Files: Files{MaxEntries: 5000, TimeoutSeconds: 30, DeleteTimeoutSeconds: 270},
 			Network: Network{
 				IP: "/usr/sbin/ip", Systemctl: "/usr/bin/systemctl", Hostnamectl: "/usr/bin/hostnamectl",
@@ -538,6 +546,9 @@ func (c Config) Validate() error {
 	if err := c.Agent.Accounts.validate(); err != nil {
 		return err
 	}
+	if !filepath.IsAbs(c.Agent.Time.Timedatectl) {
+		return errors.New("agent.time.timedatectl harus path absolut")
+	}
 	if err := c.Agent.Files.validate(); err != nil {
 		return err
 	}
@@ -693,8 +704,8 @@ func (s Shares) validate() error {
 	case !strings.HasSuffix(s.ExportsFile, ".exports"):
 		// exportfs hanya membaca file *.exports di /etc/exports.d.
 		return errors.New("agent.shares.exports_file harus berakhiran .exports")
-	case !serviceName.MatchString(s.NFSService):
-		return errors.New("agent.shares.nfs_service harus nama unit systemd (misalnya nfs-server.service)")
+	case !serviceName.MatchString(s.NFSService) || !serviceName.MatchString(s.SMBService):
+		return errors.New("agent.shares.nfs_service dan smb_service harus nama unit systemd (misalnya nfs-server.service)")
 	}
 	return nil
 }

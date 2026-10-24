@@ -48,7 +48,7 @@
     },
     "control-panel": {
       "title": "Control Panel",
-      "description": "Layanan, user, dan sistem"
+      "description": "Layanan, waktu, dan pengaturan sistem"
     },
     "sapo-drive": {
       "title": "Sapo Drive",
@@ -630,5 +630,27 @@
       "invalid_params": "Nama atau lokasi tidak valid.",
       "network_error": "Koneksi ke NAS terputus."
     }
+  },
+  "controlPanel": {
+    "settings": "Pengaturan",
+    "services": "Layanan berbagi file",
+    "servicesHelp": "Mematikan layanan memutus semua komputer yang sedang memakainya. Izin folder tidak berubah; layanan bisa dinyalakan lagi kapan saja.",
+    "smb": "SMB (Windows, Mac, Linux, HP)",
+    "smbHelp": "Membuka shared folder dari File Explorer, Finder, atau aplikasi file.",
+    "nfs": "NFS (Linux, Mac)",
+    "nfsHelp": "Ekspor NFS yang diatur per folder di Shared Folder.",
+    "on": "Menyala",
+    "off": "Mati",
+    "smbOn": "SMB dinyalakan.",
+    "smbOff": "SMB dimatikan.",
+    "nfsOn": "NFS dinyalakan.",
+    "nfsOff": "NFS dimatikan.",
+    "time": "Waktu dan tanggal",
+    "timezone": "Zona waktu",
+    "ntp": "Sinkronkan jam otomatis dari internet (NTP)",
+    "ntpSynced": "Jam tersinkron otomatis.",
+    "ntpWaiting": "Menunggu sinkronisasi jam otomatis…",
+    "ntpOff": "Sinkronisasi jam otomatis mati.",
+    "timeSaved": "Pengaturan waktu disimpan."
   }
 }
