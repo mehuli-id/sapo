@@ -47,6 +47,9 @@ type Pools struct {
 	st    *Storage
 	t     PoolTools
 	write sync.Mutex
+	// openExcl memeriksa bahwa perangkat blok tidak sedang dipakai (diganti
+	// di test; nil = tidak diperiksa).
+	openExcl func(dev string) error
 }
 
 // NewPools menyiapkan operasi pool di atas st.
@@ -54,7 +57,7 @@ func NewPools(st *Storage, t PoolTools) *Pools {
 	if t.ByIDDir == "" {
 		t.ByIDDir = "/dev/disk/by-id"
 	}
-	return &Pools{st: st, t: t}
+	return &Pools{st: st, t: t, openExcl: openExclusive}
 }
 
 // poolNamePattern membatasi nama pool baru: huruf kecil, angka, garis bawah,
@@ -355,9 +358,11 @@ func (p *Pools) PoolCreateOp() Handler {
 		}
 		defer p.write.Unlock()
 
-		ctx, cancel := context.WithTimeout(ctx, p.t.CreateTimeout)
+		// Pemeriksaan memakai batas waktu biasa; zpool create mendapat batas
+		// waktunya sendiri di bawah agar tidak terpotong waktu pemeriksaan.
+		checkCtx, cancel := context.WithTimeout(ctx, p.st.t.Timeout)
 		defer cancel()
-		existing, err := p.poolNames(ctx)
+		existing, err := p.poolNames(checkCtx)
 		if err != nil {
 			return nil, err
 		}
@@ -366,7 +371,7 @@ func (p *Pools) PoolCreateOp() Handler {
 		}
 		// Selalu dibaca baru (bukan dari cache): keadaan disk saat ini yang
 		// menentukan.
-		disks, err := p.st.listDisks(ctx)
+		disks, err := p.st.listDisks(checkCtx)
 		if err != nil {
 			return nil, err
 		}
@@ -374,10 +379,20 @@ func (p *Pools) PoolCreateOp() Handler {
 		if err != nil {
 			return nil, err
 		}
+		// Lapisan terakhir: kernel sendiri yang memastikan tidak ada yang
+		// sedang memegang disk atau partisinya (anggota btrfs multi-disk,
+		// device-mapper, dan pemakai lain yang tidak terlihat di lsblk).
+		if err := p.checkNotClaimed(req.Disks, disks); err != nil {
+			return nil, err
+		}
 
 		devices := make([]string, 0, len(req.Disks))
 		for _, d := range req.Disks {
-			devices = append(devices, p.stablePath(d.Name))
+			dev, err := p.stablePath(d)
+			if err != nil {
+				return nil, err
+			}
+			devices = append(devices, dev)
 		}
 		flags := []string{"create"}
 		if force {
@@ -398,20 +413,42 @@ func (p *Pools) PoolCreateOp() Handler {
 		operands = append(operands, devices...)
 
 		p.logInfo("membuat pool", "pool", req.Name, "susunan", layout.ID, "perangkat", devices, "paksa", force)
-		res, err := p.st.run(ctx, p.t.Zpool, flags, operands...)
+		// Tidak dibatalkan bila sapo-api memutus koneksi: zpool yang dihentikan
+		// di tengah jalan bisa meninggalkan disk setengah berlabel.
+		createCtx, cancelCreate := context.WithTimeout(context.WithoutCancel(ctx), p.t.CreateTimeout)
+		defer cancelCreate()
+		res, runErr := p.st.run(createCtx, p.t.Zpool, flags, operands...)
 		p.st.forgetDisks()
-		if err != nil {
-			return nil, err
-		}
-		if res.ExitCode != 0 {
-			msg := clipTo(strings.TrimSpace(string(res.Stderr)), maxErrorText)
-			p.logWarn("pool gagal dibuat", "pool", req.Name, "kode", res.ExitCode, "stderr", msg)
+
+		// Hasil dipastikan dari keadaan nyata: zpool bisa gagal melapor
+		// (misalnya waktu habis) padahal pool sudah terbentuk.
+		afterCtx, cancelAfter := context.WithTimeout(context.WithoutCancel(ctx), p.st.t.Timeout)
+		defer cancelAfter()
+		names, namesErr := p.poolNames(afterCtx)
+		created := namesErr == nil && names[req.Name]
+		if !created {
+			msg := ""
+			switch {
+			case runErr != nil:
+				msg = runErr.Error()
+			case res.ExitCode != 0:
+				msg = clipTo(strings.TrimSpace(string(res.Stderr)), maxErrorText)
+			case namesErr != nil:
+				msg = "pool mungkin sudah dibuat, tetapi daftar pool tidak terbaca: " + namesErr.Error()
+			default:
+				msg = "zpool selesai tanpa error, tetapi pool tidak ditemukan"
+			}
+			p.logWarn("pool gagal dibuat", "pool", req.Name, "kode", res.ExitCode, "pesan", msg)
 			return nil, &OpError{Code: "pool_create_failed", Message: msg}
 		}
+		if runErr != nil || res.ExitCode != 0 {
+			p.logWarn("zpool create melapor gagal, tetapi pool terbentuk", "pool", req.Name, "err", runErr, "kode", res.ExitCode)
+		}
 		p.logInfo("pool dibuat", "pool", req.Name)
-		list, err := p.listPools(ctx)
+		list, err := p.listPools(afterCtx)
 		if err != nil {
-			return nil, err
+			// Pool sudah ada; detailnya tampil saat panel memuat ulang.
+			return proto.Pool{Name: req.Name, Vdevs: []proto.Vdev{}}, nil
 		}
 		for _, pool := range list.Pools {
 			if pool.Name == req.Name {
@@ -468,7 +505,10 @@ func (p *Pools) checkDisks(refs []proto.DiskRef, disks []proto.Disk) (force bool
 		if !ok {
 			return false, &OpError{Code: proto.ErrDiskChanged, Message: "disk " + ref.Name + " tidak ditemukan lagi"}
 		}
-		if d.Serial != ref.Serial || d.WWN != ref.WWN || d.SizeBytes != ref.SizeBytes {
+		// Status pakai juga bagian dari identitas: disk kosong yang tiba-tiba
+		// berisi data (dipartisi ulang, atau ditukar dengan disk lain
+		// berukuran sama tanpa nomor seri) tidak boleh ikut terhapus.
+		if d.Serial != ref.Serial || d.WWN != ref.WWN || d.SizeBytes != ref.SizeBytes || d.Usage != ref.Usage {
 			return false, &OpError{Code: proto.ErrDiskChanged, Message: "disk " + ref.Name + " sudah berbeda dari yang dipilih"}
 		}
 		switch {
@@ -514,18 +554,27 @@ func (p *Pools) poolNames(ctx context.Context) (map[string]bool, error) {
 }
 
 // stablePath memilih nama perangkat yang tidak berubah antar-boot dari
-// /dev/disk/by-id (WWN dulu, lalu nomor seri). Bila tidak ada (misalnya disk
-// virtual tanpa nomor seri), dipakai /dev/<nama>; ZFS tetap menemukan disknya
-// saat impor karena label pool tersimpan di disk.
-func (p *Pools) stablePath(name string) string {
+// /dev/disk/by-id (WWN dulu, lalu nomor seri). Nama itu harus memuat WWN atau
+// nomor seri yang sudah diperiksa, dan harus masih menunjuk ke disk yang sama.
+// Bila disk tidak punya keduanya (misalnya disk virtual), dipakai /dev/<nama>;
+// ZFS tetap menemukan disknya saat impor karena label pool tersimpan di disk.
+func (p *Pools) stablePath(ref proto.DiskRef) (string, error) {
+	name := ref.Name
+	fallback := func() (string, error) {
+		if ref.Serial != "" || ref.WWN != "" {
+			// Disk beridentitas harus muncul di by-id; bila tidak, ada yang aneh.
+			return "", &OpError{Code: proto.ErrDiskChanged, Message: "nama tetap disk " + name + " tidak ditemukan"}
+		}
+		return "/dev/" + name, nil
+	}
 	entries, err := os.ReadDir(p.t.ByIDDir)
 	if err != nil {
-		return "/dev/" + name
+		return fallback()
 	}
 	best, bestRank := "", len(byIDPrefixes)+1
 	for _, e := range entries {
 		n := e.Name()
-		if partSuffix.MatchString(n) {
+		if partSuffix.MatchString(n) || !matchesIdentity(n, ref) {
 			continue
 		}
 		target, err := filepath.EvalSymlinks(filepath.Join(p.t.ByIDDir, n))
@@ -544,9 +593,50 @@ func (p *Pools) stablePath(name string) string {
 		}
 	}
 	if best == "" {
-		return "/dev/" + name
+		return fallback()
 	}
-	return filepath.Join(p.t.ByIDDir, best)
+	return filepath.Join(p.t.ByIDDir, best), nil
+}
+
+// matchesIdentity: nama by-id memuat WWN (wwn-0x…, nvme-eui.…) atau nomor
+// seri disk yang sudah diperiksa.
+func matchesIdentity(link string, ref proto.DiskRef) bool {
+	wwn := strings.TrimPrefix(strings.ToLower(ref.WWN), "0x")
+	switch {
+	case wwn != "" && strings.Contains(strings.ToLower(link), wwn):
+		return true
+	case ref.Serial != "" && strings.Contains(link, strings.ReplaceAll(ref.Serial, " ", "_")):
+		return true
+	}
+	return false
+}
+
+// checkNotClaimed membuka setiap disk dan partisinya dengan O_EXCL. Kernel
+// menolak (EBUSY) perangkat blok yang sedang dipakai: terpasang, swap,
+// anggota RAID, device-mapper, atau btrfs multi-disk.
+func (p *Pools) checkNotClaimed(refs []proto.DiskRef, disks []proto.Disk) error {
+	if p.openExcl == nil {
+		return nil
+	}
+	byName := map[string]proto.Disk{}
+	for _, d := range disks {
+		byName[d.Name] = d
+	}
+	for _, ref := range refs {
+		d := byName[ref.Name]
+		names := []string{d.Name}
+		for _, part := range d.Partitions {
+			if part.Type == "part" {
+				names = append(names, part.Name)
+			}
+		}
+		for _, n := range names {
+			if err := p.openExcl("/dev/" + n); err != nil {
+				return &OpError{Code: proto.ErrDiskInUse, Message: "disk " + ref.Name + " sedang dipakai sistem (" + n + ": " + err.Error() + ")"}
+			}
+		}
+	}
+	return nil
 }
 
 // byIDPrefixes: urutan pilihan nama di /dev/disk/by-id, dari yang paling
@@ -566,6 +656,10 @@ func (p *Pools) PoolScrubOp() Handler {
 		if !poolNamePattern.MatchString(req.Name) || (req.Action != "start" && req.Action != "stop") {
 			return nil, &OpError{Code: proto.ErrInvalidParams, Message: "parameter scrub tidak valid"}
 		}
+		if !p.write.TryLock() {
+			return nil, &OpError{Code: proto.ErrBusy, Message: "operasi pool lain sedang berjalan"}
+		}
+		defer p.write.Unlock()
 		ctx, cancel := context.WithTimeout(ctx, p.st.t.Timeout)
 		defer cancel()
 		names, err := p.poolNames(ctx)

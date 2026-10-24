@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -18,14 +19,17 @@ import (
 // zpoolFake mengatur jawaban zpool pengganti per subperintah. Setiap
 // pemanggilan dicatat di <prog>.calls (argumen per baris, dipisah "---").
 type zpoolFake struct {
-	list        string // fixture zpool list -H -p (kosong = tidak ada pool)
-	listExit    int
-	listStderr  string
-	names       string // isi zpool list -H -o name
-	status      string // fixture zpool status -j
-	createExit  int
-	scrubExit   int
-	scrubStderr string
+	list       string // fixture zpool list -H -p (kosong = tidak ada pool)
+	listExit   int
+	listStderr string
+	names      string // isi zpool list -H -o name
+	status     string // fixture zpool status -j
+	createExit int
+	// createNoPool: zpool create tidak menghasilkan pool (selain itu nama
+	// pool ditambahkan ke daftar, seperti zpool sungguhan).
+	createNoPool bool
+	scrubExit    int
+	scrubStderr  string
 }
 
 func writeZpool(t *testing.T, dir string, z zpoolFake) string {
@@ -51,7 +55,9 @@ func writeZpool(t *testing.T, dir string, z zpoolFake) string {
 		"list)\n  if [ \"$3\" = -o ] && [ \"$4\" = name ]; then cat '" + namesFile + "'; exit 0; fi\n" +
 		"  printf '%s' " + q(z.listStderr) + " >&2\n  cat '" + fixture(z.list) + "'\n  exit " + strconv.Itoa(z.listExit) + " ;;\n" +
 		"status) cat '" + fixture(z.status) + "' ;;\n" +
-		"create) exit " + strconv.Itoa(z.createExit) + " ;;\n" +
+		"create) if [ " + strconv.Quote(strconv.FormatBool(z.createNoPool)) + " = false ]; then\n" +
+		"    seen=; for a in \"$@\"; do if [ \"$seen\" = 1 ]; then echo \"$a\" >> '" + namesFile + "'; break; fi; [ \"$a\" = -- ] && seen=1; done\n" +
+		"  fi; exit " + strconv.Itoa(z.createExit) + " ;;\n" +
 		"scrub) printf '%s' " + q(z.scrubStderr) + " >&2; exit " + strconv.Itoa(z.scrubExit) + " ;;\n" +
 		"esac\n"
 	if err := os.WriteFile(prog, []byte(script), 0o755); err != nil {
@@ -91,11 +97,31 @@ func newTestPools(t *testing.T, z zpoolFake) (*Pools, string) {
 		Timeout: 5 * time.Second, MaxConcurrent: 2,
 	})
 	zpool := writeZpool(t, dir, z)
-	return NewPools(st, PoolTools{
+	// /dev/disk/by-id tiruan: virtio-<nomor seri> → file pengganti /dev/<disk>.
+	byID, devDir := filepath.Join(dir, "by-id"), filepath.Join(dir, "dev")
+	for _, d := range []string{byID, devDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for serial, name := range map[string]string{"SYS0": "vda", "POOL1": "vdb", "POOL2": "vdc", "NEW1": "vdd", "OLD1": "vde", "BIG1": "vdf", "SWAP1": "vdg", "LVM1": "vdh", "DM1": "vdj"} {
+		if err := os.WriteFile(filepath.Join(devDir, name), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Join(devDir, name), filepath.Join(byID, "virtio-"+serial)); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Join(devDir, name), filepath.Join(byID, "virtio-"+serial+"-part1")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pools := NewPools(st, PoolTools{
 		Zpool: zpool, MountBase: "/srv/sapo", Ashift: 12,
 		RootProperties: map[string]string{"compression": "lz4", "atime": "off"},
-		Layouts:        testLayouts, CreateTimeout: 5 * time.Second, ByIDDir: filepath.Join(dir, "by-id"),
-	}), zpool
+		Layouts:        testLayouts, CreateTimeout: 5 * time.Second, ByIDDir: byID,
+	})
+	pools.openExcl = nil
+	return pools, zpool
 }
 
 func TestDiskUsage(t *testing.T) {
@@ -117,7 +143,7 @@ func TestDiskUsage(t *testing.T) {
 		"vdd": "free/", "vdf": "free/",
 		"vde": "data/", // ext4 yang tidak terpasang: boleh dipakai bila penghapusan dikonfirmasi
 		"vdg": "in_use/swap", "vdh": "in_use/lvm",
-		"sdi": "free/",
+		"sdi": "free/", "vdj": "in_use/holder",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("usage = %v\nharus   %v", got, want)
@@ -189,8 +215,13 @@ func TestPoolsUnavailable(t *testing.T) {
 	}
 }
 
+// ref adalah disk seperti yang dilihat pengguna; usage diambil dari fixture.
 func ref(name, serial string, size uint64, erase bool) proto.DiskRef {
-	return proto.DiskRef{Name: name, Serial: serial, SizeBytes: size, Erase: erase}
+	usage := map[string]string{"vda": "in_use", "vdb": "in_use", "vdc": "in_use", "vde": "data", "vdg": "in_use", "vdh": "in_use", "vdj": "in_use"}[name]
+	if usage == "" {
+		usage = "free"
+	}
+	return proto.DiskRef{Name: name, Serial: serial, SizeBytes: size, Usage: usage, Erase: erase}
 }
 
 const gib4 = 4294967296
@@ -208,22 +239,9 @@ func TestPoolCreateMirror(t *testing.T) {
 	p, zpool := newTestPools(t, zpoolFake{names: "tank\n"})
 	// Nama by-id yang stabil dipakai bila ada (WWN didahulukan).
 	byID := p.t.ByIDDir
-	devDir := t.TempDir()
-	for _, n := range []string{"vdd", "vde"} {
-		if err := os.WriteFile(filepath.Join(devDir, n), nil, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.MkdirAll(byID, 0o755); err != nil {
+	// Link WWN yang menunjuk vdd tetapi bukan identitas vdd yang diperiksa.
+	if err := os.Symlink(filepath.Join(filepath.Dir(byID), "dev", "vdd"), filepath.Join(byID, "wwn-0x5000c500a1b2c3d4")); err != nil {
 		t.Fatal(err)
-	}
-	for link, target := range map[string]string{
-		"virtio-NEW1": "vdd", "wwn-0x5000c500a1b2c3d4": "vdd", "virtio-NEW1-part1": "vdd",
-		"virtio-OLD1": "vde",
-	} {
-		if err := os.Symlink(filepath.Join(devDir, target), filepath.Join(byID, link)); err != nil {
-			t.Fatal(err)
-		}
 	}
 
 	_, err := p.PoolCreateOp()(context.Background(), createParams(t, proto.PoolCreateParams{
@@ -239,9 +257,10 @@ func TestPoolCreateMirror(t *testing.T) {
 			create = c
 		}
 	}
+	// Link WWN milik disk lain (identitasnya tidak cocok dengan NEW1) tidak dipakai.
 	want := []string{
 		"create", "-f", "-o", "ashift=12", "-O", "atime=off", "-O", "compression=lz4", "-m", "/srv/sapo/data", "--",
-		"data", "mirror", filepath.Join(byID, "wwn-0x5000c500a1b2c3d4"), filepath.Join(byID, "virtio-OLD1"),
+		"data", "mirror", filepath.Join(byID, "virtio-NEW1"), filepath.Join(byID, "virtio-OLD1"),
 	}
 	// -f karena vde berisi data yang penghapusannya dikonfirmasi.
 	if !reflect.DeepEqual(create, want) {
@@ -258,7 +277,7 @@ func TestPoolCreateWithoutForceOnFreeDisks(t *testing.T) {
 	}
 	for _, c := range zpoolCalls(t, zpool) {
 		if c[0] == "create" {
-			if strings.Join(c, " ") != "create -o ashift=12 -O atime=off -O compression=lz4 -m /srv/sapo/solo -- solo /dev/vdd" {
+			if strings.Join(c, " ") != "create -o ashift=12 -O atime=off -O compression=lz4 -m /srv/sapo/solo -- solo "+filepath.Join(p.t.ByIDDir, "virtio-NEW1") {
 				t.Fatalf("zpool create = %q", c)
 			}
 			return
@@ -338,7 +357,7 @@ func TestPoolCreateMixedSizesForces(t *testing.T) {
 }
 
 func TestPoolCreateFailureAndBusy(t *testing.T) {
-	p, _ := newTestPools(t, zpoolFake{createExit: 1})
+	p, _ := newTestPools(t, zpoolFake{createExit: 1, createNoPool: true})
 	params := createParams(t, proto.PoolCreateParams{Name: "solo", Layout: proto.LayoutSingle, Disks: []proto.DiskRef{ref("vdd", "NEW1", gib4, false)}})
 	_, err := p.PoolCreateOp()(context.Background(), params)
 	var oe *OpError
@@ -390,5 +409,58 @@ func TestPoolScrub(t *testing.T) {
 		if _, _, err := scrub(zpoolFake{names: "tank\n"}, bad[0], bad[1]); !errors.As(err, &oe) || oe.Code != proto.ErrInvalidParams {
 			t.Fatalf("%q: %v", bad, err)
 		}
+	}
+}
+
+func TestPoolCreateRefusesClaimedOrChangedDisks(t *testing.T) {
+	params := func(r proto.DiskRef) json.RawMessage {
+		return createParams(t, proto.PoolCreateParams{Name: "solo", Layout: proto.LayoutSingle, Disks: []proto.DiskRef{r}})
+	}
+	var oe *OpError
+	// Kernel menolak O_EXCL (misalnya anggota btrfs multi-disk yang tidak
+	// terlihat sebagai terpasang di lsblk).
+	p, zpool := newTestPools(t, zpoolFake{})
+	var opened []string
+	p.openExcl = func(dev string) error {
+		opened = append(opened, dev)
+		if dev == "/dev/vde1" {
+			return syscall.EBUSY
+		}
+		return nil
+	}
+	if _, err := p.PoolCreateOp()(context.Background(), params(ref("vde", "OLD1", gib4, true))); !errors.As(err, &oe) || oe.Code != proto.ErrDiskInUse {
+		t.Fatalf("err = %v, harus disk_in_use", err)
+	}
+	if !reflect.DeepEqual(opened, []string{"/dev/vde", "/dev/vde1"}) {
+		t.Fatalf("diperiksa = %v", opened)
+	}
+	for _, c := range zpoolCalls(t, zpool) {
+		if c[0] == "create" {
+			t.Fatal("zpool create tidak boleh dipanggil")
+		}
+	}
+	// Disk yang tampil kosong saat dipilih tetapi kini berisi data.
+	r := ref("vde", "OLD1", gib4, false)
+	r.Usage = proto.DiskFree
+	if _, err := p.PoolCreateOp()(context.Background(), params(r)); !errors.As(err, &oe) || oe.Code != proto.ErrDiskChanged {
+		t.Fatalf("err = %v, harus disk_changed", err)
+	}
+	// Dipegang device-mapper: gagal-tertutup.
+	if _, err := p.PoolCreateOp()(context.Background(), params(ref("vdj", "DM1", gib4, true))); !errors.As(err, &oe) || oe.Code != proto.ErrDiskInUse {
+		t.Fatalf("err = %v, harus disk_in_use", err)
+	}
+	// Disk bernomor seri yang tidak muncul di by-id: ditolak.
+	p.t.ByIDDir = t.TempDir()
+	if _, err := p.PoolCreateOp()(context.Background(), params(ref("vdd", "NEW1", gib4, false))); !errors.As(err, &oe) || oe.Code != proto.ErrDiskChanged {
+		t.Fatalf("err = %v, harus disk_changed", err)
+	}
+}
+
+func TestPoolCreateReportsRealOutcome(t *testing.T) {
+	params := createParams(t, proto.PoolCreateParams{Name: "solo", Layout: proto.LayoutSingle, Disks: []proto.DiskRef{ref("vdd", "NEW1", gib4, false)}})
+	// zpool melapor gagal tetapi pool terbentuk: dilaporkan berhasil.
+	p, _ := newTestPools(t, zpoolFake{createExit: 1})
+	if _, err := p.PoolCreateOp()(context.Background(), params); err != nil {
+		t.Fatalf("pool terbentuk harus dilaporkan berhasil: %v", err)
 	}
 }

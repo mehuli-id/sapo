@@ -296,7 +296,7 @@ func appendChildren(dst *[]proto.Partition, children []lsblkDevice) {
 // seluruh turunannya. Urutan alasan penting: yang paling berbahaya bila
 // dihapus (sistem berkas terpasang, swap) didahulukan.
 func diskUsage(b lsblkDevice) (usage, reason string) {
-	rank := map[string]int{proto.UsageMounted: 6, proto.UsageSwap: 5, proto.UsagePool: 4, proto.UsageRAID: 3, proto.UsageLVM: 2, proto.UsageCrypt: 1}
+	rank := map[string]int{proto.UsageMounted: 7, proto.UsageSwap: 6, proto.UsagePool: 5, proto.UsageRAID: 4, proto.UsageLVM: 3, proto.UsageCrypt: 2, proto.UsageHolder: 1}
 	hasData := str(b.FSType) != "" || str(b.PTType) != "" || len(b.Children) > 0
 	var walk func(d lsblkDevice)
 	walk = func(d lsblkDevice) {
@@ -313,7 +313,8 @@ func diskUsage(b lsblkDevice) (usage, reason string) {
 		switch fs := str(d.FSType); {
 		case fs == "zfs_member":
 			r = pickReason(r, proto.UsagePool, rank)
-		case fs == "linux_raid_member" || strings.HasPrefix(d.Type, "raid"):
+		case strings.HasSuffix(fs, "_raid_member") || strings.HasPrefix(d.Type, "raid") || d.Type == "md":
+			// linux_raid_member, isw_raid_member (Intel), ddf_raid_member, …
 			r = pickReason(r, proto.UsageRAID, rank)
 		case fs == "LVM2_member" || d.Type == "lvm":
 			r = pickReason(r, proto.UsageLVM, rank)
@@ -322,6 +323,11 @@ func diskUsage(b lsblkDevice) (usage, reason string) {
 		}
 		reason = pickReason(reason, r, rank)
 		for _, c := range d.Children {
+			// Turunan selain partisi (dm, mpath, bcache, …) berarti ada
+			// perangkat lain yang memegang disk ini.
+			if c.Type != "part" {
+				reason = pickReason(reason, proto.UsageHolder, rank)
+			}
 			walk(c)
 		}
 	}

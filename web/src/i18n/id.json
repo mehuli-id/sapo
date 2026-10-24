@@ -154,7 +154,8 @@
       "raid": "Anggota RAID mdadm",
       "lvm": "Dipakai LVM",
       "crypt": "Volume terenkripsi yang sedang terbuka",
-      "removable": "Disk lepas-pasang (flashdisk) tidak dipakai untuk pool"
+      "removable": "Disk lepas-pasang (flashdisk) tidak dipakai untuk pool",
+      "holder": "Dipegang perangkat lain (device-mapper, multipath, atau sejenisnya)"
     }
   },
   "about": {

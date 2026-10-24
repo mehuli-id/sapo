@@ -89,7 +89,9 @@ func (s *Server) handlePoolCreate(w http.ResponseWriter, r *http.Request) {
 	// Membuat pool bisa lebih lama dari batas tulis server HTTP.
 	timeout := time.Duration(s.cfg.Agent.Storage.Pools.CreateTimeoutSeconds)*time.Second + 15*time.Second
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(timeout + 15*time.Second))
-	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	// Tidak dibatalkan bila browser menutup koneksi: sapod tetap
+	// menyelesaikan pembuatan pool, jadi hasil di log audit harus hasil nyata.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), timeout)
 	defer cancel()
 	var pool json.RawMessage
 	err := s.agent.Call(ctx, proto.OpStoragePoolCreate, proto.PoolCreateParams{Name: req.Name, Layout: req.Layout, Disks: req.Disks}, &pool)

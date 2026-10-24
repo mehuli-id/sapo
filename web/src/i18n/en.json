@@ -154,7 +154,8 @@
       "raid": "Member of an mdadm RAID",
       "lvm": "Used by LVM",
       "crypt": "Open encrypted volume",
-      "removable": "Removable disks (USB sticks) are not used for pools"
+      "removable": "Removable disks (USB sticks) are not used for pools",
+      "holder": "Held by another device (device-mapper, multipath, or similar)"
     }
   },
   "about": {

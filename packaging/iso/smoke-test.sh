@@ -119,7 +119,7 @@ refs() { json "
 d={x['serial']:x for x in v}
 out=[]
 for s,erase in [$1]:
-    x=d[s]; out.append(dict(name=x['name'],serial=x['serial'],wwn=x['wwn'],size_bytes=x['size_bytes'],erase=erase))
+    x=d[s]; out.append(dict(name=x['name'],serial=x['serial'],wwn=x['wwn'],size_bytes=x['size_bytes'],usage=x['usage'],erase=erase))
 print(json.dumps(out))" <<<"$disks_json"; }
 json "
 u={x['serial']:x['usage'] for x in v}
