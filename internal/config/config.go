@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -80,6 +81,12 @@ type Shares struct {
 	ServerString string `yaml:"server_string"`
 	// Versi SMB paling rendah: SMB2 (SMB1 tidak aman).
 	MinProtocol string `yaml:"min_protocol"`
+	// NFS: file ekspor ditulis utuh oleh sapod; layanan server NFS hanya
+	// berjalan selama ada folder yang diekspor.
+	Exportfs    string `yaml:"exportfs"`
+	Systemctl   string `yaml:"systemctl"`
+	ExportsFile string `yaml:"exports_file"`
+	NFSService  string `yaml:"nfs_service"`
 }
 
 // Console mengatur alamat panel di layar login konsol NAS. File ditulis sapod
@@ -225,6 +232,8 @@ func Default() Config {
 			Shares: Shares{
 				Zfs: "/usr/sbin/zfs", Setfacl: "/usr/bin/setfacl", Testparm: "/usr/bin/testparm", Smbcontrol: "/usr/bin/smbcontrol",
 				SMBConf: "/etc/samba/smb.conf", Workgroup: "WORKGROUP", ServerString: "Sapo NAS", MinProtocol: "SMB2",
+				Exportfs: "/usr/sbin/exportfs", Systemctl: "/usr/bin/systemctl", ExportsFile: "/etc/exports.d/sapo.exports",
+				NFSService: "nfs-server.service",
 			},
 			Storage: Storage{
 				Lsblk:                 "/usr/bin/lsblk",
@@ -538,10 +547,13 @@ var (
 	// Nilai [global] Samba ditulis apa adanya ke smb.conf: tanpa baris baru
 	// atau karakter yang punya arti di sintaks Samba.
 	smbValue = regexp.MustCompile(`^[A-Za-z0-9 ._-]{1,64}$`)
+	// serviceName: nama unit systemd (tidak diawali "-", agar tidak dibaca
+	// sebagai opsi).
+	serviceName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9@._-]{0,63}\.service$`)
 )
 
 func (s Shares) validate() error {
-	for _, p := range []string{s.Zfs, s.Setfacl, s.Testparm, s.Smbcontrol, s.SMBConf} {
+	for _, p := range []string{s.Zfs, s.Setfacl, s.Testparm, s.Smbcontrol, s.SMBConf, s.Exportfs, s.Systemctl, s.ExportsFile} {
 		if !filepath.IsAbs(p) {
 			return fmt.Errorf("agent.shares: %q harus path absolut", p)
 		}
@@ -551,6 +563,11 @@ func (s Shares) validate() error {
 		return errors.New("agent.shares: workgroup dan server_string hanya huruf, angka, spasi, titik, garis bawah, tanda hubung")
 	case s.MinProtocol != "SMB2" && s.MinProtocol != "SMB3":
 		return errors.New("agent.shares.min_protocol harus SMB2 atau SMB3")
+	case !strings.HasSuffix(s.ExportsFile, ".exports"):
+		// exportfs hanya membaca file *.exports di /etc/exports.d.
+		return errors.New("agent.shares.exports_file harus berakhiran .exports")
+	case !serviceName.MatchString(s.NFSService):
+		return errors.New("agent.shares.nfs_service harus nama unit systemd (misalnya nfs-server.service)")
 	}
 	return nil
 }

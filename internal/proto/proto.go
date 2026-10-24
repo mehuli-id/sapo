@@ -423,13 +423,30 @@ type ShareSpec struct {
 	Description string   `json:"description"`
 	Read        []string `json:"read"`
 	Write       []string `json:"write"`
+	// NFS: folder juga diekspor lewat NFS (nil = tidak).
+	NFS *NFSExport `json:"nfs,omitempty"`
 }
 
-// SharesApplyResult melaporkan keadaan setiap folder dan Samba ("applied"
-// atau "unavailable" bila Samba belum terpasang).
+// MaxNFSClients membatasi jumlah jaringan klien NFS per folder.
+const MaxNFSClients = 32
+
+// NFSExport adalah ekspor NFS satu folder. Semua akses dari klien dipetakan
+// ke satu akun Sapo (User), jadi izin NFS sama dengan izin akun itu.
+// Clients berisi alamat atau jaringan dalam bentuk kanonis (netip), misalnya
+// "192.168.1.0/24" atau "192.168.1.20/32". ReadOnly mengikuti izin efektif
+// akun itu di folder (dihitung sapo-api, termasuk lewat grup).
+type NFSExport struct {
+	Clients  []string `json:"clients"`
+	User     string   `json:"user"`
+	ReadOnly bool     `json:"read_only"`
+}
+
+// SharesApplyResult melaporkan keadaan setiap folder, Samba, dan NFS.
 type SharesApplyResult struct {
 	Shares []ShareState `json:"shares"`
 	SMB    string       `json:"smb"`
+	// NFS: "applied", atau "unavailable" bila server NFS belum terpasang.
+	NFS string `json:"nfs"`
 }
 
 // ShareState adalah hasil satu folder; Error kosong bila siap.
@@ -438,6 +455,8 @@ type ShareState struct {
 	Pool  string `json:"pool"`
 	Path  string `json:"path,omitempty"`
 	Error string `json:"error,omitempty"`
+	// NFSError: folder siap, tetapi ekspor NFS-nya tidak dipasang.
+	NFSError string `json:"nfs_error,omitempty"`
 }
 
 // ShareDeleteParams adalah parameter shares.delete.

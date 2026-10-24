@@ -36,6 +36,12 @@ type ShareTools struct {
 	MountBase string
 	// Untuk mengubah nama pengguna dan grup menjadi ID (ACL isi folder).
 	PasswdFile, GroupFile string
+	// NFS: file ekspor yang ditulis utuh oleh sapod, exportfs, dan layanan
+	// server NFS (dijalankan hanya selama ada folder yang diekspor).
+	Exportfs, Systemctl, ExportsFile, NFSService string
+	// Rentang ID akun Sapo (agent.accounts): klien NFS hanya boleh
+	// dipetakan ke akun di rentang ini.
+	IDMin, IDMax int
 }
 
 // Shares melayani shares.apply, shares.delete, dan shares.usage. Perubahan
@@ -134,6 +140,9 @@ func (s *Shares) checkSpecs(specs []proto.ShareSpec) error {
 				return invalid("izin tidak valid di " + sp.Name + ": " + clip(p))
 			}
 		}
+		if err := checkNFSSpec(sp); err != nil {
+			return invalid(err.Error())
+		}
 	}
 	return nil
 }
@@ -168,20 +177,35 @@ func (s *Shares) ApplyOp() Handler {
 		}
 		out := proto.SharesApplyResult{Shares: []proto.ShareState{}}
 		var active []shareConf
+		var exports []nfsConf
 		for _, sp := range req.Shares {
 			if !pools[sp.Pool] {
 				out.Shares = append(out.Shares, proto.ShareState{Name: sp.Name, Pool: sp.Pool, Error: "pool tidak ditemukan"})
 				continue
 			}
-			acl, aclErr := ids.resolve(sp)
+			st := proto.ShareState{Name: sp.Name, Pool: sp.Pool}
+			var nfs *nfsConf
+			if sp.NFS != nil {
+				uid, gid, err := s.nfsAccount(ids, sp.NFS.User)
+				if err != nil {
+					// Folder tetap disiapkan untuk SMB, tanpa ekspor NFS.
+					st.NFSError = err.Error()
+					sp.NFS = nil
+				} else {
+					nfs = &nfsConf{clients: sp.NFS.Clients, uid: uid, gid: gid, readOnly: sp.NFS.ReadOnly}
+				}
+			}
+			// Izin di sistem berkas mencakup akun NFS; Samba memakai izin asli.
+			perms := withNFSUser(sp)
+			acl, aclErr := ids.resolve(perms)
 			path, applied, err := s.ensureDataset(ctx, sp)
 			if err == nil {
 				err = aclErr
 			}
 			if err == nil {
-				err = s.setPermissions(ctx, path, sp)
+				err = s.setPermissions(ctx, path, perms)
 			}
-			st := proto.ShareState{Name: sp.Name, Pool: sp.Pool, Path: path}
+			st.Path = path
 			if err != nil {
 				st.Error = clipTo(err.Error(), maxErrorText)
 				s.p.logWarn("shared folder gagal disiapkan", "folder", sp.Name, "err", err)
@@ -194,10 +218,22 @@ func (s *Shares) ApplyOp() Handler {
 					// users kosong di Samba berarti semua pengguna boleh masuk).
 					active = append(active, shareConf{spec: sp, path: path})
 				}
+				if nfs != nil {
+					if nfsPathPattern.MatchString(path) {
+						nfs.path = path
+						exports = append(exports, *nfs)
+					} else {
+						st.NFSError = "path folder tidak bisa diekspor lewat NFS"
+					}
+				}
 			}
 			out.Shares = append(out.Shares, st)
 		}
 		out.SMB, err = s.writeSMBConf(ctx, active)
+		if err != nil {
+			return nil, err
+		}
+		out.NFS, err = s.writeExports(ctx, exports)
 		if err != nil {
 			return nil, err
 		}
@@ -633,6 +669,10 @@ func (s *Shares) DeleteOp() Handler {
 		// dilepas. Bila masih dipakai, tidak ada yang dihapus (zfs destroy -r
 		// menghapus snapshot sebelum melepas folder).
 		_, _ = s.p.st.run(ctx, s.t.Smbcontrol, []string{"smbd", "close-share"}, req.Name)
+		// Ekspor NFS dicabut sebelum folder dilepas.
+		if err := s.unexport(ctx, filepath.Join(s.t.MountBase, req.Pool, req.Name)); err != nil {
+			return nil, &OpError{Code: "share_delete_failed", Message: clipTo(err.Error(), maxErrorText)}
+		}
 		res, err = s.p.st.run(ctx, s.t.Zfs, []string{"unmount"}, ds)
 		if err != nil {
 			return nil, err

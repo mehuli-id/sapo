@@ -90,6 +90,8 @@ func main() {
 		Zfs: shc.Zfs, Setfacl: shc.Setfacl, Testparm: shc.Testparm, Smbcontrol: shc.Smbcontrol, SMBConf: shc.SMBConf,
 		Workgroup: shc.Workgroup, ServerString: shc.ServerString, MinProtocol: shc.MinProtocol,
 		MountBase: pc.MountBase, PasswdFile: ac.PasswdFile, GroupFile: ac.GroupFile,
+		Exportfs: shc.Exportfs, Systemctl: shc.Systemctl, ExportsFile: shc.ExportsFile, NFSService: shc.NFSService,
+		IDMin: ac.IDMin, IDMax: ac.IDMax,
 	})
 	reg.Register(proto.OpSharesApply, shares.ApplyOp())
 	reg.Register(proto.OpSharesDelete, shares.DeleteOp())

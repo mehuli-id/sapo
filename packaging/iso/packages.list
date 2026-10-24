@@ -15,4 +15,6 @@ zfsutils-linux
 # Berbagi file SMB (fitur smb) dan ACL POSIX untuk izin shared folder.
 samba
 acl
+# Berbagi file NFS (fitur nfs, NFS versi 4 saja).
+nfs-kernel-server
 # SSH sengaja tidak dipasang: user live memakai password bawaan.

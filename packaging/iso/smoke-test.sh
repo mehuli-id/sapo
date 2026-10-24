@@ -5,19 +5,20 @@
 # sementara (file di samping ISO, dihapus di akhir); disk ketiga berisi
 # ext4 dan harus ditolak tanpa konfirmasi penghapusan (ADR 0005). Setelah
 # scrub, shared folder dibuat dan dibuka lewat SMB dengan tiga pengguna
-# (tulis, baca, tanpa akses), satu disk diganti disk ketiga (resilver), lalu
-# pool dihapus.
+# (tulis, baca, tanpa akses) dan lewat NFS (dipasang dari host dengan sudo),
+# satu disk diganti disk ketiga (resilver), lalu pool dihapus.
 # HTTPS wajib (ADR 0004): HTTP hanya boleh menyajikan halaman petunjuk, dan
 # sidik jari yang diumumkan panel harus sama dengan sertifikat yang dipakai.
 # Pemakaian: packaging/iso/smoke-test.sh dist/sapo-dev_<versi>_amd64.iso
-# Kebutuhan: qemu-system-x86_64, curl, openssl, python3, mkfs.ext4, smbclient. KVM
-# dipakai bila tersedia.
+# Kebutuhan: qemu-system-x86_64, curl, openssl, python3, mkfs.ext4, smbclient,
+# klien NFS (mount.nfs4) dan sudo tanpa password. KVM dipakai bila tersedia.
 set -euo pipefail
 
 ISO="${1:?Pemakaian: $0 <file.iso>}"
 PORT="${PORT:-15000}"              # port HTTP di host, diteruskan ke 5000 di VM
 TLS_PORT="${TLS_PORT:-15001}"      # port HTTPS di host, diteruskan ke 5001 di VM
 SMB_PORT="${SMB_PORT:-14450}"      # port SMB di host, diteruskan ke 445 di VM
+NFS_PORT="${NFS_PORT:-12049}"      # port NFS di host, diteruskan ke 2049 di VM
 TIMEOUT_S="${TIMEOUT_S:-600}"      # batas waktu boot sampai panel siap
 VM_RAM_MB="${VM_RAM_MB:-2048}"
 LOG="${LOG:-$(dirname "$ISO")/smoke-test-console.log}"
@@ -38,10 +39,10 @@ if [[ -w /dev/kvm ]]; then accel=(-accel kvm -cpu host); fi
 
 qemu-system-x86_64 "${accel[@]}" -m "$VM_RAM_MB" -smp 2 \
   -cdrom "$ISO" -boot d "${disks[@]}" \
-  -nic "user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:$PORT-:5000,hostfwd=tcp:127.0.0.1:$TLS_PORT-:5001,hostfwd=tcp:127.0.0.1:$SMB_PORT-:445" \
+  -nic "user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:$PORT-:5000,hostfwd=tcp:127.0.0.1:$TLS_PORT-:5001,hostfwd=tcp:127.0.0.1:$SMB_PORT-:445,hostfwd=tcp:127.0.0.1:$NFS_PORT-:2049" \
   -display none -serial "file:$LOG" &
 qemu=$!
-trap 'kill "$qemu" 2>/dev/null || true; rm -rf "$WORK"' EXIT
+trap 'sudo umount -f -l "$WORK/nfs" 2>/dev/null || true; kill "$qemu" 2>/dev/null || true; rm -rf "$WORK"' EXIT
 
 fail() { echo "GAGAL: $*" >&2; exit 1; }
 
@@ -205,6 +206,49 @@ rm -f "$WORK/salinan.txt"
 out="$(smb cici "get halo.txt $WORK/salinan.txt")"
 cmp -s "$WORK/halo.txt" "$WORK/salinan.txt" || fail "cici (baca, izin baru) harus bisa membaca file lama: $out"
 echo "SMB: izin baru berlaku untuk file yang sudah ada"
+
+# --- Shared folder lewat NFS ----------------------------------------------------
+# Koneksi dari host lewat QEMU tampak dari 10.0.2.2 di VM. Semua akses dari
+# klien berlaku sebagai pengguna NFS yang dipilih (all_squash), termasuk root.
+mkdir -p "$WORK/nfs"
+share_path="$(json 'print(v[0]["path"])' <<<"$shares")"
+nfs_set() { # nfs_set JSON → respons API
+  api POST /api/v1/shares/keluarga "{\"nfs\":$1,\"admin_password\":\"$PASS\"}"
+}
+nfs_mount() {
+  timeout 60 sudo mount -t nfs4 -o "vers=4.2,port=$NFS_PORT,retry=0,soft,timeo=50,retrans=1" "127.0.0.1:$share_path" "$WORK/nfs" 2>&1
+}
+nfs_umount() { sudo umount "$WORK/nfs"; }
+res="$(nfs_set '{"user":"ani","clients":["10.0.2.2"]}')"
+[[ "$res" == *' 200' && "$res" != *'system_sync_failed'* ]] || fail "aktifkan NFS: $res; status sinkronisasi: $(api GET /api/v1/system/sync)"
+shares="$(api GET /api/v1/shares)"
+json 's=v[0]; assert s["nfs"]["clients"]==["10.0.2.2/32"] and s["nfs_access"]=="read" and not s.get("nfs_error"), s' <<<"$shares" \
+  || fail "status NFS: $shares"
+out="$(nfs_mount)" || fail "pasang NFS (ani, baca): $out"
+cmp -s "$WORK/halo.txt" "$WORK/nfs/halo.txt" || fail "NFS sebagai ani (baca) harus bisa membaca halo.txt"
+if sudo sh -c "echo x > '$WORK/nfs/coba.txt'" 2>/dev/null; then fail "NFS sebagai ani (baca) tidak boleh menulis, termasuk dari root klien"; fi
+nfs_umount
+echo "NFS: baca saja sebagai ani, root klien tidak mendapat hak lebih"
+
+res="$(nfs_set '{"user":"budi","clients":["10.0.2.0/24"]}')"
+[[ "$res" == *' 200' && "$res" != *'system_sync_failed'* ]] || fail "NFS sebagai budi: $res"
+out="$(nfs_mount)" || fail "pasang NFS (budi, tulis): $out"
+echo "dari NFS" | sudo tee "$WORK/nfs/nfs.txt" >/dev/null || fail "NFS sebagai budi (tulis) harus bisa menulis"
+owner="$(stat -c %u "$WORK/nfs/nfs.txt")"
+(( owner >= 20000 && owner <= 29999 )) || fail "file dari root klien harus milik akun budi, bukan UID $owner"
+nfs_umount
+rm -f "$WORK/salinan.txt"
+out="$(smb cici "get nfs.txt $WORK/salinan.txt")"
+[[ "$(cat "$WORK/salinan.txt" 2>/dev/null)" == "dari NFS" ]] || fail "file dari NFS harus mewarisi izin folder (cici baca lewat SMB): $out"
+echo "NFS: tulis sebagai budi (file milik UID $owner), izin folder diwarisi"
+
+res="$(nfs_set '{"user":"budi","clients":["10.0.3.0/24"]}')"
+[[ "$res" == *' 200' ]] || fail "NFS klien lain: $res"
+if out="$(nfs_mount)"; then nfs_umount; fail "klien di luar jaringan yang diizinkan harus ditolak"; fi
+res="$(nfs_set null)"
+[[ "$res" == *' 200' ]] || fail "matikan NFS: $res"
+if out="$(nfs_mount)"; then nfs_umount; fail "NFS yang dimatikan tidak boleh bisa dipasang"; fi
+echo "NFS: klien di luar jaringan dan NFS yang dimatikan ditolak"
 
 # Pengguna yang dinonaktifkan tidak bisa masuk lewat SMB, dan sesinya yang
 # sedang terbuka ikut diputus.

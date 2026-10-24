@@ -168,3 +168,74 @@ func TestSyncFailsClosedWhenAccountsFail(t *testing.T) {
 		t.Fatalf("shares.apply = %+v", apply)
 	}
 }
+
+func TestShareNFS(t *testing.T) {
+	agent := shareAgent()
+	h := newHarness(t, agent)
+	h.runSetup()
+	h.do(http.MethodPost, "/api/v1/groups", map[string]string{"name": "ortu"})
+	h.createUser("ani", "user", false, "ortu")
+	h.createUser("budi", "user", false)
+
+	body := map[string]any{
+		"name": "keluarga", "pool": "tank", "admin_password": adminPassword,
+		"permissions": map[string]string{"group:ortu": "write", "user:budi": "read"},
+		// Alamat tunggal menjadi /32; jaringan disamakan ke bentuk kanonis.
+		"nfs": map[string]any{"user": "ani", "clients": []string{" 192.168.1.20 ", "10.1.2.3/16", "10.1.0.0/16"}},
+	}
+	if rec := h.do(http.MethodPost, "/api/v1/shares", body); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"nfs_access":"write"`) {
+		t.Fatalf("buat folder: %d %s", rec.Code, rec.Body)
+	}
+	// Izin ani lewat grup ortu: diekspor baca & tulis.
+	apply, _ := agent.param(proto.OpSharesApply).(proto.SharesApplyParams)
+	if n := apply.Shares[0].NFS; n == nil || n.User != "ani" || n.ReadOnly || strings.Join(n.Clients, ",") != "192.168.1.20/32,10.1.0.0/16" {
+		t.Fatalf("shares.apply = %+v", apply.Shares[0].NFS)
+	}
+
+	for name, nfs := range map[string]any{
+		"semua orang":    map[string]any{"user": "ani", "clients": []string{"0.0.0.0/0"}},
+		"terlalu luas":   map[string]any{"user": "ani", "clients": []string{"10.0.0.0/7"}},
+		"nama host":      map[string]any{"user": "ani", "clients": []string{"pc-ani.lan"}},
+		"tanpa klien":    map[string]any{"user": "ani", "clients": []string{}},
+		"pengguna asing": map[string]any{"user": "hantu", "clients": []string{"10.0.0.0/8"}},
+	} {
+		rec := h.do(http.MethodPost, "/api/v1/shares/keluarga", map[string]any{"nfs": nfs, "admin_password": adminPassword})
+		if errCode(rec) != "nfs_invalid" {
+			t.Errorf("%s: %d %s", name, rec.Code, rec.Body)
+		}
+	}
+	// Mengubah ekspor NFS butuh password admin.
+	nfsBudi := map[string]any{"user": "budi", "clients": []string{"10.0.0.0/8"}}
+	if rec := h.do(http.MethodPost, "/api/v1/shares/keluarga", map[string]any{"nfs": nfsBudi}); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("ubah NFS tanpa password: %d", rec.Code)
+	}
+	// budi hanya punya izin baca: diekspor baca saja.
+	if rec := h.do(http.MethodPost, "/api/v1/shares/keluarga", map[string]any{"nfs": nfsBudi, "admin_password": adminPassword}); rec.Code != http.StatusOK {
+		t.Fatalf("ubah NFS: %d %s", rec.Code, rec.Body)
+	}
+	apply, _ = agent.param(proto.OpSharesApply).(proto.SharesApplyParams)
+	if n := apply.Shares[0].NFS; n == nil || n.User != "budi" || !n.ReadOnly {
+		t.Fatalf("shares.apply = %+v", n)
+	}
+	// Pengguna tanpa izin di folder: tidak diekspor sama sekali.
+	h.do(http.MethodPost, "/api/v1/shares/keluarga", map[string]any{"permissions": map[string]string{"group:ortu": "write"}, "admin_password": adminPassword})
+	if apply, _ = agent.param(proto.OpSharesApply).(proto.SharesApplyParams); apply.Shares[0].NFS != nil {
+		t.Fatalf("budi tanpa izin tidak boleh diekspor: %+v", apply.Shares[0].NFS)
+	}
+	// Mengubah keterangan saja tidak mengubah ekspor NFS.
+	h.do(http.MethodPost, "/api/v1/shares/keluarga", map[string]any{"description": "baru"})
+	if sh, _ := h.s.shares.get("keluarga"); sh.NFS == nil || sh.NFS.User != "budi" {
+		t.Fatalf("NFS hilang: %+v", sh.NFS)
+	}
+	// Menghapus pengguna NFS mematikan ekspornya.
+	h.do(http.MethodPost, "/api/v1/users/budi/delete", map[string]string{"confirm_name": "budi", "admin_password": adminPassword})
+	if sh, _ := h.s.shares.get("keluarga"); sh.NFS != nil {
+		t.Fatalf("NFS pengguna terhapus harus mati: %+v", sh.NFS)
+	}
+	// null mematikan ekspor.
+	h.do(http.MethodPost, "/api/v1/shares/keluarga", map[string]any{"nfs": map[string]any{"user": "ani", "clients": []string{"10.0.0.0/8"}}, "admin_password": adminPassword})
+	h.do(http.MethodPost, "/api/v1/shares/keluarga", map[string]any{"nfs": nil, "admin_password": adminPassword})
+	if sh, _ := h.s.shares.get("keluarga"); sh.NFS != nil {
+		t.Fatalf("NFS harus mati: %+v", sh.NFS)
+	}
+}
