@@ -57,12 +57,12 @@ func TestSharesNFSExport(t *testing.T) {
 	for _, w := range []string{
 		"g:ortu:rwx,u:ani:rwx", // akun NFS punya entri ACL sendiri
 		"m::rwx,u:budi:r-x,d:", // tanpa entri ganda
-		"systemctl enable --now -- nfs-server.service\nexportfs -ra --",
 	} {
 		if !strings.Contains(c, w) {
 			t.Errorf("panggilan tanpa %q:\n%s", w, c)
 		}
 	}
+	inOrder(t, c, "systemctl enable --now -- nfs-server.service", "exportfs -ra --")
 	// Samba tetap memakai izin asli (ani tidak ditambahkan ke valid users).
 	if conf, _ := os.ReadFile(s.t.SMBConf); strings.Contains(string(conf), "ani") {
 		t.Fatalf("smb.conf:\n%s", conf)
@@ -76,9 +76,8 @@ func TestSharesNFSExport(t *testing.T) {
 	if b, _ := os.ReadFile(s.t.ExportsFile); strings.Contains(string(b), root) {
 		t.Fatalf("ekspor harus kosong:\n%s", b)
 	}
-	if b, _ := os.ReadFile(log); !strings.Contains(string(b), "exportfs -ra --\nsystemctl disable --now -- nfs-server.service") {
-		t.Fatalf("panggilan:\n%s", b)
-	}
+	b, _ := os.ReadFile(log)
+	inOrder(t, string(b), "exportfs -ra --", "systemctl disable --now -- nfs-server.service")
 }
 
 func TestSharesNFSRejectsBadSpecs(t *testing.T) {
@@ -154,8 +153,9 @@ func TestSharesDeleteUnexportsFirst(t *testing.T) {
 		t.Fatalf("file ekspor:\n%s", b)
 	}
 	calls, _ := os.ReadFile(log)
-	if !strings.Contains(string(calls), "exportfs -ra --\nzfs unmount -- tank/data") || strings.Contains(string(calls), "systemctl disable") {
-		t.Fatalf("panggilan:\n%s", calls)
+	inOrder(t, string(calls), "exportfs -ra --", "zfs unmount -- tank/data")
+	if strings.Contains(string(calls), "systemctl disable") {
+		t.Fatalf("server NFS tidak boleh dimatikan selama masih ada ekspor:\n%s", calls)
 	}
 }
 
@@ -188,5 +188,19 @@ func TestSharesApplyExportsEvenWhenSMBFails(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(s.t.ExportsFile); strings.Contains(string(b), filepath.Join(root, "tank/data")) {
 		t.Fatalf("ekspor harus dicabut walau Samba gagal:\n%s", b)
+	}
+}
+
+// inOrder: setiap baris want muncul di calls berurutan. Pekerjaan ACL latar
+// belakang boleh menyisipkan baris di antaranya.
+func inOrder(t *testing.T, calls string, want ...string) {
+	t.Helper()
+	rest := calls
+	for _, w := range want {
+		i := strings.Index(rest, w+"\n")
+		if i < 0 {
+			t.Fatalf("panggilan tanpa %q (berurutan):\n%s", w, calls)
+		}
+		rest = rest[i+len(w):]
 	}
 }
