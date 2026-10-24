@@ -580,7 +580,10 @@ func (a *Accounts) smbSessionPIDs(ctx context.Context, name string) []int {
 // smbNoEntry: smbpasswd gagal karena akun belum ada di basis data Samba.
 func smbNoEntry(err error) bool {
 	m := strings.ToLower(err.Error())
-	return strings.Contains(m, "failed to find entry") || strings.Contains(m, "does not exist") || strings.Contains(m, "not found")
+	// "Failed to find entry for user x" (versi lama) atau "Failed to find
+	// user x in passdb backend" (Samba 4.2x).
+	return strings.Contains(m, "failed to find entry") || strings.Contains(m, "failed to find user") ||
+		strings.Contains(m, "does not exist") || strings.Contains(m, "not found")
 }
 
 // smb menjalankan smbpasswd dengan satu opsi untuk akun (bila Samba
