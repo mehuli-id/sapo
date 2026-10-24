@@ -17,6 +17,8 @@ import (
 	"strconv"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/mehuli-id/sapo/internal/proto"
 )
 
 // DefaultPath adalah lokasi konfigurasi pada sistem terpasang.
@@ -66,6 +68,31 @@ type Storage struct {
 	// peringatan bila nilai mentahnya bukan nol.
 	WarnATARawIDs  []int    `yaml:"warn_ata_raw_ids"`
 	WarnNVMeFields []string `yaml:"warn_nvme_fields"`
+	Pools          Pools    `yaml:"pools"`
+}
+
+// Pools mengatur pool ZFS: cara sapod membuat pool dan susunan yang boleh
+// dipilih di panel.
+type Pools struct {
+	Zpool string `yaml:"zpool"`
+	// Pool dipasang di <mount_base>/<nama pool>.
+	MountBase string `yaml:"mount_base"`
+	// ashift 12 = sektor 4 KiB; aman juga untuk disk bersektor 512 byte.
+	Ashift int `yaml:"ashift"`
+	// Properti dataset akar setiap pool baru (zpool create -O).
+	RootProperties map[string]string `yaml:"root_properties"`
+	Layouts        []PoolLayout      `yaml:"layouts"`
+	// Disk lepas-pasang (flashdisk, kartu memori) tidak cocok untuk pool.
+	AllowRemovable       bool `yaml:"allow_removable"`
+	CreateTimeoutSeconds int  `yaml:"create_timeout_seconds"`
+}
+
+// PoolLayout adalah satu susunan pool yang boleh dipilih beserta batas
+// jumlah disknya. Arti setiap id (single, mirror, raidz1-3) tetap di kode.
+type PoolLayout struct {
+	ID       string `yaml:"id"`
+	MinDisks int    `yaml:"min_disks"`
+	MaxDisks int    `yaml:"max_disks"`
 }
 
 // API mengatur sapo-api.
@@ -156,6 +183,22 @@ func Default() Config {
 				SMARTCacheSeconds:     60,
 				WarnATARawIDs:         []int{5, 187, 197, 198},
 				WarnNVMeFields:        []string{"media_errors", "critical_warning"},
+				Pools: Pools{
+					Zpool:     "/usr/sbin/zpool",
+					MountBase: "/srv/sapo",
+					Ashift:    12,
+					RootProperties: map[string]string{
+						"compression": "lz4", "atime": "off", "xattr": "sa", "acltype": "posixacl",
+					},
+					Layouts: []PoolLayout{
+						{ID: proto.LayoutSingle, MinDisks: 1, MaxDisks: 1},
+						{ID: proto.LayoutMirror, MinDisks: 2, MaxDisks: 4},
+						{ID: proto.LayoutRAIDZ1, MinDisks: 3, MaxDisks: 8},
+						{ID: proto.LayoutRAIDZ2, MinDisks: 4, MaxDisks: 12},
+						{ID: proto.LayoutRAIDZ3, MinDisks: 5, MaxDisks: 16},
+					},
+					CreateTimeoutSeconds: 120,
+				},
 			},
 		},
 		API: API{
@@ -303,6 +346,9 @@ func (c Config) Validate() error {
 			return fmt.Errorf("api.hostnames: %q bukan nama host yang valid (huruf kecil a-z, angka, titik, tanda hubung; tanpa port)", h)
 		}
 	}
+	if err := c.Agent.Storage.Pools.validate(); err != nil {
+		return err
+	}
 	for _, p := range c.Agent.Storage.IgnoreDevices {
 		if _, err := path.Match(p, ""); err != nil {
 			return fmt.Errorf("agent.storage.ignore_devices: pola %q tidak valid", p)
@@ -354,4 +400,50 @@ func parsePrefixes(name string, list []string) ([]netip.Prefix, error) {
 		out = append(out, p.Masked())
 	}
 	return out, nil
+}
+
+// Properti ZFS dari konfigurasi diteruskan ke zpool create apa adanya, jadi
+// bentuknya dibatasi: nama properti (termasuk properti pengguna modul:nama)
+// dan nilai tanpa spasi atau tanda sama dengan.
+var (
+	zfsPropName  = regexp.MustCompile(`^[a-z][a-z0-9_.:-]{0,63}$`)
+	zfsPropValue = regexp.MustCompile(`^[A-Za-z0-9_.:@+-]{1,128}$`)
+)
+
+func (p Pools) validate() error {
+	switch {
+	case !filepath.IsAbs(p.Zpool):
+		return errors.New("agent.storage.pools.zpool harus path absolut")
+	case !filepath.IsAbs(p.MountBase) || filepath.Clean(p.MountBase) != p.MountBase || p.MountBase == "/":
+		return errors.New("agent.storage.pools.mount_base harus path absolut yang rapi dan bukan /")
+	case p.Ashift < 9 || p.Ashift > 16:
+		return errors.New("agent.storage.pools.ashift harus 9 sampai 16")
+	case p.CreateTimeoutSeconds < 10 || p.CreateTimeoutSeconds > 240:
+		return errors.New("agent.storage.pools.create_timeout_seconds harus 10 sampai 240 (batas operasi sapod 5 menit)")
+	case len(p.Layouts) == 0:
+		return errors.New("agent.storage.pools.layouts tidak boleh kosong")
+	}
+	for k, v := range p.RootProperties {
+		if !zfsPropName.MatchString(k) || !zfsPropValue.MatchString(v) {
+			return fmt.Errorf("agent.storage.pools.root_properties: %q=%q tidak valid", k, v)
+		}
+	}
+	seen := map[string]bool{}
+	for _, l := range p.Layouts {
+		floor, known := proto.LayoutFloor[l.ID]
+		switch {
+		case !known:
+			return fmt.Errorf("agent.storage.pools.layouts: susunan %q tidak dikenal", l.ID)
+		case seen[l.ID]:
+			return fmt.Errorf("agent.storage.pools.layouts: susunan %q ditulis dua kali", l.ID)
+		case l.MinDisks < floor:
+			return fmt.Errorf("agent.storage.pools.layouts: %s butuh min_disks minimal %d", l.ID, floor)
+		case l.MaxDisks < l.MinDisks || l.MaxDisks > 64:
+			return fmt.Errorf("agent.storage.pools.layouts: %s: max_disks harus antara min_disks dan 64", l.ID)
+		case l.ID == proto.LayoutSingle && l.MaxDisks != 1:
+			return errors.New("agent.storage.pools.layouts: single selalu satu disk (max_disks 1)")
+		}
+		seen[l.ID] = true
+	}
+	return nil
 }

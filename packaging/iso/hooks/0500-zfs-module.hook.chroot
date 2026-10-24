@@ -1,0 +1,13 @@
+#!/bin/sh
+# Hook live-build (di dalam chroot): pastikan modul ZFS benar-benar
+# terkompilasi untuk kernel ISO. Tanpa ini, kegagalan DKMS baru ketahuan saat
+# panel melapor "ZFS belum siap".
+set -e
+for k in /lib/modules/*; do
+  [ -d "$k/kernel" ] || continue
+  if ! find "$k" -name 'zfs.ko*' | grep -q .; then
+    echo "Modul ZFS tidak ada untuk kernel $(basename "$k")" >&2
+    exit 1
+  fi
+  echo "Modul ZFS ada untuk kernel $(basename "$k")"
+done

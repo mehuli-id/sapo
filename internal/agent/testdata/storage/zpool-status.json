@@ -1,0 +1,22 @@
+{"output_version":{"command":"zpool status","vers_major":0,"vers_minor":1},
+ "pools":{
+  "tank":{"name":"tank","state":"ONLINE","pool_guid":123,"txg":45,"spa_version":5000,"zpl_version":5,
+   "vdevs":{"tank":{"name":"tank","vdev_type":"root","guid":123,"class":"normal","state":"ONLINE","alloc_space":1048576,"total_space":4294967296,"def_space":4294967296,"read_errors":0,"write_errors":0,"checksum_errors":0,
+     "vdevs":{"mirror-0":{"name":"mirror-0","vdev_type":"mirror","guid":5,"class":"normal","state":"ONLINE","read_errors":0,"write_errors":0,"checksum_errors":0,
+       "vdevs":{
+        "vdc":{"name":"vdc","vdev_type":"disk","guid":7,"path":"/dev/vdc1","class":"normal","state":"ONLINE","read_errors":0,"write_errors":0,"checksum_errors":2,"slow_ios":0},
+        "vdb":{"name":"vdb","vdev_type":"disk","guid":6,"path":"/dev/vdb1","class":"normal","state":"ONLINE","read_errors":0,"write_errors":0,"checksum_errors":0,"slow_ios":0}}}}}},
+   "scan_stats":{"function":"SCRUB","state":"FINISHED","start_time":1792800000,"end_time":1792800060,"to_examine":1048576,"examined":1048576,"skipped":0,"processed":0,"errors":0,"bytes_per_scan":0,"pass_start":1792800000,"scrub_pause":0,"scrub_spent_paused":0,"issued_bytes_per_scan":1048576,"issued":1048576},
+   "error_count":0},
+  "backup":{"name":"backup","state":"DEGRADED","pool_guid":456,"txg":99,"spa_version":5000,"zpl_version":5,
+   "status":"One or more devices could not be used because the label is missing or invalid.","action":"Replace the device using 'zpool replace'.","msgid":"ZFS-8000-4J","moreinfo":"https://openzfs.github.io/openzfs-docs/msg/ZFS-8000-4J",
+   "vdevs":{"backup":{"name":"backup","vdev_type":"root","state":"DEGRADED","read_errors":0,"write_errors":0,"checksum_errors":0,
+     "vdevs":{"raidz2-0":{"name":"raidz2-0","vdev_type":"raidz","state":"DEGRADED","read_errors":0,"write_errors":0,"checksum_errors":0,
+       "vdevs":{
+        "9182736455":{"name":"9182736455","vdev_type":"disk","path":"/dev/disk/by-id/ata-HILANG-part1","state":"UNAVAIL","read_errors":0,"write_errors":0,"checksum_errors":0},
+        "sdk":{"name":"sdk","vdev_type":"disk","path":"/dev/sdk1","state":"ONLINE","read_errors":3,"write_errors":0,"checksum_errors":0},
+        "sdl":{"name":"sdl","vdev_type":"disk","path":"/dev/sdl1","state":"ONLINE","read_errors":0,"write_errors":0,"checksum_errors":0},
+        "sdm":{"name":"sdm","vdev_type":"disk","path":"/dev/sdm1","state":"ONLINE","read_errors":0,"write_errors":0,"checksum_errors":0}}}}}},
+   "scan_stats":{"function":"RESILVER","state":"SCANNING","start_time":1792900000,"end_time":0,"to_examine":6442450944,"examined":3221225472,"errors":0,"scrub_pause":0,"issued":3000000000},
+   "error_count":4}
+ }}

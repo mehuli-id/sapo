@@ -23,13 +23,18 @@ type Client struct {
 }
 
 // Call menjalankan op dengan params, lalu mendekode hasil ke out (boleh nil).
+// Batas waktu bawaan (Timeout) hanya berlaku bila ctx belum punya batas
+// waktu; operasi panjang (misalnya membuat pool) memberi batasnya sendiri.
 func (c *Client) Call(ctx context.Context, op string, params any, out any) error {
-	timeout := c.Timeout
-	if timeout == 0 {
-		timeout = 30 * time.Second
+	if _, ok := ctx.Deadline(); !ok {
+		timeout := c.Timeout
+		if timeout == 0 {
+			timeout = 30 * time.Second
+		}
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
 	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
 
 	var d net.Dialer
 	conn, err := d.DialContext(ctx, "unix", c.Socket)

@@ -70,6 +70,8 @@ printf '\nset timeout=%s\n' "$BOOT_TIMEOUT_S" >> config/bootloaders/grub-pc/conf
 # Daftar paket dan file tambahan (data di packaging/iso/).
 grep -v '^\s*#' "$HERE/packages.list" | sed '/^\s*$/d' > config/package-lists/sapo.list.chroot
 cp -r "$HERE/includes.chroot/." config/includes.chroot/
+# Pemeriksaan di dalam chroot (misalnya modul ZFS terkompilasi).
+cp "$HERE"/hooks/*.hook.chroot config/hooks/normal/
 # Paket lokal: live-build membuat repo APT sementara darinya, jadi Depends
 # paket sapo dipasang oleh apt seperti biasa.
 cp "$DEB" config/packages.chroot/

@@ -19,7 +19,11 @@ type Wizard struct {
 	ID     string            `yaml:"id" json:"id"`
 	Title  map[string]string `yaml:"title" json:"title"`
 	Action string            `yaml:"action" json:"action"`
-	Steps  []WizardStep      `yaml:"steps" json:"steps"`
+	// FinishLabel: teks tombol terakhir (bawaan panel: Selesai).
+	FinishLabel map[string]string `yaml:"finish_label" json:"finish_label,omitempty"`
+	// Destructive: tindakan akhir menghapus data (tombol terakhir berwarna bahaya).
+	Destructive bool         `yaml:"destructive" json:"destructive,omitempty"`
+	Steps       []WizardStep `yaml:"steps" json:"steps"`
 }
 
 // WizardStep adalah satu langkah wizard.
@@ -34,16 +38,22 @@ type WizardStep struct {
 
 // WizardField adalah satu isian.
 type WizardField struct {
-	Key          string            `yaml:"key" json:"key"`
-	Type         string            `yaml:"type" json:"type"`
-	Label        map[string]string `yaml:"label" json:"label"`
-	Help         map[string]string `yaml:"help" json:"help,omitempty"`
-	Placeholder  map[string]string `yaml:"placeholder" json:"placeholder,omitempty"`
-	Required     bool              `yaml:"required" json:"required,omitempty"`
-	Default      string            `yaml:"default" json:"default,omitempty"`
-	Match        string            `yaml:"match" json:"match,omitempty"`
-	Autocomplete string            `yaml:"autocomplete" json:"autocomplete,omitempty"`
-	Secret       bool              `yaml:"secret" json:"secret,omitempty"`
+	Key         string            `yaml:"key" json:"key"`
+	Type        string            `yaml:"type" json:"type"`
+	Label       map[string]string `yaml:"label" json:"label"`
+	Help        map[string]string `yaml:"help" json:"help,omitempty"`
+	Placeholder map[string]string `yaml:"placeholder" json:"placeholder,omitempty"`
+	Required    bool              `yaml:"required" json:"required,omitempty"`
+	Default     string            `yaml:"default" json:"default,omitempty"`
+	Match       string            `yaml:"match" json:"match,omitempty"`
+	// Source: isian lain yang dipakai jenis isian ini (pool-layout dan
+	// erase-confirm membaca disk dari isian disk-select).
+	Source string `yaml:"source" json:"source,omitempty"`
+	// Pattern: pola isian teks untuk petunjuk di panel; server tetap
+	// memeriksa sendiri.
+	Pattern      string `yaml:"pattern" json:"pattern,omitempty"`
+	Autocomplete string `yaml:"autocomplete" json:"autocomplete,omitempty"`
+	Secret       bool   `yaml:"secret" json:"secret,omitempty"`
 }
 
 var wizardID = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
@@ -52,7 +62,13 @@ var wizardID = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
 // file data ketahuan saat dimuat, bukan saat pengguna sedang mengisi.
 var (
 	stepTypes  = map[string]bool{"": true, "form": true, "review": true}
-	fieldTypes = map[string]bool{"text": true, "username": true, "password": true, "password-confirm": true, "language": true, "totp-enroll": true, "recovery-codes": true}
+	fieldTypes = map[string]bool{
+		"text": true, "username": true, "password": true, "password-confirm": true, "current-password": true,
+		"language": true, "totp-enroll": true, "recovery-codes": true,
+		"disk-select": true, "pool-layout": true, "erase-confirm": true, "confirm": true,
+	}
+	// Jenis isian yang wajib merujuk isian disk-select lewat source.
+	needsDiskSource = map[string]bool{"pool-layout": true, "erase-confirm": true}
 )
 
 // LoadWizard membaca dan memvalidasi wizard dari dir.
@@ -86,10 +102,27 @@ func LoadWizard(dir, id string) (*Wizard, error) {
 			keys[f.Key] = true
 		}
 	}
+	types := map[string]string{}
+	for _, st := range wz.Steps {
+		for _, f := range st.Fields {
+			types[f.Key] = f.Type
+		}
+	}
 	for _, st := range wz.Steps {
 		for _, f := range st.Fields {
 			if f.Match != "" && !keys[f.Match] {
 				return nil, fmt.Errorf("wizard %s: isian %q merujuk %q yang tidak ada", id, f.Key, f.Match)
+			}
+			if (f.Type == "confirm" || f.Type == "password-confirm") && f.Match == "" {
+				return nil, fmt.Errorf("wizard %s: isian %q butuh match", id, f.Key)
+			}
+			if needsDiskSource[f.Type] && types[f.Source] != "disk-select" {
+				return nil, fmt.Errorf("wizard %s: isian %q butuh source berupa isian disk-select", id, f.Key)
+			}
+			if f.Pattern != "" {
+				if _, err := regexp.Compile(f.Pattern); err != nil {
+					return nil, fmt.Errorf("wizard %s: pola isian %q tidak valid: %w", id, f.Key, err)
+				}
 			}
 		}
 	}

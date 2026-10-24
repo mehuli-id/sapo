@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # Uji asap ISO live: boot di QEMU, lalu tunggu sampai panel menjawab bahwa
-# sapo-api dan sapod sehat dan wizard setup awal siap. Tidak ada disk yang
-# dipasang ke VM, jadi uji ini tidak menulis ke disk mana pun.
+# sapo-api dan sapod sehat dan wizard setup awal siap. Setelah itu setup awal
+# dijalankan lewat API dan pool ZFS mirror dibuat di dua disk virtual
+# sementara (file di samping ISO, dihapus di akhir); disk ketiga berisi
+# ext4 dan harus ditolak tanpa konfirmasi penghapusan (ADR 0005).
 # HTTPS wajib (ADR 0004): HTTP hanya boleh menyajikan halaman petunjuk, dan
 # sidik jari yang diumumkan panel harus sama dengan sertifikat yang dipakai.
 # Pemakaian: packaging/iso/smoke-test.sh dist/sapo-dev_<versi>_amd64.iso
-# Kebutuhan: qemu-system-x86_64, curl, openssl. KVM dipakai bila tersedia.
+# Kebutuhan: qemu-system-x86_64, curl, openssl, python3, mkfs.ext4. KVM
+# dipakai bila tersedia.
 set -euo pipefail
 
 ISO="${1:?Pemakaian: $0 <file.iso>}"
@@ -17,15 +20,24 @@ LOG="${LOG:-$(dirname "$ISO")/smoke-test-console.log}"
 HTTP="http://127.0.0.1:$PORT"
 HTTPS="https://127.0.0.1:$TLS_PORT"
 
+# Disk virtual untuk uji pool: dua kosong, satu berisi ext4 berlabel.
+WORK="$(mktemp -d)"
+for i in 1 2 3; do truncate -s 2G "$WORK/disk$i.img"; done
+mkfs.ext4 -q -L foto "$WORK/disk3.img"
+disks=()
+for i in 1 2 3; do
+  disks+=(-drive "file=$WORK/disk$i.img,if=none,format=raw,id=d$i" -device "virtio-blk-pci,drive=d$i,serial=SAPOUJI$i")
+done
+
 accel=(-accel tcg)
 if [[ -w /dev/kvm ]]; then accel=(-accel kvm -cpu host); fi
 
 qemu-system-x86_64 "${accel[@]}" -m "$VM_RAM_MB" -smp 2 \
-  -cdrom "$ISO" -boot d \
+  -cdrom "$ISO" -boot d "${disks[@]}" \
   -nic "user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:$PORT-:5000,hostfwd=tcp:127.0.0.1:$TLS_PORT-:5001" \
   -display none -serial "file:$LOG" &
 qemu=$!
-trap 'kill "$qemu" 2>/dev/null || true' EXIT
+trap 'kill "$qemu" 2>/dev/null || true; rm -rf "$WORK"' EXIT
 
 fail() { echo "GAGAL: $*" >&2; exit 1; }
 
@@ -71,4 +83,80 @@ done
 grep -qF "${served:0:47}" "$LOG" && grep -qF "${served:48}" "$LOG" \
   || fail "layar konsol tidak menampilkan sidik jari sertifikat yang dipakai server."
 echo "layar konsol: sidik jari sama dengan sertifikat server"
+
+# --- Setup awal dan pool ZFS lewat API --------------------------------------
+JAR="$WORK/cookies"
+api() { # api METHOD PATH [JSON] → badan jawaban + " <kode HTTP>"
+  local body=()
+  if [[ $# -ge 3 ]]; then body=(-d "$3"); fi
+  curl -ksS -b "$JAR" -c "$JAR" -X "$1" -H 'X-Sapo-Request: 1' -H 'Content-Type: application/json' \
+    "${body[@]}" -w ' %{http_code}' --max-time 150 "$HTTPS$2"
+}
+json() { python3 -c 'import json,sys; v=json.loads(sys.stdin.read().rsplit(" ",1)[0]); exec(sys.argv[1])' "$1"; }
+totp() { python3 - "$1" <<'PY'
+import base64, hashlib, hmac, struct, sys, time
+s = sys.argv[1]; key = base64.b32decode(s + "=" * (-len(s) % 8))
+h = hmac.new(key, struct.pack(">Q", int(time.time()) // 30), hashlib.sha1).digest()
+o = h[-1] & 15
+print("%06d" % ((struct.unpack(">I", h[o:o + 4])[0] & 0x7FFFFFFF) % 1000000))
+PY
+}
+PASS="uji-asap-$(openssl rand -hex 8)"
+enroll="$(api POST /api/v1/setup/totp '{"username":"penguji"}')"
+[[ "$enroll" == *' 200' ]] || fail "setup/totp: $enroll"
+secret="$(json 'print(v["secret"])' <<<"$enroll")"
+token="$(json 'print(v["token"])' <<<"$enroll")"
+res="$(api POST /api/v1/setup "{\"language\":\"id\",\"username\":\"penguji\",\"password\":\"$PASS\",\"password_confirm\":\"$PASS\",\"totp_code\":\"$(totp "$secret")\",\"totp_token\":\"$token\"}")"
+[[ "$res" == *' 200' ]] || fail "setup: $res"
+echo "setup awal lewat API: ok"
+
+pools="$(api GET /api/v1/storage/pools)"
+[[ "$pools" == *' 200' ]] || fail "storage/pools: $pools"
+json 'assert v["available"], v.get("message"); assert v["pools"] == [], v' <<<"$pools" || fail "ZFS harus siap tanpa pool: $pools"
+disks_json="$(api GET /api/v1/storage/disks)"
+# Identitas disk uji (nomor seri SAPOUJIn) seperti yang dilihat panel.
+refs() { json "
+d={x['serial']:x for x in v}
+out=[]
+for s,erase in [$1]:
+    x=d[s]; out.append(dict(name=x['name'],serial=x['serial'],wwn=x['wwn'],size_bytes=x['size_bytes'],erase=erase))
+print(json.dumps(out))" <<<"$disks_json"; }
+json "
+u={x['serial']:x['usage'] for x in v}
+assert u.get('SAPOUJI1')=='free' and u.get('SAPOUJI2')=='free' and u.get('SAPOUJI3')=='data', u" <<<"$disks_json" \
+  || fail "status disk uji salah: $disks_json"
+
+# Disk berisi ext4 tanpa konfirmasi penghapusan: ditolak, tidak ada yang dihapus.
+res="$(api POST /api/v1/storage/pools "{\"name\":\"uji\",\"layout\":\"mirror\",\"disks\":$(refs "('SAPOUJI1',True),('SAPOUJI3',False)"),\"confirm_name\":\"uji\",\"password\":\"$PASS\"}")"
+[[ "$res" == *'"disk_has_data"'*' 409' ]] || fail "disk berisi data harus ditolak: $res"
+# Password salah: ditolak sebelum sapod dipanggil.
+res="$(api POST /api/v1/storage/pools "{\"name\":\"uji\",\"layout\":\"mirror\",\"disks\":$(refs "('SAPOUJI1',True),('SAPOUJI2',True)"),\"confirm_name\":\"uji\",\"password\":\"salah-sekali-ini\"}")"
+[[ "$res" == *' 401' ]] || fail "password salah harus 401: $res"
+echo "penolakan: disk berisi data (409) dan password salah (401)"
+
+res="$(api POST /api/v1/storage/pools "{\"name\":\"uji\",\"layout\":\"mirror\",\"disks\":$(refs "('SAPOUJI1',True),('SAPOUJI2',True)"),\"confirm_name\":\"uji\",\"password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "membuat pool mirror: $res"
+json 'assert v["name"]=="uji" and v["health"]=="ONLINE" and v["layout"]=="mirror", v
+leaves=[c for t in v["vdevs"] for c in t.get("children",[])]
+assert len(leaves)==2 and all(c["state"]=="ONLINE" and c["disk"] for c in leaves), leaves' <<<"$res" \
+  || fail "pool baru tidak sesuai: $res"
+echo "pool mirror dibuat: $(json 'print(v["name"], v["health"], v["size_bytes"], [c["disk"] for t in v["vdevs"] for c in t["children"]])' <<<"$res")"
+
+# Disk anggota pool sekarang tidak bisa dipilih lagi.
+disks_json="$(api GET /api/v1/storage/disks)"
+json "assert all(x['usage']=='in_use' and x['usage_reason']=='pool' for x in v if x['serial'] in ('SAPOUJI1','SAPOUJI2')), v" <<<"$disks_json" \
+  || fail "disk pool harus berstatus in_use/pool: $disks_json"
+res="$(api POST /api/v1/storage/pools "{\"name\":\"uji2\",\"layout\":\"single\",\"disks\":$(refs "('SAPOUJI1',True)"),\"confirm_name\":\"uji2\",\"password\":\"$PASS\"}")"
+[[ "$res" == *'"disk_in_use"'*' 409' ]] || fail "disk anggota pool harus ditolak: $res"
+
+res="$(api POST /api/v1/storage/pools/uji/scrub '{"action":"start"}')"
+[[ "$res" == *' 200' ]] || fail "scrub: $res"
+for _ in $(seq 1 30); do
+  pools="$(api GET /api/v1/storage/pools)"
+  json 'import sys; s=v["pools"][0].get("scan") or {}; sys.exit(0 if s.get("function")=="scrub" and s.get("state")=="finished" else 1)' <<<"$pools" && break
+  sleep 2
+done
+json 's=v["pools"][0]["scan"]; assert s["function"]=="scrub" and s["state"]=="finished" and s["errors"]==0, s' <<<"$pools" \
+  || fail "scrub tidak selesai bersih: $pools"
+echo "scrub selesai tanpa kesalahan"
 echo "Uji asap lulus."
