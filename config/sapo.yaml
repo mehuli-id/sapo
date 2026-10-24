@@ -65,6 +65,35 @@ agent:
       # Flashdisk dan kartu memori mudah tercabut dan cepat aus.
       allow_removable: false
       create_timeout_seconds: 120
+  # Akun sistem untuk berbagi file: setiap pengguna Sapo punya akun Linux
+  # bernama sama (tanpa shell dan home) agar bisa memiliki file dan masuk
+  # lewat SMB. sapod hanya mengubah akun dan grup ber-UID/GID di rentang ini
+  # (akun juga harus bergrup utama primary_group); akun lain tidak disentuh.
+  accounts:
+    useradd: /usr/sbin/useradd
+    userdel: /usr/sbin/userdel
+    groupadd: /usr/sbin/groupadd
+    groupdel: /usr/sbin/groupdel
+    gpasswd: /usr/bin/gpasswd
+    smbpasswd: /usr/bin/smbpasswd
+    passwd_file: /etc/passwd
+    group_file: /etc/group
+    id_min: 20000
+    id_max: 29999
+    primary_group: sapo-users
+    shell: /usr/sbin/nologin
+  # Shared folder (dataset ZFS <pool>/<nama>) dan Samba. smb.conf ditulis
+  # utuh oleh sapod dari templat tetap; ubah lewat panel, bukan manual.
+  shares:
+    zfs: /usr/sbin/zfs
+    setfacl: /usr/bin/setfacl
+    testparm: /usr/bin/testparm
+    smbcontrol: /usr/bin/smbcontrol
+    smb_conf: /etc/samba/smb.conf
+    workgroup: WORKGROUP
+    server_string: Sapo NAS
+    # SMB1 tidak pernah diaktifkan (tidak aman).
+    min_protocol: SMB2
 
 api:
   # Port panel. Siapa yang boleh membuka panel diatur oleh allowed_networks.

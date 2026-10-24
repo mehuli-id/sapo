@@ -3,6 +3,7 @@ import { computed, defineAsyncComponent } from "vue"
 import {
   Activity,
   Cloud,
+  FolderLock,
   FolderOpen,
   Gauge,
   HardDrive,
@@ -47,6 +48,7 @@ export function findApp(id: string): AppDef | undefined {
 const icons: Record<string, Component> = {
   "activity": Activity,
   "cloud": Cloud,
+  "folder-lock": FolderLock,
   "folder-open": FolderOpen,
   "gauge": Gauge,
   "hard-drive": HardDrive,
@@ -69,6 +71,7 @@ const components: Record<string, Component> = {
   Storage: defineAsyncComponent(() => import("./Storage.vue")),
   AccountSecurity: defineAsyncComponent(() => import("./AccountSecurity.vue")),
   Users: defineAsyncComponent(() => import("./Users.vue")),
+  SharedFolders: defineAsyncComponent(() => import("./SharedFolders.vue")),
   About: defineAsyncComponent(() => import("./About.vue")),
   Planned: defineAsyncComponent(() => import("./Planned.vue")),
 }

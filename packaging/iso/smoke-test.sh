@@ -4,17 +4,20 @@
 # dijalankan lewat API dan pool ZFS mirror dibuat di dua disk virtual
 # sementara (file di samping ISO, dihapus di akhir); disk ketiga berisi
 # ext4 dan harus ditolak tanpa konfirmasi penghapusan (ADR 0005). Setelah
-# scrub, satu disk diganti disk ketiga (resilver), lalu pool dihapus.
+# scrub, shared folder dibuat dan dibuka lewat SMB dengan tiga pengguna
+# (tulis, baca, tanpa akses), satu disk diganti disk ketiga (resilver), lalu
+# pool dihapus.
 # HTTPS wajib (ADR 0004): HTTP hanya boleh menyajikan halaman petunjuk, dan
 # sidik jari yang diumumkan panel harus sama dengan sertifikat yang dipakai.
 # Pemakaian: packaging/iso/smoke-test.sh dist/sapo-dev_<versi>_amd64.iso
-# Kebutuhan: qemu-system-x86_64, curl, openssl, python3, mkfs.ext4. KVM
+# Kebutuhan: qemu-system-x86_64, curl, openssl, python3, mkfs.ext4, smbclient. KVM
 # dipakai bila tersedia.
 set -euo pipefail
 
 ISO="${1:?Pemakaian: $0 <file.iso>}"
 PORT="${PORT:-15000}"              # port HTTP di host, diteruskan ke 5000 di VM
 TLS_PORT="${TLS_PORT:-15001}"      # port HTTPS di host, diteruskan ke 5001 di VM
+SMB_PORT="${SMB_PORT:-14450}"      # port SMB di host, diteruskan ke 445 di VM
 TIMEOUT_S="${TIMEOUT_S:-600}"      # batas waktu boot sampai panel siap
 VM_RAM_MB="${VM_RAM_MB:-2048}"
 LOG="${LOG:-$(dirname "$ISO")/smoke-test-console.log}"
@@ -35,7 +38,7 @@ if [[ -w /dev/kvm ]]; then accel=(-accel kvm -cpu host); fi
 
 qemu-system-x86_64 "${accel[@]}" -m "$VM_RAM_MB" -smp 2 \
   -cdrom "$ISO" -boot d "${disks[@]}" \
-  -nic "user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:$PORT-:5000,hostfwd=tcp:127.0.0.1:$TLS_PORT-:5001" \
+  -nic "user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:$PORT-:5000,hostfwd=tcp:127.0.0.1:$TLS_PORT-:5001,hostfwd=tcp:127.0.0.1:$SMB_PORT-:445" \
   -display none -serial "file:$LOG" &
 qemu=$!
 trap 'kill "$qemu" 2>/dev/null || true; rm -rf "$WORK"' EXIT
@@ -160,6 +163,49 @@ done
 json 's=v["pools"][0]["scan"]; assert s["function"]=="scrub" and s["state"]=="finished" and s["errors"]==0, s' <<<"$pools" \
   || fail "scrub tidak selesai bersih: $pools"
 echo "scrub selesai tanpa kesalahan"
+
+# --- Shared folder lewat SMB ---------------------------------------------------
+UPASS="uji-smb-$(openssl rand -hex 6)"
+for u in budi ani cici; do
+  res="$(api POST /api/v1/users "{\"username\":\"$u\",\"password\":\"$UPASS\",\"password_confirm\":\"$UPASS\",\"role\":\"user\",\"groups\":[],\"must_change_password\":false,\"admin_password\":\"$PASS\"}")"
+  [[ "$res" == *' 200' && "$res" != *'"warning":"system_sync_failed"'* ]] || fail "buat pengguna $u: $res"
+done
+res="$(api POST /api/v1/shares "{\"name\":\"keluarga\",\"pool\":\"uji\",\"description\":\"Uji asap\",\"permissions\":{\"user:budi\":\"write\",\"user:ani\":\"read\"},\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "buat shared folder: $res"
+json 'assert not v.get("error") and v["path"].endswith("/uji/keluarga"), v' <<<"$res" || fail "shared folder tidak siap: $res"
+smb() { # smb USER PERINTAH → keluaran smbclient (tidak gagal walau smbclient gagal)
+  smbclient "//127.0.0.1/keluarga" -p "$SMB_PORT" -m SMB3 -U "$1%$UPASS" -c "$2" 2>&1 || true
+}
+echo "isi uji asap" > "$WORK/halo.txt"
+out="$(smb budi "put $WORK/halo.txt halo.txt; ls")"
+[[ "$out" == *"halo.txt"* ]] || fail "budi (tulis) harus bisa menulis: $out"
+out="$(smb ani "get halo.txt $WORK/salinan.txt")"
+cmp -s "$WORK/halo.txt" "$WORK/salinan.txt" || fail "ani (baca) harus bisa membaca: $out"
+out="$(smb ani "put $WORK/halo.txt coba.txt")"
+[[ "$out" == *"NT_STATUS_ACCESS_DENIED"* ]] || fail "ani (baca) tidak boleh menulis: $out"
+out="$(smb cici "ls")"
+[[ "$out" == *"NT_STATUS_ACCESS_DENIED"* ]] || fail "cici (tanpa izin) harus ditolak: $out"
+out="$(smbclient //127.0.0.1/keluarga -p "$SMB_PORT" -m SMB3 -U "budi%salah-sekali" -c ls 2>&1 || true)"
+[[ "$out" == *"NT_STATUS_LOGON_FAILURE"* ]] || fail "password salah harus ditolak: $out"
+out="$(smbclient //127.0.0.1/keluarga -p "$SMB_PORT" -m SMB3 -N -c ls 2>&1 || true)"
+[[ "$out" != *"halo.txt"* ]] || fail "tamu (tanpa login) tidak boleh masuk: $out"
+echo "SMB: tulis (budi), baca saja (ani), tanpa izin (cici), password salah, dan tamu sesuai izin"
+
+# Pengguna yang dinonaktifkan tidak bisa masuk lewat SMB.
+res="$(api POST /api/v1/users/ani "{\"disabled\":true}")"
+[[ "$res" == *' 200' ]] || fail "nonaktifkan ani: $res"
+out="$(smb ani "ls")"
+[[ "$out" == *"NT_STATUS"* && "$out" != *"halo.txt"* ]] || fail "ani nonaktif harus ditolak: $out"
+echo "SMB: pengguna nonaktif ditolak"
+
+# Hapus folder: nama salah ditolak, lalu folder dan isinya hilang.
+res="$(api POST /api/v1/shares/keluarga/delete "{\"confirm_name\":\"kel\",\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *'"confirm_mismatch"'*' 400' ]] || fail "nama salah harus ditolak: $res"
+res="$(api POST /api/v1/shares/keluarga/delete "{\"confirm_name\":\"keluarga\",\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "hapus shared folder: $res"
+out="$(smb budi "ls")"
+[[ "$out" == *"NT_STATUS_BAD_NETWORK_NAME"* ]] || fail "folder terhapus masih bisa dibuka: $out"
+echo "shared folder dihapus"
 
 # Ganti disk SAPOUJI2 dengan SAPOUJI3 (berisi ext4, penghapusan dikonfirmasi).
 disks_json="$(api GET /api/v1/storage/disks)"

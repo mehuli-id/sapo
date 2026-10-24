@@ -76,6 +76,23 @@ func main() {
 	reg.Register(proto.OpStoragePoolScrub, pools.PoolScrubOp())
 	reg.Register(proto.OpStoragePoolReplace, pools.PoolReplaceOp())
 	reg.Register(proto.OpStoragePoolDestroy, pools.PoolDestroyOp())
+	ac := cfg.Agent.Accounts
+	accounts := agent.NewAccounts(agent.AccountTools{
+		Useradd: ac.Useradd, Userdel: ac.Userdel, Groupadd: ac.Groupadd, Groupdel: ac.Groupdel, Gpasswd: ac.Gpasswd,
+		Smbpasswd: ac.Smbpasswd, PasswdFile: ac.PasswdFile, GroupFile: ac.GroupFile,
+		IDMin: ac.IDMin, IDMax: ac.IDMax, PrimaryGroup: ac.PrimaryGroup, Shell: ac.Shell,
+		Timeout: time.Duration(sc.CommandTimeoutSeconds) * time.Second, Log: log,
+	})
+	reg.Register(proto.OpAccountsSync, accounts.SyncOp())
+	reg.Register(proto.OpSMBPassword, accounts.SMBPasswordOp())
+	shc := cfg.Agent.Shares
+	shares := agent.NewShares(pools, agent.ShareTools{
+		Zfs: shc.Zfs, Setfacl: shc.Setfacl, Testparm: shc.Testparm, Smbcontrol: shc.Smbcontrol, SMBConf: shc.SMBConf,
+		Workgroup: shc.Workgroup, ServerString: shc.ServerString, MinProtocol: shc.MinProtocol,
+	})
+	reg.Register(proto.OpSharesApply, shares.ApplyOp())
+	reg.Register(proto.OpSharesDelete, shares.DeleteOp())
+	reg.Register(proto.OpSharesUsage, shares.UsageOp())
 	reg.Register(proto.OpConsolePanelAddress, agent.ConsolePanelAddressOp(agent.ConsoleTools{
 		IssueFile: cfg.Agent.Console.IssueFile,
 		Agetty:    cfg.Agent.Console.Agetty,

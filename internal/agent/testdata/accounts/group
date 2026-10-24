@@ -1,0 +1,6 @@
+root:x:0:
+sudo:x:27:admin
+users:x:100:
+admin:x:1000:
+sapo-users:x:20000:
+bekas:x:20010:lama

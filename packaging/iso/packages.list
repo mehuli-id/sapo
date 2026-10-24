@@ -12,4 +12,7 @@ sudo
 linux-headers-amd64
 zfs-dkms
 zfsutils-linux
+# Berbagi file SMB (fitur smb) dan ACL POSIX untuk izin shared folder.
+samba
+acl
 # SSH sengaja tidak dipasang: user live memakai password bawaan.

@@ -9,3 +9,4 @@ Setiap keputusan arsitektur penting dicatat di sini sebagai file bernomor (`NNNN
 | [0003](0003-auth-and-first-run.md) | Autentikasi, setup awal lewat web, dan akses jaringan | Diterima |
 | [0004](0004-local-https.md) | HTTPS wajib di jaringan lokal dengan sertifikat self-signed | Diterima |
 | [0005](0005-zfs-pools.md) | Pool penyimpanan ZFS dari panel | Diterima |
+| [0006](0006-shared-folders-smb.md) | Shared folder, akun sistem, dan SMB | Diterima |

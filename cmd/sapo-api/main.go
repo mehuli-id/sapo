@@ -104,6 +104,8 @@ func main() {
 		log.Error("menyiapkan API", "err", err)
 		os.Exit(1)
 	}
+	// Akun sistem dan shared folder disamakan dengan data panel.
+	go handler.SyncLoop(ctx)
 	newServer := func(addr string) *http.Server {
 		return &http.Server{
 			Addr:              addr,
