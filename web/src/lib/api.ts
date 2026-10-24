@@ -194,11 +194,35 @@ export interface AuthStatus {
   authenticated: boolean
   user?: {
     username: string
-    role: string
+    role: "admin" | "user"
+    // Langkah wajib sebelum panel bisa dipakai: ganti password (dibuat admin)
+    // dan 2FA (administrator).
+    pending: ("password" | "totp")[]
     // Ada bila 2FA aktif: sisa kode cadangan dan apakah sudah perlu dibuat ulang.
     recovery_codes_left?: number
     recovery_codes_low?: boolean
   }
+}
+
+export type Role = "admin" | "user"
+
+export interface UserAccount {
+  username: string
+  role: Role
+  description: string
+  disabled: boolean
+  groups: string[]
+  two_factor: boolean
+  must_change_password: boolean
+  created_at: string
+  last_login_at?: string
+}
+
+export interface UserGroup {
+  name: string
+  description: string
+  members: string[]
+  created_at: string
 }
 
 export type Localized = Record<string, string>
@@ -219,6 +243,9 @@ export interface WizardField {
     | "erase-confirm"
     | "confirm"
     | "acknowledge"
+    | "choice"
+    | "group-select"
+    | "toggle"
   label: Localized
   help?: Localized
   placeholder?: Localized
@@ -233,6 +260,8 @@ export interface WizardField {
   match_context?: "pool"
   // disk-select: jumlah disk paling banyak (1 = pilih satu).
   max?: number
+  // choice: pilihan beserta labelnya.
+  options?: { value: string; label: Localized; help?: Localized }[]
   autocomplete?: string
   secret?: boolean
 }
@@ -339,6 +368,21 @@ export const api = {
   regenerateRecoveryCodes: (password: string) => post<{ recovery_codes: string[] }>("/api/v1/account/recovery-codes", { password }),
   totpBegin: (password: string) => post<TOTPEnrollment>("/api/v1/account/totp/begin", { password }),
   totpConfirm: (token: string, code: string) => post<{ ok: boolean }>("/api/v1/account/totp/confirm", { token, code }),
+  changePassword: (current_password: string, password: string, password_confirm: string) =>
+    post<{ ok: boolean }>("/api/v1/account/password", { current_password, password, password_confirm }),
+  users: () => get<UserAccount[]>("/api/v1/users"),
+  groups: () => get<UserGroup[]>("/api/v1/groups"),
+  createUser: (req: Record<string, unknown>) => post<UserAccount>("/api/v1/users", req),
+  updateUser: (name: string, req: { role?: Role; disabled?: boolean; groups?: string[]; description?: string; admin_password?: string }) =>
+    post<UserAccount>(`/api/v1/users/${encodeURIComponent(name)}`, req),
+  resetUserPassword: (name: string, req: { password: string; password_confirm: string; must_change_password: boolean; admin_password: string }) =>
+    post<{ ok: boolean }>(`/api/v1/users/${encodeURIComponent(name)}/password`, req),
+  deleteUser: (name: string, req: { confirm_name: string; admin_password: string }) =>
+    post<{ ok: boolean }>(`/api/v1/users/${encodeURIComponent(name)}/delete`, req),
+  createGroup: (name: string, description: string) => post<{ ok: boolean }>("/api/v1/groups", { name, description }),
+  updateGroup: (name: string, req: { description?: string; members?: string[] }) =>
+    post<{ ok: boolean }>(`/api/v1/groups/${encodeURIComponent(name)}`, req),
+  deleteGroup: (name: string) => post<{ ok: boolean }>(`/api/v1/groups/${encodeURIComponent(name)}/delete`),
 }
 
 // Data yang dibutuhkan isian wizard tertentu (misalnya daftar disk untuk
@@ -349,6 +393,8 @@ export interface WizardContext {
   // Pool dan disk yang sedang dikerjakan (ganti disk, hapus pool).
   pool?: Pool
   vdev?: Vdev
+  // Grup yang bisa dipilih (group-select).
+  groups?: UserGroup[]
 }
 
 // Daftar nama dari isian disk-select (dipisah koma).
@@ -384,6 +430,17 @@ export const wizardActions: Record<string, (values: Record<string, string>, ctx:
     if (!ctx.pool || !ctx.vdev?.guid || !disk) throw new ApiError(409, "disk_changed", "")
     return api.replacePoolDisk(ctx.pool.name, { old_guid: ctx.vdev.guid, disk, password: v.password ?? "" })
   },
+  "users.create": (v) =>
+    api.createUser({
+      username: v.username ?? "",
+      description: v.description ?? "",
+      role: v.role ?? "user",
+      groups: splitList(v.groups),
+      password: v.password ?? "",
+      password_confirm: v.password_confirm ?? "",
+      must_change_password: v.must_change_password === "yes",
+      admin_password: v.admin_password ?? "",
+    }),
   "storage.pool_destroy": (v, ctx) => {
     if (!ctx.pool) throw new ApiError(404, "not_found", "")
     return api.destroyPool(ctx.pool.name, { confirm_name: v.confirm_name ?? "", password: v.password ?? "" })

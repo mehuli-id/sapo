@@ -17,7 +17,7 @@ import { api, ApiError } from "@/lib/api"
 const { t } = useI18n()
 const { status, refresh } = useSession()
 
-type Mode = "idle" | "codes-password" | "codes-shown" | "totp-password" | "totp-scan" | "totp-done"
+type Mode = "idle" | "codes-password" | "codes-shown" | "totp-password" | "totp-scan" | "totp-done" | "password" | "password-done"
 const mode = ref<Mode>("idle")
 const password = ref("")
 const code = ref("")
@@ -28,6 +28,10 @@ const enrollment = ref<TOTPEnrollment | null>(null)
 const qr = ref("")
 
 const left = computed(() => status.value?.user?.recovery_codes_left)
+// recovery_codes_left hanya ada bila 2FA aktif.
+const twofa = computed(() => left.value !== undefined)
+const newPassword = ref("")
+const repeatPassword = ref("")
 const low = computed(() => status.value?.user?.recovery_codes_low)
 
 // Fokus ke isian berikutnya. Atribut autofocus tidak berlaku untuk isian
@@ -42,6 +46,8 @@ function start(m: Mode) {
   password.value = ""
   code.value = ""
   error.value = ""
+  newPassword.value = repeatPassword.value = ""
+  if (m === "password") focus("acc-pass-current")
   if (m === "codes-password") focus("acc-pass-codes")
   if (m === "totp-password") focus("acc-pass-totp")
 }
@@ -93,6 +99,13 @@ const confirmTOTP = () =>
     mode.value = "totp-done"
   })
 
+const changePassword = () =>
+  run(async () => {
+    await api.changePassword(password.value, newPassword.value, repeatPassword.value)
+    password.value = newPassword.value = repeatPassword.value = ""
+    mode.value = "password-done"
+  })
+
 const grouped = (s: string) => s.replace(/(.{4})/g, "$1 ").trim()
 </script>
 
@@ -100,9 +113,9 @@ const grouped = (s: string) => s.replace(/(.{4})/g, "$1 ").trim()
   <div class="space-y-4 p-4">
     <!-- Status -->
     <div class="flex items-start gap-3 rounded-xl border p-4">
-      <ShieldCheck class="mt-0.5 size-5 shrink-0 text-primary" />
+      <ShieldCheck :class="['mt-0.5 size-5 shrink-0', twofa ? 'text-primary' : 'text-muted-foreground']" />
       <div class="space-y-1 text-sm">
-        <div class="font-medium">{{ t("account.twofaOn") }}</div>
+        <div class="font-medium">{{ twofa ? t("account.twofaOn") : t("account.twofaOff") }}</div>
         <p v-if="left !== undefined" class="text-muted-foreground">{{ t("account.codesLeft", { n: left }) }}</p>
       </div>
     </div>
@@ -111,8 +124,33 @@ const grouped = (s: string) => s.replace(/(.{4})/g, "$1 ").trim()
       <AlertDescription>{{ left === 0 ? t("account.codesNone") : t("account.codesLow", { n: left }) }}</AlertDescription>
     </Alert>
 
-    <!-- Kode cadangan -->
+    <!-- Password -->
     <section class="space-y-3 rounded-xl border p-4">
+      <h3 class="flex items-center gap-2 font-medium"><KeyRound class="size-4" />{{ t("account.passwordTitle") }}</h3>
+      <form v-if="mode === 'password'" class="space-y-2" @submit.prevent="changePassword">
+        <Label for="acc-pass-current">{{ t("setupAccount.current") }}</Label>
+        <Input id="acc-pass-current" v-model="password" type="password" autocomplete="current-password" />
+        <Label for="acc-pass-new">{{ t("users.newPassword") }}</Label>
+        <Input id="acc-pass-new" v-model="newPassword" type="password" autocomplete="new-password" />
+        <Label for="acc-pass-repeat">{{ t("users.repeatPassword") }}</Label>
+        <Input id="acc-pass-repeat" v-model="repeatPassword" type="password" autocomplete="new-password" />
+        <div class="flex gap-2">
+          <Button type="submit" size="sm" :disabled="busy || !password || !newPassword || newPassword !== repeatPassword">
+            <LoaderCircle v-if="busy" class="animate-spin" />{{ t("account.passwordSave") }}
+          </Button>
+          <Button type="button" size="sm" variant="ghost" @click="start('idle')">{{ t("account.cancel") }}</Button>
+        </div>
+      </form>
+      <template v-else-if="mode === 'password-done'">
+        <p class="text-sm font-medium text-primary">{{ t("account.passwordDone") }}</p>
+        <p class="text-xs text-muted-foreground">{{ t("account.othersSignedOut") }}</p>
+        <Button size="sm" variant="ghost" @click="start('idle')">{{ t("account.done") }}</Button>
+      </template>
+      <Button v-else size="sm" variant="outline" @click="start('password')">{{ t("account.passwordChange") }}</Button>
+    </section>
+
+    <!-- Kode cadangan -->
+    <section v-if="twofa" class="space-y-3 rounded-xl border p-4">
       <h3 class="flex items-center gap-2 font-medium"><KeyRound class="size-4" />{{ t("account.codesTitle") }}</h3>
       <p class="text-sm text-muted-foreground">{{ t("account.codesIntro") }}</p>
       <template v-if="mode === 'codes-password'">
@@ -140,7 +178,7 @@ const grouped = (s: string) => s.replace(/(.{4})/g, "$1 ").trim()
     <!-- Pindah aplikasi autentikator -->
     <section class="space-y-3 rounded-xl border p-4">
       <h3 class="flex items-center gap-2 font-medium"><Smartphone class="size-4" />{{ t("account.totpTitle") }}</h3>
-      <p class="text-sm text-muted-foreground">{{ t("account.totpIntro") }}</p>
+      <p class="text-sm text-muted-foreground">{{ twofa ? t("account.totpIntro") : t("account.totpIntroOff") }}</p>
       <template v-if="mode === 'totp-password'">
         <form class="space-y-2" @submit.prevent="beginTOTP">
           <Label for="acc-pass-totp">{{ t("account.password") }}</Label>
@@ -183,7 +221,7 @@ const grouped = (s: string) => s.replace(/(.{4})/g, "$1 ").trim()
         <p class="text-xs text-muted-foreground">{{ t("account.othersSignedOut") }} {{ t("account.totpCodesStillValid") }}</p>
         <Button size="sm" variant="ghost" @click="start('idle')">{{ t("account.done") }}</Button>
       </template>
-      <Button v-else size="sm" variant="outline" @click="start('totp-password')">{{ t("account.totpStart") }}</Button>
+      <Button v-else size="sm" variant="outline" @click="start('totp-password')">{{ twofa ? t("account.totpStart") : t("account.totpEnable") }}</Button>
     </section>
 
     <Alert v-if="error" variant="destructive">

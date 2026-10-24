@@ -131,9 +131,12 @@ type TLS struct {
 
 // Auth berisi kebijakan login. Semua angka di sini bisa diubah admin.
 type Auth struct {
-	PasswordMinLength   int      `yaml:"password_min_length"`
-	UsernamePattern     string   `yaml:"username_pattern"`
-	ReservedUsernames   []string `yaml:"reserved_usernames"`
+	PasswordMinLength int      `yaml:"password_min_length"`
+	UsernamePattern   string   `yaml:"username_pattern"`
+	ReservedUsernames []string `yaml:"reserved_usernames"`
+	// Nama grup: aturan dan nama yang dicadangkan (grup sistem).
+	GroupNamePattern    string   `yaml:"group_name_pattern"`
+	ReservedGroupNames  []string `yaml:"reserved_group_names"`
 	RequireTOTPForAdmin bool     `yaml:"require_totp_for_admin"`
 	SessionIdleMinutes  int      `yaml:"session_idle_minutes"`
 	SessionMaxHours     int      `yaml:"session_max_hours"`
@@ -223,9 +226,13 @@ func Default() Config {
 			},
 		},
 		Auth: Auth{
-			PasswordMinLength:      10,
-			UsernamePattern:        `^[a-z][a-z0-9._-]{2,31}$`,
-			ReservedUsernames:      []string{"root", "sapo", "daemon", "bin", "sys", "nobody", "guest"},
+			PasswordMinLength: 10,
+			UsernamePattern:   `^[a-z][a-z0-9._-]{2,31}$`,
+			ReservedUsernames: []string{"root", "sapo", "daemon", "bin", "sys", "sync", "games", "man", "lp", "mail", "news", "uucp", "proxy",
+				"www-data", "backup", "list", "irc", "nobody", "guest", "systemd-network", "systemd-timesync", "messagebus", "sshd", "_apt"},
+			GroupNamePattern: "^[a-z][a-z0-9._-]{1,31}$",
+			ReservedGroupNames: []string{"root", "sapo", "sudo", "adm", "staff", "users", "admin", "administrators", "wheel", "nogroup",
+				"daemon", "bin", "sys", "disk", "tty", "shadow", "systemd-journal"},
 			RequireTOTPForAdmin:    true,
 			SessionIdleMinutes:     30,
 			SessionMaxHours:        12,
@@ -328,6 +335,9 @@ func (c Config) Validate() error {
 	}
 	if _, err := regexp.Compile(c.Auth.UsernamePattern); err != nil {
 		return fmt.Errorf("auth.username_pattern tidak valid: %w", err)
+	}
+	if _, err := regexp.Compile(c.Auth.GroupNamePattern); err != nil {
+		return fmt.Errorf("auth.group_name_pattern tidak valid: %w", err)
 	}
 	if _, err := ListenPort("api.listen", c.API.Listen); err != nil {
 		return err

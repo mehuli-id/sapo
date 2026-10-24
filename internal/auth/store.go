@@ -7,16 +7,25 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"sync"
 	"time"
 )
 
-// Role adalah peran user. Izin per modul akan disimpan sebagai data; untuk
-// tahap ini baru ada admin.
+// Role adalah peran user. Izin per folder dan aplikasi diatur lewat grup.
 type Role string
 
-// RoleAdmin adalah administrator penuh.
-const RoleAdmin Role = "admin"
+const (
+	// RoleAdmin adalah administrator penuh.
+	RoleAdmin Role = "admin"
+	// RoleUser adalah pengguna biasa: mengakses file dan aplikasi yang
+	// diizinkan, tidak bisa mengubah pengaturan sistem.
+	RoleUser Role = "user"
+)
+
+// ValidRole memeriksa nilai peran dari luar (panel).
+func ValidRole(r Role) bool { return r == RoleAdmin || r == RoleUser }
 
 // User adalah akun panel.
 type User struct {
@@ -28,6 +37,23 @@ type User struct {
 	// Hash kode cadangan 2FA yang belum dipakai (lihat recovery.go).
 	RecoveryCodes []string  `json:"recovery_codes,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
+	// Description: keterangan bebas dari admin (misalnya nama lengkap).
+	Description string `json:"description,omitempty"`
+	// Disabled: akun dinonaktifkan; tidak bisa login, sesinya diakhiri.
+	Disabled bool `json:"disabled,omitempty"`
+	// MustChangePassword: password dibuat atau di-reset admin, jadi pemilik
+	// akun wajib menggantinya sebelum memakai panel.
+	MustChangePassword bool `json:"must_change_password,omitempty"`
+	// Groups: nama grup yang diikuti user.
+	Groups      []string   `json:"groups,omitempty"`
+	LastLoginAt *time.Time `json:"last_login_at,omitempty"`
+}
+
+// Group adalah kumpulan user, dipakai untuk izin folder dan aplikasi.
+type Group struct {
+	Name        string    `json:"name"`
+	Description string    `json:"description,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // State adalah isi file penyimpanan.
@@ -36,6 +62,7 @@ type State struct {
 	SetupCompletedAt *time.Time `json:"setup_completed_at,omitempty"`
 	Language         string     `json:"language,omitempty"`
 	Users            []User     `json:"users"`
+	Groups           []Group    `json:"groups,omitempty"`
 }
 
 // ErrSetupDone dikembalikan bila setup awal sudah pernah selesai.
@@ -176,6 +203,254 @@ func (s *Store) SetPasswordHash(username, hash string) error {
 	})
 }
 
+// Kesalahan pengelolaan user dan grup.
+var (
+	ErrUserExists   = errors.New("nama pengguna sudah dipakai")
+	ErrUserNotFound = errors.New("user tidak ditemukan")
+	// ErrLastAdmin: perubahan akan membuat NAS tanpa administrator aktif.
+	ErrLastAdmin     = errors.New("harus tetap ada minimal satu administrator aktif")
+	ErrGroupExists   = errors.New("nama grup sudah dipakai")
+	ErrGroupNotFound = errors.New("grup tidak ditemukan")
+)
+
+// Users mengembalikan salinan semua user, urut nama.
+func (s *Store) Users() []User {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := cloneUsers(s.state.Users)
+	sort.Slice(out, func(i, j int) bool { return out[i].Username < out[j].Username })
+	return out
+}
+
+// Groups mengembalikan salinan semua grup, urut nama.
+func (s *Store) Groups() []Group {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := append([]Group(nil), s.state.Groups...)
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// CreateUser menambah user baru. Grupnya harus sudah ada.
+func (s *Store) CreateUser(u User) error {
+	return s.mutate(func(st *State) error {
+		for _, x := range st.Users {
+			if x.Username == u.Username {
+				return ErrUserExists
+			}
+		}
+		if err := checkGroups(st, u.Groups); err != nil {
+			return err
+		}
+		u.Groups = uniqueSorted(u.Groups)
+		st.Users = append(st.Users, u)
+		return nil
+	})
+}
+
+// UserChange adalah perubahan atribut user oleh admin; nil = tidak diubah.
+type UserChange struct {
+	Role        *Role
+	Disabled    *bool
+	Groups      *[]string
+	Description *string
+}
+
+// UpdateUser menerapkan perubahan. Administrator aktif terakhir tidak bisa
+// diturunkan perannya atau dinonaktifkan.
+func (s *Store) UpdateUser(username string, c UserChange) error {
+	return s.mutate(func(st *State) error {
+		u := findUser(st, username)
+		if u == nil {
+			return ErrUserNotFound
+		}
+		if c.Groups != nil {
+			if err := checkGroups(st, *c.Groups); err != nil {
+				return err
+			}
+			u.Groups = uniqueSorted(*c.Groups)
+		}
+		if c.Role != nil {
+			u.Role = *c.Role
+		}
+		if c.Disabled != nil {
+			u.Disabled = *c.Disabled
+		}
+		if c.Description != nil {
+			u.Description = *c.Description
+		}
+		return requireActiveAdmin(st)
+	})
+}
+
+// SetPassword mengganti hash password. mustChange: pemilik akun wajib
+// menggantinya lagi saat login (password dibuat admin).
+func (s *Store) SetPassword(username, hash string, mustChange bool) error {
+	return s.updateUser(username, func(u *User) error {
+		u.PasswordHash = hash
+		u.MustChangePassword = mustChange
+		return nil
+	})
+}
+
+// RecordLogin mencatat waktu login terakhir.
+func (s *Store) RecordLogin(username string, at time.Time) error {
+	return s.updateUser(username, func(u *User) error {
+		u.LastLoginAt = &at
+		return nil
+	})
+}
+
+// DeleteUser menghapus user. Administrator aktif terakhir tidak bisa dihapus.
+func (s *Store) DeleteUser(username string) error {
+	return s.mutate(func(st *State) error {
+		for i, u := range st.Users {
+			if u.Username == username {
+				st.Users = append(st.Users[:i:i], st.Users[i+1:]...)
+				return requireActiveAdmin(st)
+			}
+		}
+		return ErrUserNotFound
+	})
+}
+
+// CreateGroup menambah grup.
+func (s *Store) CreateGroup(g Group) error {
+	return s.mutate(func(st *State) error {
+		for _, x := range st.Groups {
+			if x.Name == g.Name {
+				return ErrGroupExists
+			}
+		}
+		st.Groups = append(st.Groups, g)
+		return nil
+	})
+}
+
+// UpdateGroup mengganti keterangan grup dan, bila members tidak nil,
+// anggotanya (user di luar daftar dikeluarkan dari grup).
+func (s *Store) UpdateGroup(name string, description *string, members *[]string) error {
+	return s.mutate(func(st *State) error {
+		g := findGroup(st, name)
+		if g == nil {
+			return ErrGroupNotFound
+		}
+		if description != nil {
+			g.Description = *description
+		}
+		if members == nil {
+			return nil
+		}
+		want := map[string]bool{}
+		for _, m := range *members {
+			if findUser(st, m) == nil {
+				return ErrUserNotFound
+			}
+			want[m] = true
+		}
+		for i := range st.Users {
+			u := &st.Users[i]
+			groups := slices.DeleteFunc(slices.Clone(u.Groups), func(x string) bool { return x == name })
+			if want[u.Username] {
+				groups = append(groups, name)
+			}
+			u.Groups = uniqueSorted(groups)
+		}
+		return nil
+	})
+}
+
+// DeleteGroup menghapus grup dan keanggotaannya.
+func (s *Store) DeleteGroup(name string) error {
+	return s.mutate(func(st *State) error {
+		i := slices.IndexFunc(st.Groups, func(g Group) bool { return g.Name == name })
+		if i < 0 {
+			return ErrGroupNotFound
+		}
+		st.Groups = slices.Delete(st.Groups, i, i+1)
+		for j := range st.Users {
+			st.Users[j].Groups = slices.DeleteFunc(slices.Clone(st.Users[j].Groups), func(x string) bool { return x == name })
+		}
+		return nil
+	})
+}
+
+// mutate menjalankan fn pada salinan state, lalu menyimpannya bila berhasil.
+// Salinan dibuat dalam (slice di dalam user ikut disalin), jadi state lama
+// tidak pernah berubah bila fn atau penulisan gagal.
+func (s *Store) mutate(fn func(*State) error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	next := s.state
+	next.Users = cloneUsers(s.state.Users)
+	next.Groups = append([]Group(nil), s.state.Groups...)
+	if err := fn(&next); err != nil {
+		return err
+	}
+	if err := s.write(next); err != nil {
+		return err
+	}
+	s.state = next
+	return nil
+}
+
+func cloneUsers(in []User) []User {
+	out := make([]User, len(in))
+	for i, u := range in {
+		u.Groups = slices.Clone(u.Groups)
+		u.RecoveryCodes = slices.Clone(u.RecoveryCodes)
+		out[i] = u
+	}
+	return out
+}
+
+func findUser(st *State, name string) *User {
+	for i := range st.Users {
+		if st.Users[i].Username == name {
+			return &st.Users[i]
+		}
+	}
+	return nil
+}
+
+func findGroup(st *State, name string) *Group {
+	for i := range st.Groups {
+		if st.Groups[i].Name == name {
+			return &st.Groups[i]
+		}
+	}
+	return nil
+}
+
+func checkGroups(st *State, groups []string) error {
+	for _, g := range groups {
+		if findGroup(st, g) == nil {
+			return ErrGroupNotFound
+		}
+	}
+	return nil
+}
+
+func uniqueSorted(in []string) []string {
+	out := slices.Clone(in)
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+// requireActiveAdmin: setelah setup, harus selalu ada administrator yang
+// aktif, agar NAS tidak terkunci dari panel.
+func requireActiveAdmin(st *State) error {
+	if st.SetupCompletedAt == nil {
+		return nil
+	}
+	for _, u := range st.Users {
+		if u.Role == RoleAdmin && !u.Disabled {
+			return nil
+		}
+	}
+	return ErrLastAdmin
+}
+
 func (s *Store) updateUser(username string, fn func(*User) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -193,7 +468,7 @@ func (s *Store) updateUser(username string, fn func(*User) error) error {
 			return nil
 		}
 	}
-	return errors.New("user tidak ditemukan")
+	return ErrUserNotFound
 }
 
 // write menulis state ke file sementara, fsync, lalu rename (atomik).

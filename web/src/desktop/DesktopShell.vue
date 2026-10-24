@@ -4,7 +4,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue"
 import { useI18n } from "vue-i18n"
 import { onClickOutside, onKeyStroke, useElementSize } from "@vueuse/core"
 import type { AppDef } from "@/apps/registry"
-import { apps, findApp, iconFor } from "@/apps/registry"
+import { findApp, iconFor, useVisibleApps } from "@/apps/registry"
 import SapoLogo from "@/components/SapoLogo.vue"
 import { Kbd } from "@/components/ui/kbd"
 import { useShell } from "@/composables/useShell"
@@ -40,7 +40,7 @@ function launch(app: AppDef) {
   open(app, area.value)
 }
 
-const desktopApps = computed(() => apps)
+const desktopApps = useVisibleApps()
 const now = ref(new Date())
 let clockTimer: number | undefined
 onMounted(() => (clockTimer = window.setInterval(() => (now.value = new Date()), 15_000)))

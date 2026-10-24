@@ -3,7 +3,7 @@
 import { computed, ref } from "vue"
 import { useI18n } from "vue-i18n"
 import { Menu, X } from "@lucide/vue"
-import { apps, componentFor, findApp, iconFor } from "@/apps/registry"
+import { componentFor, findApp, iconFor, useVisibleApps } from "@/apps/registry"
 import SapoLogo from "@/components/SapoLogo.vue"
 import { useShell } from "@/composables/useShell"
 import { cn } from "@/lib/utils"
@@ -11,7 +11,8 @@ import ShellMenu from "./ShellMenu.vue"
 
 const { t } = useI18n()
 const { branding, isSmall } = useShell()
-const activeId = ref(apps.find((a) => a.status === "ready")?.id ?? apps[0]?.id ?? "")
+const apps = useVisibleApps()
+const activeId = ref(apps.value.find((a) => a.status === "ready")?.id ?? apps.value[0]?.id ?? "")
 const sidebarOpen = ref(false)
 const active = computed(() => findApp(activeId.value))
 

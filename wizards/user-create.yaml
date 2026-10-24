@@ -1,0 +1,99 @@
+# Wizard menambah pengguna. Aturan nama dan password dari auth di
+# sapo.yaml; server memeriksa ulang semuanya.
+id: user-create
+action: users.create
+title:
+  id: Tambah pengguna
+  en: Add a user
+finish_label:
+  id: Buat pengguna
+  en: Create user
+
+steps:
+  - id: account
+    title: { id: Akun, en: Account }
+    description:
+      id: Nama ini dipakai untuk masuk ke panel dan, nantinya, membuka folder bersama dari komputer lain.
+      en: This name is used to sign in to the panel and, later, to open shared folders from other computers.
+    fields:
+      - key: username
+        type: username
+        required: true
+        autocomplete: "off"
+        label: { id: Nama pengguna, en: Username }
+        placeholder: { id: "misalnya: budi", en: "e.g. budi" }
+        help:
+          id: Huruf kecil, angka, titik, garis bawah, atau tanda hubung; diawali huruf.
+          en: Lowercase letters, digits, dots, underscores, or hyphens; starts with a letter.
+      - key: description
+        type: text
+        autocomplete: "off"
+        label: { id: Keterangan (boleh kosong), en: Description (optional) }
+        placeholder: { id: "misalnya: Budi Santoso, keuangan", en: "e.g. Budi Santoso, finance" }
+      - key: role
+        type: choice
+        default: user
+        label: { id: Peran, en: Role }
+        options:
+          - value: user
+            label: { id: Pengguna, en: User }
+            help:
+              id: Membuka file dan aplikasi yang diizinkan. Tidak bisa mengubah pengaturan NAS.
+              en: Opens the files and apps they're allowed to. Can't change NAS settings.
+          - value: admin
+            label: { id: Administrator, en: Administrator }
+            help:
+              id: Akses penuh ke NAS, termasuk disk dan pengguna lain. Wajib verifikasi dua langkah.
+              en: Full access to the NAS, including disks and other users. Two-step verification is required.
+
+  - id: password
+    title: { id: Password, en: Password }
+    description:
+      id: >-
+        Berikan password ini kepada pemilik akun lewat jalur yang aman. Bila
+        diwajibkan, ia harus menggantinya saat pertama masuk.
+      en: >-
+        Give this password to the account owner through a safe channel. If
+        required, they must change it the first time they sign in.
+    fields:
+      - key: password
+        type: password
+        required: true
+        secret: true
+        autocomplete: new-password
+        label: { id: Password awal, en: Initial password }
+      - key: password_confirm
+        type: password-confirm
+        required: true
+        secret: true
+        match: password
+        autocomplete: new-password
+        label: { id: Ulangi password, en: Repeat password }
+      - key: must_change_password
+        type: toggle
+        default: "yes"
+        label: { id: Wajib ganti password saat pertama masuk, en: Must change password at first sign-in }
+
+  - id: groups
+    title: { id: Grup, en: Groups }
+    description:
+      id: Grup memudahkan memberi izin folder ke banyak orang sekaligus. Bisa diubah kapan saja.
+      en: Groups make it easy to give folder access to many people at once. You can change this any time.
+    fields:
+      - key: groups
+        type: group-select
+        label: { id: Grup, en: Groups }
+
+  - id: summary
+    type: review
+    title: { id: Ringkasan, en: Summary }
+    fields:
+      - key: admin_password
+        type: current-password
+        required: true
+        secret: true
+        autocomplete: current-password
+        label: { id: Password Anda, en: Your password }
+        help:
+          id: Diminta lagi karena menambah pengguna memberi akses ke NAS.
+          en: Asked again because adding a user grants access to the NAS.

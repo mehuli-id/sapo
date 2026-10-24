@@ -72,6 +72,7 @@ type Server struct {
 	// totpLimiter menghitung kode 2FA salah per akun.
 	totpLimiter *auth.Limiter
 	userRe      *regexp.Regexp
+	groupRe     *regexp.Regexp
 	argon       auth.Argon2Params
 	dummy       string
 	setup       pendingTOTP
@@ -138,6 +139,7 @@ func New(o Options) (*Server, error) {
 		totpLimiter: auth.NewLimiter(cfg.Auth.TOTPMaxFailures,
 			time.Duration(cfg.Auth.TOTPWindowMinutes)*time.Minute, time.Duration(cfg.Auth.TOTPWindowMinutes)*time.Minute),
 		userRe:   regexp.MustCompile(cfg.Auth.UsernamePattern),
+		groupRe:  regexp.MustCompile(cfg.Auth.GroupNamePattern),
 		argon:    argon,
 		dummy:    dummy,
 		setup:    pendingTOTP{entries: map[string]pendingEntry{}},
@@ -170,16 +172,30 @@ func New(o Options) (*Server, error) {
 	s.mux.HandleFunc("GET /api/v1/wizards/{id}", s.handleWizard)
 	s.mux.HandleFunc("POST /api/v1/setup/totp", s.handleSetupTOTP)
 	s.mux.HandleFunc("POST /api/v1/setup", s.handleSetup)
-	s.mux.Handle("POST /api/v1/account/recovery-codes", s.requireAuth(http.HandlerFunc(s.handleRecoveryCodes)))
-	s.mux.Handle("POST /api/v1/account/totp/begin", s.requireAuth(http.HandlerFunc(s.handleTOTPBegin)))
-	s.mux.Handle("POST /api/v1/account/totp/confirm", s.requireAuth(http.HandlerFunc(s.handleTOTPConfirm)))
+	// Akun sendiri: boleh dipakai selama langkah wajib akun belum selesai.
+	s.mux.Handle("POST /api/v1/account/recovery-codes", s.requireAuthPending(http.HandlerFunc(s.handleRecoveryCodes)))
+	s.mux.Handle("POST /api/v1/account/totp/begin", s.requireAuthPending(http.HandlerFunc(s.handleTOTPBegin)))
+	s.mux.Handle("POST /api/v1/account/totp/confirm", s.requireAuthPending(http.HandlerFunc(s.handleTOTPConfirm)))
+	s.mux.Handle("POST /api/v1/account/password", s.requireAuthPending(http.HandlerFunc(s.handleChangePassword)))
+
+	// Pengguna dan grup (hanya admin).
+	s.mux.Handle("GET /api/v1/users", s.requireAdmin(http.HandlerFunc(s.handleUsers)))
+	s.mux.Handle("POST /api/v1/users", s.requireAdmin(http.HandlerFunc(s.handleUserCreate)))
+	s.mux.Handle("POST /api/v1/users/{name}", s.requireAdmin(http.HandlerFunc(s.handleUserUpdate)))
+	s.mux.Handle("POST /api/v1/users/{name}/password", s.requireAdmin(http.HandlerFunc(s.handleUserPassword)))
+	s.mux.Handle("POST /api/v1/users/{name}/delete", s.requireAdmin(http.HandlerFunc(s.handleUserDelete)))
+	s.mux.Handle("GET /api/v1/groups", s.requireAdmin(http.HandlerFunc(s.handleGroups)))
+	s.mux.Handle("POST /api/v1/groups", s.requireAdmin(http.HandlerFunc(s.handleGroupCreate)))
+	s.mux.Handle("POST /api/v1/groups/{name}", s.requireAdmin(http.HandlerFunc(s.handleGroupUpdate)))
+	s.mux.Handle("POST /api/v1/groups/{name}/delete", s.requireAdmin(http.HandlerFunc(s.handleGroupDelete)))
 
 	// Butuh login.
+	// Info sistem boleh dilihat semua user; storage dan paket hanya admin.
 	s.mux.Handle("GET /api/v1/system/info", s.requireAuth(s.proxyRead(proto.OpSystemInfo)))
-	s.mux.Handle("GET /api/v1/features", s.requireAuth(s.proxyRead(proto.OpFeaturesList)))
-	s.mux.Handle("GET /api/v1/storage/disks", s.requireAuth(s.proxyRead(proto.OpStorageDisks)))
-	s.mux.Handle("GET /api/v1/storage/disks/{name}/smart", s.requireAuth(http.HandlerFunc(s.handleDiskSMART)))
-	s.mux.Handle("GET /api/v1/storage/pools", s.requireAuth(s.proxyRead(proto.OpStoragePools)))
+	s.mux.Handle("GET /api/v1/features", s.requireAdmin(s.proxyRead(proto.OpFeaturesList)))
+	s.mux.Handle("GET /api/v1/storage/disks", s.requireAdmin(s.proxyRead(proto.OpStorageDisks)))
+	s.mux.Handle("GET /api/v1/storage/disks/{name}/smart", s.requireAdmin(http.HandlerFunc(s.handleDiskSMART)))
+	s.mux.Handle("GET /api/v1/storage/pools", s.requireAdmin(s.proxyRead(proto.OpStoragePools)))
 	s.mux.Handle("POST /api/v1/storage/pools", s.requireAdmin(http.HandlerFunc(s.handlePoolCreate)))
 	s.mux.Handle("POST /api/v1/storage/pools/{name}/scrub", s.requireAdmin(http.HandlerFunc(s.handlePoolScrub)))
 	s.mux.Handle("POST /api/v1/storage/pools/{name}/replace", s.requireAdmin(http.HandlerFunc(s.handlePoolReplace)))
