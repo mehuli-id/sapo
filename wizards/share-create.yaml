@@ -1,0 +1,70 @@
+# Wizard membuat shared folder: dataset ZFS <pool>/<nama> yang dibagikan
+# lewat SMB. sapod memeriksa ulang semua isian sebelum menulis smb.conf.
+id: share-create
+action: shares.create
+admin_only: true
+title:
+  id: Buat shared folder
+  en: Create a shared folder
+finish_label:
+  id: Buat folder
+  en: Create folder
+
+steps:
+  - id: folder
+    title: { id: Folder, en: Folder }
+    description:
+      id: Shared folder bisa dibuka dari komputer dan HP lain di jaringan, sesuai izin setiap pengguna.
+      en: A shared folder can be opened from other computers and phones on the network, according to each user's permissions.
+    fields:
+      - key: name
+        type: text
+        required: true
+        pattern: "^[a-z][a-z0-9_-]{0,31}$"
+        autocomplete: "off"
+        label: { id: Nama folder, en: Folder name }
+        placeholder: { id: "misalnya: keluarga", en: "e.g. family" }
+        help:
+          id: Huruf kecil, angka, garis bawah, atau tanda hubung; diawali huruf. Nama ini dipakai untuk membuka folder dari komputer lain.
+          en: Lowercase letters, digits, underscores, or hyphens; starts with a letter. This name is used to open the folder from other computers.
+      - key: description
+        type: text
+        autocomplete: "off"
+        label: { id: Keterangan (boleh kosong), en: Description (optional) }
+      - key: pool
+        type: pool-select
+        required: true
+        label: { id: Disimpan di pool, en: Stored on pool }
+
+  - id: access
+    title: { id: Izin akses, en: Access }
+    description:
+      id: Pengguna dan grup tanpa izin tidak bisa membuka folder ini. Administrator juga perlu diberi izin.
+      en: Users and groups without permission can't open this folder. Administrators need permission too.
+    help:
+      id: >-
+        "Baca" bisa membuka dan menyalin file. "Baca & tulis" juga bisa
+        menambah, mengubah, dan menghapus file. Bila seseorang mendapat izin
+        dari dirinya sendiri dan dari grup, izin yang lebih tinggi berlaku.
+      en: >-
+        "Read" can open and copy files. "Read & write" can also add, change,
+        and delete files. If someone gets permission both directly and from a
+        group, the higher one applies.
+    fields:
+      - key: permissions
+        type: permissions
+        label: { id: Izin, en: Permissions }
+
+  - id: summary
+    type: review
+    title: { id: Ringkasan, en: Summary }
+    fields:
+      - key: admin_password
+        type: current-password
+        required: true
+        secret: true
+        autocomplete: current-password
+        label: { id: Password Anda, en: Your password }
+        help:
+          id: Diminta lagi karena izin folder memberi akses ke data.
+          en: Asked again because folder permissions grant access to data.

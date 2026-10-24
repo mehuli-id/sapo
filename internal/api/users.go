@@ -169,8 +169,13 @@ func (s *Server) handleUserCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.record(r, admin.Username, "users.create", true, map[string]string{"user": u.Username, "role": string(u.Role), "groups": strings.Join(u.Groups, ",")})
+	// Akun sistem dibuat dulu, baru password Samba-nya.
+	warning := s.syncAfterChange(r)
+	if warning == "" {
+		s.setSMBPassword(r.Context(), u.Username, req.Password)
+	}
 	created, _ := s.store.Get(u.Username)
-	writeJSON(w, http.StatusOK, s.viewOf(created))
+	writeJSON(w, http.StatusOK, map[string]any{"user": s.viewOf(created), "warning": warning})
 }
 
 func (s *Server) handleUserUpdate(w http.ResponseWriter, r *http.Request) {
@@ -206,7 +211,8 @@ func (s *Server) handleUserUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actor := sess.Username
-	if roleChange || enabling {
+	// Grup menentukan izin shared folder, jadi mengubahnya juga memberi akses.
+	if roleChange || enabling || req.Groups != nil {
 		admin, ok := s.reauthField(w, r, req.AdminPassword, "admin_password")
 		if !ok {
 			return
@@ -235,8 +241,9 @@ func (s *Server) handleUserUpdate(w http.ResponseWriter, r *http.Request) {
 		s.sessions.DeleteUserExcept(name, "")
 	}
 	s.record(r, actor, "users.update", true, detail)
+	warning := s.syncAfterChange(r)
 	updated, _ := s.store.Get(name)
-	writeJSON(w, http.StatusOK, s.viewOf(updated))
+	writeJSON(w, http.StatusOK, map[string]any{"user": s.viewOf(updated), "warning": warning})
 }
 
 func (s *Server) handleUserPassword(w http.ResponseWriter, r *http.Request) {
@@ -278,6 +285,7 @@ func (s *Server) handleUserPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ended := s.sessions.DeleteUserExcept(name, "")
+	s.setSMBPassword(r.Context(), name, req.Password)
 	s.record(r, admin.Username, "users.password_reset", true, map[string]string{"user": name, "must_change": boolText(req.MustChangePassword), "sessions_ended": itoa(ended)})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
@@ -311,7 +319,8 @@ func (s *Server) handleUserDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	s.sessions.DeleteUserExcept(name, "")
 	s.record(r, admin.Username, "users.delete", true, map[string]string{"user": name})
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	s.purgePrincipal("user:" + name)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "warning": s.syncAfterChange(r)})
 }
 
 // validGroupName: aturan nama sama dengan nama pengguna (nantinya juga
@@ -353,13 +362,14 @@ func (s *Server) handleGroupCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.record(r, sess.Username, "groups.create", true, map[string]string{"group": req.Name})
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "warning": s.syncAfterChange(r)})
 }
 
 func (s *Server) handleGroupUpdate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Description *string   `json:"description"`
-		Members     *[]string `json:"members"`
+		Description   *string   `json:"description"`
+		Members       *[]string `json:"members"`
+		AdminPassword string    `json:"admin_password"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
@@ -370,6 +380,15 @@ func (s *Server) handleGroupUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	name := r.PathValue("name")
 	sess, _, _ := s.currentSession(r)
+	actor := sess.Username
+	// Anggota grup menentukan izin shared folder: butuh password admin.
+	if req.Members != nil {
+		admin, ok := s.reauthField(w, r, req.AdminPassword, "admin_password")
+		if !ok {
+			return
+		}
+		actor = admin.Username
+	}
 	if err := s.store.UpdateGroup(name, req.Description, req.Members); err != nil {
 		userStoreError(w, err)
 		return
@@ -378,8 +397,8 @@ func (s *Server) handleGroupUpdate(w http.ResponseWriter, r *http.Request) {
 	if req.Members != nil {
 		detail["members"] = auditText(strings.Join(*req.Members, ","))
 	}
-	s.record(r, sess.Username, "groups.update", true, detail)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	s.record(r, actor, "groups.update", true, detail)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "warning": s.syncAfterChange(r)})
 }
 
 func (s *Server) handleGroupDelete(w http.ResponseWriter, r *http.Request) {
@@ -390,7 +409,8 @@ func (s *Server) handleGroupDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.record(r, sess.Username, "groups.delete", true, map[string]string{"group": name})
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	s.purgePrincipal("group:" + name)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "warning": s.syncAfterChange(r)})
 }
 
 // handleChangePassword: user mengganti password sendiri (juga langkah wajib
@@ -426,6 +446,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ended := s.endOtherSessions(r, user.Username)
+	s.setSMBPassword(r.Context(), user.Username, req.Password)
 	s.record(r, user.Username, "account.password", true, map[string]string{"other_sessions_ended": itoa(ended)})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "other_sessions_ended": ended})
 }

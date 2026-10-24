@@ -3,6 +3,7 @@
   { "id": "features", "icon": "package", "component": "Features", "status": "ready", "window": { "width": 680, "height": 560 }, "keywords": ["paket", "package", "debian"], "admin_only": true },
   { "id": "storage", "icon": "hard-drive", "component": "Storage", "status": "ready", "window": { "width": 720, "height": 620 }, "keywords": ["disk", "raid", "pool", "zfs", "smart", "hdd", "ssd", "nvme"], "admin_only": true },
   { "id": "users", "icon": "users-round", "component": "Users", "status": "ready", "admin_only": true, "window": { "width": 720, "height": 620 }, "keywords": ["user", "pengguna", "grup", "group", "akun", "account", "izin", "permission"] },
+  { "id": "shared-folders", "icon": "folder-lock", "component": "SharedFolders", "status": "ready", "admin_only": true, "window": { "width": 720, "height": 620 }, "keywords": ["folder", "share", "smb", "samba", "windows", "mac", "izin", "permission", "berbagi"] },
   { "id": "file-station", "icon": "folder-open", "component": "Planned", "status": "planned", "phase": 1, "keywords": ["file", "folder"] },
   { "id": "control-panel", "icon": "settings", "component": "Planned", "status": "planned", "phase": 1, "keywords": ["jaringan", "network", "user", "smb"] },
   { "id": "sapo-drive", "icon": "cloud", "component": "Planned", "status": "planned", "phase": 2, "keywords": ["drive", "sync", "share"] },

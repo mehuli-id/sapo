@@ -77,14 +77,15 @@ func (s *Server) handlePoolCreate(w http.ResponseWriter, r *http.Request) {
 		"disks": strings.Join(names, ","), "erase": strings.Join(erase, ","),
 	}
 	s.destructive(w, r, user, "storage.pool_create", detail, proto.OpStoragePoolCreate,
-		proto.PoolCreateParams{Name: req.Name, Layout: req.Layout, Disks: req.Disks})
+		proto.PoolCreateParams{Name: req.Name, Layout: req.Layout, Disks: req.Disks}, nil)
 }
 
 // destructive menjalankan operasi sapod yang menghapus data, setelah
 // password diperiksa: permintaan dicatat di log audit lebih dulu (bila
 // gagal, operasi dibatalkan), operasi tidak ikut batal bila browser menutup
 // koneksi, lalu hasil nyatanya dicatat.
-func (s *Server) destructive(w http.ResponseWriter, r *http.Request, user auth.User, action string, detail map[string]string, op string, params any) {
+// after (boleh nil) dijalankan setelah operasi berhasil, sebelum jawaban.
+func (s *Server) destructive(w http.ResponseWriter, r *http.Request, user auth.User, action string, detail map[string]string, op string, params any, after func()) {
 	// Nilai dari pengguna (nama pool, nama disk) disimpan sebagai data JSON,
 	// jadi tidak bisa memalsukan baris lain.
 	if err := s.audit.Record(audit.Event{Time: s.now().UTC(), Actor: user.Username, Action: action + ".request", IP: clientIP(r), OK: true, Detail: detail}); err != nil {
@@ -109,6 +110,9 @@ func (s *Server) destructive(w http.ResponseWriter, r *http.Request, user auth.U
 		s.agentError(w, op, err)
 		return
 	}
+	if after != nil {
+		after()
+	}
 	writeRaw(w, out)
 }
 
@@ -128,7 +132,7 @@ func (s *Server) handlePoolReplace(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	detail := map[string]string{"pool": auditText(name), "old_guid": auditText(req.OldGUID), "disk": auditText(req.Disk.Name), "erase": strconv.FormatBool(req.Disk.Erase)}
 	s.destructive(w, r, user, "storage.pool_replace", detail, proto.OpStoragePoolReplace,
-		proto.PoolReplaceParams{Name: name, OldGUID: req.OldGUID, Disk: req.Disk})
+		proto.PoolReplaceParams{Name: name, OldGUID: req.OldGUID, Disk: req.Disk}, nil)
 }
 
 func (s *Server) handlePoolDestroy(w http.ResponseWriter, r *http.Request) {
@@ -149,7 +153,7 @@ func (s *Server) handlePoolDestroy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.destructive(w, r, user, "storage.pool_destroy", map[string]string{"pool": auditText(name)}, proto.OpStoragePoolDestroy,
-		proto.PoolDestroyParams{Name: name})
+		proto.PoolDestroyParams{Name: name}, nil)
 }
 
 // auditText memotong nilai dari pengguna sebelum dicatat.

@@ -73,6 +73,10 @@
     "users": {
       "title": "Pengguna & Grup",
       "description": "Akun, peran, dan grup"
+    },
+    "shared-folders": {
+      "title": "Shared Folder",
+      "description": "Folder bersama dan izin aksesnya"
     }
   },
   "systemInfo": {
@@ -308,7 +312,13 @@
     "group_not_found": "Grup tidak ditemukan.",
     "password_same": "Password baru harus berbeda dari password sekarang.",
     "password_too_long": "Password terlalu panjang.",
-    "bad_request": "Isian tidak valid."
+    "bad_request": "Isian tidak valid.",
+    "share_invalid": "Nama folder tidak sesuai aturan.",
+    "share_taken": "Nama folder ini sudah dipakai.",
+    "share_not_ready": "Folder tersimpan, tetapi belum bisa disiapkan: {message}",
+    "share_delete_failed": "Folder gagal dihapus: {message}",
+    "conflict": "Bentrok dengan keadaan sistem.",
+    "system_sync_failed": "Perubahan tersimpan, tetapi belum bisa diterapkan ke sistem. Coba lagi sebentar."
   },
   "pool": {
     "title": "Pool penyimpanan",
@@ -477,6 +487,34 @@
     "none": "Belum ada grup.",
     "members": "Anggota",
     "editMembers": "Ubah anggota",
-    "confirmDelete": "Ya, hapus grup"
+    "confirmDelete": "Ya, hapus grup",
+    "passwordHelp": "Diminta karena grup menentukan izin shared folder."
+  },
+  "permissions": {
+    "none": "Tanpa akses",
+    "read": "Baca",
+    "write": "Baca & tulis",
+    "members": "{n} anggota",
+    "nobody": "Belum ada pengguna atau grup.",
+    "nobodyShort": "belum ada"
+  },
+  "shares": {
+    "intro": "Folder bersama di pool, dibuka dari Windows, Mac, Linux, atau HP lewat SMB.",
+    "add": "Buat folder",
+    "none": "Belum ada shared folder.",
+    "noPool": "Buat pool dulu di Storage Manager.",
+    "pickPool": "Pilih pool.",
+    "created": "Shared folder {name} sudah dibuat.",
+    "saved": "Izin {name} disimpan.",
+    "deleted": "Shared folder {name} dihapus.",
+    "onPool": "di pool {pool}",
+    "used": "{used} terpakai, {free} tersedia",
+    "access": "Akses",
+    "editAccess": "Ubah izin",
+    "notShared": "Belum ada yang diberi izin, jadi folder ini belum bisa dibuka dari komputer lain.",
+    "openFrom": "Buka dari komputer lain (masuk dengan nama pengguna dan password panel):",
+    "deleteHelp": "Folder {name} dan SEMUA isinya ({used}) akan dihapus permanen. Tindakan ini tidak bisa dibatalkan.",
+    "typeName": "Ketik nama folder",
+    "delete": "Hapus folder dan isinya"
   }
 }

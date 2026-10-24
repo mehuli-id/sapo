@@ -38,9 +38,44 @@ type Agent struct {
 	SocketGroup string `yaml:"socket_group"`
 	FeaturesDir string `yaml:"features_dir"`
 	// Batas koneksi bersamaan ke socket sapod.
-	MaxConnections int     `yaml:"max_connections"`
-	Storage        Storage `yaml:"storage"`
-	Console        Console `yaml:"console"`
+	MaxConnections int      `yaml:"max_connections"`
+	Storage        Storage  `yaml:"storage"`
+	Console        Console  `yaml:"console"`
+	Accounts       Accounts `yaml:"accounts"`
+	Shares         Shares   `yaml:"shares"`
+}
+
+// Accounts mengatur akun sistem untuk berbagi file. sapod hanya menyentuh
+// akun dan grup dengan UID/GID di rentang [id_min, id_max]; akun juga harus
+// bergrup utama primary_group.
+type Accounts struct {
+	Useradd      string `yaml:"useradd"`
+	Userdel      string `yaml:"userdel"`
+	Groupadd     string `yaml:"groupadd"`
+	Groupdel     string `yaml:"groupdel"`
+	Gpasswd      string `yaml:"gpasswd"`
+	Smbpasswd    string `yaml:"smbpasswd"`
+	PasswdFile   string `yaml:"passwd_file"`
+	GroupFile    string `yaml:"group_file"`
+	IDMin        int    `yaml:"id_min"`
+	IDMax        int    `yaml:"id_max"`
+	PrimaryGroup string `yaml:"primary_group"`
+	Shell        string `yaml:"shell"`
+}
+
+// Shares mengatur shared folder dan Samba.
+type Shares struct {
+	Zfs        string `yaml:"zfs"`
+	Setfacl    string `yaml:"setfacl"`
+	Testparm   string `yaml:"testparm"`
+	Smbcontrol string `yaml:"smbcontrol"`
+	// Konfigurasi Samba ditulis utuh oleh sapod dari templat tetap.
+	SMBConf string `yaml:"smb_conf"`
+	// Nilai [global] Samba.
+	Workgroup    string `yaml:"workgroup"`
+	ServerString string `yaml:"server_string"`
+	// Versi SMB paling rendah: SMB2 (SMB1 tidak aman).
+	MinProtocol string `yaml:"min_protocol"`
 }
 
 // Console mengatur alamat panel di layar login konsol NAS. File ditulis sapod
@@ -177,6 +212,16 @@ func Default() Config {
 			FeaturesDir:    "/usr/share/sapo/features",
 			MaxConnections: 32,
 			Console:        Console{IssueFile: "/run/sapo/console.issue", Agetty: "/usr/sbin/agetty"},
+			Accounts: Accounts{
+				Useradd: "/usr/sbin/useradd", Userdel: "/usr/sbin/userdel", Groupadd: "/usr/sbin/groupadd",
+				Groupdel: "/usr/sbin/groupdel", Gpasswd: "/usr/bin/gpasswd", Smbpasswd: "/usr/bin/smbpasswd",
+				PasswdFile: "/etc/passwd", GroupFile: "/etc/group",
+				IDMin: 20000, IDMax: 29999, PrimaryGroup: "sapo-users", Shell: "/usr/sbin/nologin",
+			},
+			Shares: Shares{
+				Zfs: "/usr/sbin/zfs", Setfacl: "/usr/bin/setfacl", Testparm: "/usr/bin/testparm", Smbcontrol: "/usr/bin/smbcontrol",
+				SMBConf: "/etc/samba/smb.conf", Workgroup: "WORKGROUP", ServerString: "Sapo NAS", MinProtocol: "SMB2",
+			},
 			Storage: Storage{
 				Lsblk:                 "/usr/bin/lsblk",
 				Smartctl:              "/usr/sbin/smartctl",
@@ -359,6 +404,12 @@ func (c Config) Validate() error {
 	if err := c.Agent.Storage.Pools.validate(); err != nil {
 		return err
 	}
+	if err := c.Agent.Accounts.validate(); err != nil {
+		return err
+	}
+	if err := c.Agent.Shares.validate(); err != nil {
+		return err
+	}
 	for _, p := range c.Agent.Storage.IgnoreDevices {
 		if _, err := path.Match(p, ""); err != nil {
 			return fmt.Errorf("agent.storage.ignore_devices: pola %q tidak valid", p)
@@ -454,6 +505,44 @@ func (p Pools) validate() error {
 			return errors.New("agent.storage.pools.layouts: single selalu satu disk (max_disks 1)")
 		}
 		seen[l.ID] = true
+	}
+	return nil
+}
+
+func (a Accounts) validate() error {
+	for _, p := range []string{a.Useradd, a.Userdel, a.Groupadd, a.Groupdel, a.Gpasswd, a.Smbpasswd, a.PasswdFile, a.GroupFile, a.Shell} {
+		if !filepath.IsAbs(p) {
+			return fmt.Errorf("agent.accounts: %q harus path absolut", p)
+		}
+	}
+	switch {
+	case a.IDMin < 1000 || a.IDMax > 59999 || a.IDMin >= a.IDMax:
+		// Di bawah 1000 milik sistem Debian; 60000 ke atas dicadangkan.
+		return errors.New("agent.accounts: id_min dan id_max harus 1000 sampai 59999, id_min < id_max")
+	case !accountName.MatchString(a.PrimaryGroup):
+		return errors.New("agent.accounts.primary_group tidak valid")
+	}
+	return nil
+}
+
+var (
+	accountName = regexp.MustCompile(`^[a-z][a-z0-9._-]{0,31}$`)
+	// Nilai [global] Samba ditulis apa adanya ke smb.conf: tanpa baris baru
+	// atau karakter yang punya arti di sintaks Samba.
+	smbValue = regexp.MustCompile(`^[A-Za-z0-9 ._-]{1,64}$`)
+)
+
+func (s Shares) validate() error {
+	for _, p := range []string{s.Zfs, s.Setfacl, s.Testparm, s.Smbcontrol, s.SMBConf} {
+		if !filepath.IsAbs(p) {
+			return fmt.Errorf("agent.shares: %q harus path absolut", p)
+		}
+	}
+	switch {
+	case !smbValue.MatchString(s.Workgroup) || !smbValue.MatchString(s.ServerString):
+		return errors.New("agent.shares: workgroup dan server_string hanya huruf, angka, spasi, titik, garis bawah, tanda hubung")
+	case s.MinProtocol != "SMB2" && s.MinProtocol != "SMB3":
+		return errors.New("agent.shares.min_protocol harus SMB2 atau SMB3")
 	}
 	return nil
 }

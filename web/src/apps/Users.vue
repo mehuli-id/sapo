@@ -98,8 +98,19 @@ async function run(fn: () => Promise<unknown>, done: string) {
   }
 }
 
+// Grup menentukan izin shared folder, jadi perubahan grup butuh password admin.
+const groupsChanged = (u: UserAccount) => [...u.groups].sort().join() !== [...form.groups].sort().join()
 const saveEdit = (u: UserAccount) =>
-  run(() => api.updateUser(u.username, { description: form.description, groups: form.groups }), t("users.saved", { name: u.username }))
+  run(
+    () =>
+      api.updateUser(
+        u.username,
+        groupsChanged(u)
+          ? { description: form.description, groups: form.groups, admin_password: form.adminPassword }
+          : { description: form.description },
+      ),
+    t("users.saved", { name: u.username }),
+  )
 const disable = (u: UserAccount) => run(() => api.updateUser(u.username, { disabled: true }), t("users.disabledDone", { name: u.username }))
 // Mengaktifkan lagi memberi akses, jadi butuh password admin.
 const enable = (u: UserAccount) =>
@@ -132,6 +143,7 @@ function toggleIn(list: string[], item: string, on: boolean) {
 // --- Grup ---
 const newGroup = reactive({ name: "", description: "" })
 const members = reactive<Record<string, string[]>>({})
+const memberPassword = ref("")
 const deleting = ref("")
 
 const createGroup = () =>
@@ -141,10 +153,11 @@ const createGroup = () =>
   }, t("groups.created"))
 function editMembers(g: UserGroup) {
   members[g.name] = [...g.members]
+  memberPassword.value = ""
 }
 const saveMembers = (g: UserGroup) =>
   run(async () => {
-    await api.updateGroup(g.name, { members: members[g.name] })
+    await api.updateGroup(g.name, { members: members[g.name], admin_password: memberPassword.value })
     delete members[g.name]
   }, t("groups.saved", { name: g.name }))
 const deleteGroup = (g: UserGroup) =>
@@ -238,8 +251,13 @@ const deleteGroup = (g: UserGroup) =>
               </label>
             </div>
           </div>
+          <div v-if="groupsChanged(u)" class="space-y-1.5">
+            <Label :for="`apg-${u.username}`">{{ t("account.password") }}</Label>
+            <Input :id="`apg-${u.username}`" v-model="form.adminPassword" type="password" autocomplete="current-password" />
+            <p class="text-xs text-muted-foreground">{{ t("groups.passwordHelp") }}</p>
+          </div>
           <div class="flex gap-2">
-            <Button type="submit" size="sm" :disabled="busy"><LoaderCircle v-if="busy" class="animate-spin" />{{ t("users.save") }}</Button>
+            <Button type="submit" size="sm" :disabled="busy || (groupsChanged(u) && !form.adminPassword)"><LoaderCircle v-if="busy" class="animate-spin" />{{ t("users.save") }}</Button>
             <Button type="button" size="sm" variant="ghost" @click="close">{{ t("common.cancel") }}</Button>
           </div>
         </form>
@@ -364,10 +382,16 @@ const deleteGroup = (g: UserGroup) =>
                 />{{ u.username }}
               </label>
             </div>
+            <div class="space-y-1.5">
+              <Label :for="`gp-${g.name}`">{{ t("account.password") }}</Label>
+              <Input :id="`gp-${g.name}`" v-model="memberPassword" type="password" autocomplete="current-password" />
+              <p class="text-xs text-muted-foreground">{{ t("groups.passwordHelp") }}</p>
+            </div>
             <div class="flex gap-2">
-              <Button type="submit" size="sm" :disabled="busy">{{ t("users.save") }}</Button>
+              <Button type="submit" size="sm" :disabled="busy || !memberPassword">{{ t("users.save") }}</Button>
               <Button type="button" size="sm" variant="ghost" @click="delete members[g.name]">{{ t("common.cancel") }}</Button>
             </div>
+            <p v-if="error" class="text-sm text-destructive" role="alert">{{ error }}</p>
           </form>
         </li>
       </ul>

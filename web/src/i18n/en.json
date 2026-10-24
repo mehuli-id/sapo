@@ -73,6 +73,10 @@
     "users": {
       "title": "Users & Groups",
       "description": "Accounts, roles, and groups"
+    },
+    "shared-folders": {
+      "title": "Shared Folder",
+      "description": "Shared folders and their access"
     }
   },
   "systemInfo": {
@@ -308,7 +312,13 @@
     "group_not_found": "Group not found.",
     "password_same": "The new password must differ from the current one.",
     "password_too_long": "The password is too long.",
-    "bad_request": "Invalid input."
+    "bad_request": "Invalid input.",
+    "share_invalid": "The folder name doesn’t follow the rules.",
+    "share_taken": "This folder name is already taken.",
+    "share_not_ready": "The folder was saved but couldn’t be set up: {message}",
+    "share_delete_failed": "The folder couldn’t be deleted: {message}",
+    "conflict": "Conflicts with the system state.",
+    "system_sync_failed": "Saved, but not yet applied to the system. Try again shortly."
   },
   "pool": {
     "title": "Storage pools",
@@ -477,6 +487,34 @@
     "none": "No groups yet.",
     "members": "Members",
     "editMembers": "Edit members",
-    "confirmDelete": "Yes, delete group"
+    "confirmDelete": "Yes, delete group",
+    "passwordHelp": "Required because groups decide shared folder access."
+  },
+  "permissions": {
+    "none": "No access",
+    "read": "Read",
+    "write": "Read & write",
+    "members": "{n} members",
+    "nobody": "No users or groups yet.",
+    "nobodyShort": "nobody"
+  },
+  "shares": {
+    "intro": "Shared folders on a pool, opened from Windows, Mac, Linux, or phones over SMB.",
+    "add": "Create folder",
+    "none": "No shared folders yet.",
+    "noPool": "Create a pool first in Storage Manager.",
+    "pickPool": "Choose a pool.",
+    "created": "Shared folder {name} has been created.",
+    "saved": "Access to {name} saved.",
+    "deleted": "Shared folder {name} deleted.",
+    "onPool": "on pool {pool}",
+    "used": "{used} used, {free} available",
+    "access": "Access",
+    "editAccess": "Edit access",
+    "notShared": "Nobody has access yet, so this folder can’t be opened from other computers.",
+    "openFrom": "Open from another computer (sign in with your panel username and password):",
+    "deleteHelp": "The folder {name} and ALL its contents ({used}) will be permanently deleted. This cannot be undone.",
+    "typeName": "Type the folder name",
+    "delete": "Delete folder and contents"
   }
 }

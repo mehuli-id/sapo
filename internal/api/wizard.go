@@ -82,7 +82,7 @@ var (
 		"text": true, "username": true, "password": true, "password-confirm": true, "current-password": true,
 		"language": true, "totp-enroll": true, "recovery-codes": true,
 		"disk-select": true, "pool-layout": true, "erase-confirm": true, "confirm": true, "acknowledge": true,
-		"choice": true, "group-select": true, "toggle": true,
+		"choice": true, "group-select": true, "toggle": true, "pool-select": true, "permissions": true,
 	}
 	// Jenis isian yang wajib merujuk isian disk-select lewat source.
 	needsDiskSource = map[string]bool{"pool-layout": true, "erase-confirm": true}

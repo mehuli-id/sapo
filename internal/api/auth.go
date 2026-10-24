@@ -333,6 +333,12 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	clear(s.setup.entries)
 	s.setup.mu.Unlock()
 	s.record(r, admin.Username, "setup.complete", true, map[string]string{"language": req.Language})
+	// Akun sistem dan password Samba admin pertama (tidak menunda jawaban).
+	go func(name, password string) {
+		if _, err := s.syncSystem(context.Background()); err == nil {
+			s.setSMBPassword(context.Background(), name, password)
+		}
+	}(admin.Username, req.Password)
 
 	tok, err := s.sessions.Create(admin.Username, admin.Role)
 	if err != nil {
@@ -537,10 +543,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if usedRecovery {
 		// Dicatat terpisah: pemakaian kode cadangan perlu diketahui admin.
 		s.record(r, user.Username, "auth.login", true, map[string]string{"method": "recovery_code", "recovery_codes_left": strconv.Itoa(recoveryLeft)})
+		go s.setSMBPassword(context.Background(), user.Username, req.Password)
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": map[string]any{"username": user.Username, "role": user.Role}, "recovery_codes_left": recoveryLeft})
 		return
 	}
 	s.record(r, user.Username, "auth.login", true, nil)
+	// Password Samba disamakan dengan password panel (misalnya akun lama
+	// sebelum Samba terpasang); tidak menunda jawaban login.
+	go s.setSMBPassword(context.Background(), user.Username, req.Password)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": map[string]any{"username": user.Username, "role": user.Role}})
 }
 

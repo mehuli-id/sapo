@@ -77,6 +77,9 @@ type Server struct {
 	dummy       string
 	setup       pendingTOTP
 	reenroll    pendingTOTP // pendaftaran ulang 2FA dari panel (per user)
+	shares      *shareStore
+	// syncMu: satu sinkronisasi akun dan shared folder ke sapod pada satu waktu.
+	syncMu sync.Mutex
 
 	hashSlots chan struct{}
 
@@ -122,6 +125,10 @@ func New(o Options) (*Server, error) {
 	if o.Now == nil {
 		o.Now = time.Now
 	}
+	shares, err := openShareStore(cfg.API.DataDir)
+	if err != nil {
+		return nil, err
+	}
 	argon := auth.Argon2Params{MemoryKiB: cfg.Auth.Argon2.MemoryKiB, Iterations: cfg.Auth.Argon2.Iterations, Parallelism: cfg.Auth.Argon2.Parallelism}
 	dummy, err := auth.HashPassword("sapo-dummy-password", argon)
 	if err != nil {
@@ -144,6 +151,7 @@ func New(o Options) (*Server, error) {
 		dummy:    dummy,
 		setup:    pendingTOTP{entries: map[string]pendingEntry{}},
 		reenroll: pendingTOTP{entries: map[string]pendingEntry{}},
+		shares:   shares,
 
 		hashSlots: make(chan struct{}, cfg.Auth.MaxConcurrentHashes),
 	}
@@ -189,6 +197,10 @@ func New(o Options) (*Server, error) {
 	s.mux.Handle("POST /api/v1/groups", s.requireAdmin(http.HandlerFunc(s.handleGroupCreate)))
 	s.mux.Handle("POST /api/v1/groups/{name}", s.requireAdmin(http.HandlerFunc(s.handleGroupUpdate)))
 	s.mux.Handle("POST /api/v1/groups/{name}/delete", s.requireAdmin(http.HandlerFunc(s.handleGroupDelete)))
+	s.mux.Handle("GET /api/v1/shares", s.requireAdmin(http.HandlerFunc(s.handleShares)))
+	s.mux.Handle("POST /api/v1/shares", s.requireAdmin(http.HandlerFunc(s.handleShareCreate)))
+	s.mux.Handle("POST /api/v1/shares/{name}", s.requireAdmin(http.HandlerFunc(s.handleShareUpdate)))
+	s.mux.Handle("POST /api/v1/shares/{name}/delete", s.requireAdmin(http.HandlerFunc(s.handleShareDelete)))
 
 	// Butuh login.
 	// Info sistem boleh dilihat semua user; storage dan paket hanya admin.
@@ -453,7 +465,9 @@ func (s *Server) agentError(w http.ResponseWriter, op string, err error) {
 			status = http.StatusServiceUnavailable
 		case proto.ErrDiskChanged, proto.ErrDiskInUse, proto.ErrDiskHasData, proto.ErrDiskRemovable, proto.ErrPoolExists, proto.ErrPoolBusy:
 			status = http.StatusConflict
-		case "pool_create_failed", "pool_scrub_failed", "pool_replace_failed", "pool_destroy_failed":
+		case proto.ErrConflict:
+			status = http.StatusConflict
+		case "pool_create_failed", "pool_scrub_failed", "pool_replace_failed", "pool_destroy_failed", "share_delete_failed":
 			status = http.StatusUnprocessableEntity
 		}
 		writeError(w, status, pe.Code, pe.Message)

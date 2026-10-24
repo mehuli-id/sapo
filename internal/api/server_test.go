@@ -24,6 +24,7 @@ import (
 )
 
 type fakeAgent struct {
+	mu      sync.Mutex
 	results map[string]any
 	err     error
 	// errs memberi error per operasi; params mencatat parameter terakhir.
@@ -32,6 +33,9 @@ type fakeAgent struct {
 }
 
 func (f *fakeAgent) Call(_ context.Context, op string, params any, out any) error {
+	// Dipanggil juga dari goroutine (misalnya password Samba saat login).
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.params == nil {
 		f.params = map[string]any{}
 	}
@@ -67,6 +71,8 @@ func newHarness(t *testing.T, agent AgentCaller) *harness {
 	t.Helper()
 	cfg := config.Default()
 	cfg.API.WebDir = t.TempDir()
+	h0data := t.TempDir()
+	cfg.API.DataDir = h0data
 	cfg.API.BrandingFile = "../../branding.yaml"
 	cfg.API.WizardsDir = "../../wizards"
 	cfg.API.Hostnames = []string{"example.com"} // host bawaan httptest
@@ -74,7 +80,7 @@ func newHarness(t *testing.T, agent AgentCaller) *harness {
 	if err := os.WriteFile(filepath.Join(cfg.API.WebDir, "index.html"), []byte("<!doctype html><title>Sapo</title>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h := &harness{t: t, now: time.Unix(1_800_000_000, 0), data: t.TempDir()}
+	h := &harness{t: t, now: time.Unix(1_800_000_000, 0), data: h0data}
 	store, err := auth.OpenStore(h.data)
 	if err != nil {
 		t.Fatal(err)

@@ -227,7 +227,11 @@ func TestGroups(t *testing.T) {
 		t.Fatalf("grup tidak ada: %d %s", rec.Code, rec.Body)
 	}
 	h.createUser("ani", "user", false)
-	if rec := h.do(http.MethodPost, "/api/v1/groups/keluarga", map[string]any{"members": []string{"ani", "arthur"}}); rec.Code != http.StatusOK {
+	// Anggota grup menentukan izin folder: butuh password admin.
+	if rec := h.do(http.MethodPost, "/api/v1/groups/keluarga", map[string]any{"members": []string{"ani"}}); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("anggota tanpa password: %d", rec.Code)
+	}
+	if rec := h.do(http.MethodPost, "/api/v1/groups/keluarga", map[string]any{"members": []string{"ani", "arthur"}, "admin_password": adminPassword}); rec.Code != http.StatusOK {
 		t.Fatalf("anggota: %d %s", rec.Code, rec.Body)
 	}
 	var groups []groupView

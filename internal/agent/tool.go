@@ -33,6 +33,12 @@ var errToolMissing = errors.New("program tidak tersedia")
 // Kode keluar bukan nol tidak dianggap error: banyak alat (misalnya smartctl)
 // memakainya untuk melaporkan status, jadi pemanggil yang menafsirkannya.
 func runTool(ctx context.Context, timeout time.Duration, prog string, flags []string, operands ...string) (toolResult, error) {
+	return runToolInput(ctx, timeout, prog, nil, flags, operands...)
+}
+
+// runToolInput sama dengan runTool, dengan stdin berisi input (misalnya
+// password untuk smbpasswd -s, agar tidak pernah muncul di argumen proses).
+func runToolInput(ctx context.Context, timeout time.Duration, prog string, input []byte, flags []string, operands ...string) (toolResult, error) {
 	if !filepath.IsAbs(prog) {
 		return toolResult{}, fmt.Errorf("%w: %q bukan path absolut", errToolMissing, prog)
 	}
@@ -51,6 +57,9 @@ func runTool(ctx context.Context, timeout time.Duration, prog string, flags []st
 	stdout := &limitedBuffer{max: maxToolOutput}
 	stderr := &limitedBuffer{max: 64 << 10}
 	cmd.Stdout, cmd.Stderr = stdout, stderr
+	if input != nil {
+		cmd.Stdin = bytes.NewReader(input)
+	}
 
 	err := cmd.Run()
 	res := toolResult{Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}

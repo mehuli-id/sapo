@@ -11,12 +11,13 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { languages, setLocale } from "@/i18n"
 import type { Disk, Wizard, WizardContext, WizardField } from "@/lib/api"
-import { ApiError, splitList } from "@/lib/api"
+import { ApiError, formatPermissions, parsePermissions, splitList } from "@/lib/api"
 import { formatBytes } from "@/lib/format"
 import { pick } from "@/lib/localized"
 import { cn } from "@/lib/utils"
 import type { Enrollment } from "./TotpEnroll.vue"
 import TotpEnroll from "./TotpEnroll.vue"
+import PermissionEditor from "@/components/PermissionEditor.vue"
 import RecoveryCodes from "@/components/RecoveryCodes.vue"
 import { fits } from "@/lib/pool"
 import DiskSelect from "./DiskSelect.vue"
@@ -88,6 +89,7 @@ function validateField(f: WizardField): string {
   if (f.type === "erase-confirm") return v === "yes" ? "" : t("pool.mustConfirmErase")
   if (f.type === "acknowledge") return v === "yes" ? "" : t("wizard.mustAcknowledge")
   if (f.type === "choice") return f.options?.some((o) => o.value === v) ? "" : t("wizard.required")
+  if (f.type === "pool-select") return props.context?.pools?.pools.some((p) => p.name === v) ? "" : t("shares.pickPool")
   if (f.type === "confirm" && f.match_context === "pool") return v === props.context?.pool?.name ? "" : t("wizard.mismatch")
   if (f.type === "disk-select" && f.required && !v) return t("pool.pickDisks")
   if (f.type === "pool-layout") {
@@ -203,6 +205,11 @@ const reviewRows = computed(() =>
         else if (f.type === "choice") value = pick(f.options?.find((o) => o.value === value)?.label, locale.value)
         else if (f.type === "group-select") value = splitList(value).join(", ") || "—"
         else if (f.type === "toggle") value = value === "yes" ? t("wizard.yes") : t("wizard.no")
+        else if (f.type === "permissions")
+          value =
+            Object.entries(parsePermissions(value))
+              .map(([who, l]) => `${who.split(":")[1]} (${t(`permissions.${l}`)})`)
+              .join(", ") || t("permissions.nobodyShort")
         else if (f.type === "totp-enroll") {
           // Yang relevan di ringkasan adalah statusnya, bukan kodenya.
           label = pick(st.title, locale.value)
@@ -388,6 +395,35 @@ const reviewRows = computed(() =>
           </label>
           <p v-if="!(context?.groups ?? []).length" class="text-sm text-muted-foreground">{{ t("wizard.noGroups") }}</p>
         </div>
+
+        <!-- Pool -->
+        <div v-else-if="f.type === 'pool-select'" :id="`wz-${f.key}`" role="radiogroup" class="space-y-2">
+          <button
+            v-for="p in context?.pools?.pools ?? []"
+            :key="p.name"
+            type="button"
+            role="radio"
+            :aria-checked="values[f.key] === p.name"
+            :class="cn('flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-left text-sm hover:bg-accent', values[f.key] === p.name && 'border-primary ring-1 ring-primary')"
+            @click="values[f.key] = p.name"
+          >
+            <span>
+              <span class="block font-medium">{{ p.name }}</span>
+              <span class="block text-xs text-muted-foreground">{{ t("pool.free", { free: size(p.free_bytes) }) }}</span>
+            </span>
+            <Check v-if="values[f.key] === p.name" class="size-4 shrink-0 text-primary" />
+          </button>
+          <p v-if="!(context?.pools?.pools ?? []).length" class="text-sm text-muted-foreground">{{ t("shares.noPool") }}</p>
+        </div>
+
+        <!-- Izin folder -->
+        <PermissionEditor
+          v-else-if="f.type === 'permissions'"
+          :model-value="parsePermissions(values[f.key])"
+          :users="context?.users ?? []"
+          :groups="context?.groups ?? []"
+          @update:model-value="(p) => (values[f.key] = formatPermissions(p))"
+        />
 
         <!-- Sakelar ya/tidak -->
         <label v-else-if="f.type === 'toggle'" class="flex items-start gap-2 text-sm">

@@ -55,6 +55,9 @@ const (
 	ErrDiskRemovable = "disk_removable" // disk lepas-pasang tidak diizinkan untuk pool
 	ErrPoolExists    = "pool_exists"
 	ErrPoolBusy      = "pool_busy" // pool sedang resilver atau sibuk dengan operasi lain
+	// ErrConflict: keadaan sistem bertentangan dengan permintaan (misalnya
+	// nama akun sudah dipakai akun sistem lain).
+	ErrConflict = "conflict"
 )
 
 // Nama operasi yang dikenal sapod saat ini.
@@ -75,6 +78,18 @@ const (
 	OpStoragePoolReplace = "storage.pool_replace"
 	// OpStoragePoolDestroy menghapus pool beserta seluruh isinya.
 	OpStoragePoolDestroy = "storage.pool_destroy"
+	// OpAccountsSync menyamakan akun dan grup sistem Sapo dengan daftar
+	// pengguna dan grup di panel.
+	OpAccountsSync = "accounts.sync"
+	// OpSMBPassword menyamakan password Samba seorang pengguna.
+	OpSMBPassword = "smb.set_password"
+	// OpSharesApply menyiapkan shared folder (dataset, izin) dan menulis
+	// ulang konfigurasi Samba.
+	OpSharesApply = "shares.apply"
+	// OpSharesDelete menghapus shared folder beserta isinya. Destruktif.
+	OpSharesDelete = "shares.delete"
+	// OpSharesUsage membaca ruang terpakai setiap shared folder.
+	OpSharesUsage = "shares.usage"
 	// OpConsolePanelAddress memperbarui alamat panel (dan sidik jari
 	// sertifikat) di layar login konsol NAS.
 	OpConsolePanelAddress = "console.panel_address"
@@ -356,4 +371,77 @@ type PoolReplaceParams struct {
 // PoolDestroyParams adalah parameter storage.pool_destroy.
 type PoolDestroyParams struct {
 	Name string `json:"name"`
+}
+
+// AccountsSyncParams adalah daftar lengkap pengguna dan grup Sapo.
+type AccountsSyncParams struct {
+	Users  []AccountUser `json:"users"`
+	Groups []string      `json:"groups"`
+}
+
+// AccountUser adalah satu pengguna untuk accounts.sync.
+type AccountUser struct {
+	Name     string   `json:"name"`
+	Groups   []string `json:"groups"`
+	Disabled bool     `json:"disabled"`
+}
+
+// AccountsSyncResult melaporkan perubahan. Conflicts berisi "user:nama" atau
+// "group:nama" yang tidak bisa dibuat karena nama sudah dipakai akun atau
+// grup sistem di luar Sapo.
+type AccountsSyncResult struct {
+	CreatedUsers  []string `json:"created_users,omitempty"`
+	RemovedUsers  []string `json:"removed_users,omitempty"`
+	CreatedGroups []string `json:"created_groups,omitempty"`
+	RemovedGroups []string `json:"removed_groups,omitempty"`
+	Conflicts     []string `json:"conflicts"`
+}
+
+// SMBPasswordParams adalah parameter smb.set_password.
+type SMBPasswordParams struct {
+	Name     string `json:"name"`
+	Password string `json:"password"`
+}
+
+// SharesApplyParams adalah daftar lengkap shared folder.
+type SharesApplyParams struct {
+	Shares []ShareSpec `json:"shares"`
+}
+
+// ShareSpec adalah satu shared folder: dataset <Pool>/<Name>. Read dan Write
+// berisi "user:nama" atau "group:nama"; selain itu tidak punya akses.
+type ShareSpec struct {
+	Name        string   `json:"name"`
+	Pool        string   `json:"pool"`
+	Description string   `json:"description"`
+	Read        []string `json:"read"`
+	Write       []string `json:"write"`
+}
+
+// SharesApplyResult melaporkan keadaan setiap folder dan Samba ("applied"
+// atau "unavailable" bila Samba belum terpasang).
+type SharesApplyResult struct {
+	Shares []ShareState `json:"shares"`
+	SMB    string       `json:"smb"`
+}
+
+// ShareState adalah hasil satu folder; Error kosong bila siap.
+type ShareState struct {
+	Name  string `json:"name"`
+	Pool  string `json:"pool"`
+	Path  string `json:"path,omitempty"`
+	Error string `json:"error,omitempty"`
+}
+
+// ShareDeleteParams adalah parameter shares.delete.
+type ShareDeleteParams struct {
+	Name string `json:"name"`
+	Pool string `json:"pool"`
+}
+
+// ShareUsage adalah ruang dataset folder (hasil shares.usage, per
+// "<pool>/<folder>").
+type ShareUsage struct {
+	UsedBytes      uint64 `json:"used_bytes"`
+	AvailableBytes uint64 `json:"available_bytes"`
 }

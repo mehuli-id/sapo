@@ -227,6 +227,21 @@ export interface UserGroup {
   created_at: string
 }
 
+export type ShareAccess = "read" | "write"
+
+export interface SharedFolder {
+  name: string
+  pool: string
+  description?: string
+  // "user:nama" / "group:nama" → read | write
+  permissions: Record<string, ShareAccess>
+  created_at: string
+  path?: string
+  error?: string
+  used_bytes: number
+  available_bytes: number
+}
+
 export type Localized = Record<string, string>
 
 export interface WizardField {
@@ -248,6 +263,8 @@ export interface WizardField {
     | "choice"
     | "group-select"
     | "toggle"
+    | "pool-select"
+    | "permissions"
   label: Localized
   help?: Localized
   placeholder?: Localized
@@ -376,15 +393,22 @@ export const api = {
   groups: () => get<UserGroup[]>("/api/v1/groups"),
   createUser: (req: Record<string, unknown>) => post<UserAccount>("/api/v1/users", req),
   updateUser: (name: string, req: { role?: Role; disabled?: boolean; groups?: string[]; description?: string; admin_password?: string }) =>
-    post<UserAccount>(`/api/v1/users/${encodeURIComponent(name)}`, req),
+    post<{ user: UserAccount; warning?: string }>(`/api/v1/users/${encodeURIComponent(name)}`, req),
   resetUserPassword: (name: string, req: { password: string; password_confirm: string; must_change_password: boolean; admin_password: string }) =>
     post<{ ok: boolean }>(`/api/v1/users/${encodeURIComponent(name)}/password`, req),
   deleteUser: (name: string, req: { confirm_name: string; admin_password: string }) =>
     post<{ ok: boolean }>(`/api/v1/users/${encodeURIComponent(name)}/delete`, req),
   createGroup: (name: string, description: string) => post<{ ok: boolean }>("/api/v1/groups", { name, description }),
-  updateGroup: (name: string, req: { description?: string; members?: string[] }) =>
+  updateGroup: (name: string, req: { description?: string; members?: string[]; admin_password?: string }) =>
     post<{ ok: boolean }>(`/api/v1/groups/${encodeURIComponent(name)}`, req),
   deleteGroup: (name: string) => post<{ ok: boolean }>(`/api/v1/groups/${encodeURIComponent(name)}/delete`),
+  shares: () => get<SharedFolder[]>("/api/v1/shares"),
+  createShare: (req: { name: string; pool: string; description: string; permissions: Record<string, ShareAccess>; admin_password: string }) =>
+    post<SharedFolder>("/api/v1/shares", req),
+  updateShare: (name: string, req: { description?: string; permissions?: Record<string, ShareAccess>; admin_password?: string }) =>
+    post<{ ok: boolean; warning?: string }>(`/api/v1/shares/${encodeURIComponent(name)}`, req),
+  deleteShare: (name: string, req: { confirm_name: string; admin_password: string }) =>
+    post<{ ok: boolean }>(`/api/v1/shares/${encodeURIComponent(name)}/delete`, req),
 }
 
 // Data yang dibutuhkan isian wizard tertentu (misalnya daftar disk untuk
@@ -395,14 +419,33 @@ export interface WizardContext {
   // Pool dan disk yang sedang dikerjakan (ganti disk, hapus pool).
   pool?: Pool
   vdev?: Vdev
-  // Grup yang bisa dipilih (group-select).
+  // Grup yang bisa dipilih (group-select, permissions).
   groups?: UserGroup[]
+  // Pengguna untuk isian permissions.
+  users?: UserAccount[]
 }
 
 // Daftar nama dari isian disk-select (dipisah koma).
 export const splitList = (v: string | undefined) => (v ?? "").split(",").filter(Boolean)
 
 // Tindakan akhir wizard (nilai `action` di YAML) → pemanggilan API.
+// Isian permissions disimpan sebagai teks "user:budi=write,group:x=read".
+export function parsePermissions(v: string | undefined): Record<string, ShareAccess> {
+  const out: Record<string, ShareAccess> = {}
+  for (const part of splitList(v)) {
+    const [who, level] = part.split("=")
+    if (who && (level === "read" || level === "write")) out[who] = level
+  }
+  return out
+}
+
+export function formatPermissions(p: Record<string, ShareAccess>): string {
+  return Object.entries(p)
+    .map(([who, level]) => `${who}=${level}`)
+    .sort()
+    .join(",")
+}
+
 // diskRefs menyusun identitas disk yang dipilih (seperti yang dilihat
 // pengguna). Konfirmasi penghapusan hanya untuk disk yang tampil berisi data
 // saat dipilih; disk lain dikirim tanpa izin hapus, sehingga sapod menolak
@@ -441,6 +484,14 @@ export const wizardActions: Record<string, (values: Record<string, string>, ctx:
       password: v.password ?? "",
       password_confirm: v.password_confirm ?? "",
       must_change_password: v.must_change_password === "yes",
+      admin_password: v.admin_password ?? "",
+    }),
+  "shares.create": (v) =>
+    api.createShare({
+      name: v.name ?? "",
+      pool: v.pool ?? "",
+      description: v.description ?? "",
+      permissions: parsePermissions(v.permissions),
       admin_password: v.admin_password ?? "",
     }),
   "storage.pool_destroy": (v, ctx) => {
