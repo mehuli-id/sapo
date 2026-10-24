@@ -1,0 +1,119 @@
+# Wizard membuat pool ZFS (ADR 0005). Langkah, teks, dan petunjuk adalah
+# data. Batas jumlah disk per susunan datang dari agent.storage.pools.layouts;
+# sapod memeriksa ulang semua isian sebelum menyentuh disk.
+id: pool-create
+action: storage.pool_create
+destructive: true
+title:
+  id: Buat pool penyimpanan
+  en: Create a storage pool
+finish_label:
+  id: Hapus disk dan buat pool
+  en: Erase disks and create pool
+
+steps:
+  - id: disks
+    title: { id: Pilih disk, en: Choose disks }
+    description:
+      id: >-
+        Pool menggabungkan beberapa disk menjadi satu tempat penyimpanan.
+        Disk yang dipilih akan dikosongkan.
+      en: >-
+        A pool combines several disks into one storage space. The disks you
+        choose will be erased.
+    help:
+      id: >-
+        Pilih disk berukuran sama bila bisa: setiap disk di pool hanya
+        terpakai sebesar disk terkecil. Disk sistem, disk yang sedang dipakai
+        pool atau RAID lain, dan flashdisk tidak bisa dipilih. Disk berlabel
+        "Berisi data" masih punya partisi atau sistem berkas; isinya akan
+        hilang.
+      en: >-
+        Choose disks of the same size if you can: every disk in a pool is
+        only used up to the size of the smallest one. The system disk, disks
+        already used by another pool or RAID, and USB sticks can't be chosen.
+        Disks marked "Has data" still contain partitions or a file system;
+        their contents will be lost.
+    fields:
+      - key: disks
+        type: disk-select
+        required: true
+        label: { id: Disk, en: Disks }
+
+  - id: layout
+    title: { id: Susunan RAID, en: RAID layout }
+    description:
+      id: >-
+        Susunan menentukan berapa disk boleh rusak tanpa kehilangan data, dan
+        berapa kapasitas yang bisa dipakai.
+      en: >-
+        The layout decides how many disks can fail without losing data, and
+        how much capacity you can use.
+    help:
+      id: >-
+        RAID bukan cadangan (backup). RAID melindungi dari disk rusak, tetapi
+        tidak dari file terhapus, ransomware, kebakaran, atau pencurian.
+        Tetap simpan salinan data penting di tempat lain. Susunan tidak bisa
+        diubah setelah pool dibuat.
+      en: >-
+        RAID is not a backup. It protects against a failed disk, but not
+        against deleted files, ransomware, fire, or theft. Keep a copy of
+        important data somewhere else. The layout can't be changed after the
+        pool is created.
+    fields:
+      - key: layout
+        type: pool-layout
+        source: disks
+        required: true
+        label: { id: Susunan, en: Layout }
+
+  - id: name
+    title: { id: Nama pool, en: Pool name }
+    description:
+      id: Nama ini tampil di panel dan menjadi nama folder pool.
+      en: This name is shown in the panel and becomes the pool's folder name.
+    fields:
+      - key: name
+        type: text
+        required: true
+        default: data
+        pattern: "^[a-z][a-z0-9_-]{0,31}$"
+        autocomplete: "off"
+        label: { id: Nama pool, en: Pool name }
+        help:
+          id: Huruf kecil, angka, garis bawah, atau tanda hubung; diawali huruf; paling banyak 32 karakter.
+          en: Lowercase letters, digits, underscores, or hyphens; starts with a letter; at most 32 characters.
+
+  - id: confirm
+    type: review
+    title: { id: Konfirmasi, en: Confirm }
+    description:
+      id: >-
+        Periksa sekali lagi. Setelah tombol terakhir ditekan, isi disk yang
+        dipilih langsung dihapus dan tidak bisa dikembalikan.
+      en: >-
+        Check once more. After you press the last button, the chosen disks
+        are erased right away and can't be recovered.
+    fields:
+      - key: erase_ok
+        type: erase-confirm
+        source: disks
+        required: true
+        label:
+          id: Saya mengerti semua data di disk ini akan dihapus permanen
+          en: I understand all data on these disks will be permanently erased
+      - key: confirm_name
+        type: confirm
+        match: name
+        required: true
+        autocomplete: "off"
+        label: { id: Ketik ulang nama pool, en: Type the pool name again }
+      - key: password
+        type: current-password
+        required: true
+        secret: true
+        autocomplete: current-password
+        label: { id: Password Anda, en: Your password }
+        help:
+          id: Diminta lagi karena tindakan ini menghapus data.
+          en: Asked again because this erases data.

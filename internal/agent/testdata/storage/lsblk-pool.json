@@ -1,0 +1,17 @@
+{"blockdevices":[
+  {"name":"vda","path":"/dev/vda","type":"disk","size":21474836480,"model":null,"vendor":"0x1af4","serial":"SYS0","wwn":null,"tran":"virtio","rota":true,"rm":false,"fstype":null,"pttype":"gpt","label":null,"mountpoints":[null],
+   "children":[{"name":"vda1","path":"/dev/vda1","type":"part","size":21473787904,"fstype":"ext4","pttype":"gpt","label":null,"mountpoints":["/"]}]},
+  {"name":"vdb","path":"/dev/vdb","type":"disk","size":4294967296,"model":null,"vendor":"0x1af4","serial":"POOL1","wwn":null,"tran":"virtio","rota":true,"rm":false,"fstype":null,"pttype":"gpt","label":null,"mountpoints":[null],
+   "children":[{"name":"vdb1","path":"/dev/vdb1","type":"part","size":4284481536,"fstype":"zfs_member","pttype":"gpt","label":"tank","mountpoints":[null]},
+               {"name":"vdb9","path":"/dev/vdb9","type":"part","size":8388608,"fstype":null,"pttype":"gpt","label":null,"mountpoints":[null]}]},
+  {"name":"vdc","path":"/dev/vdc","type":"disk","size":4294967296,"model":null,"vendor":"0x1af4","serial":"POOL2","wwn":null,"tran":"virtio","rota":true,"rm":false,"fstype":null,"pttype":"gpt","label":null,"mountpoints":[null],
+   "children":[{"name":"vdc1","path":"/dev/vdc1","type":"part","size":4284481536,"fstype":"zfs_member","pttype":"gpt","label":"tank","mountpoints":[null]}]},
+  {"name":"vdd","path":"/dev/vdd","type":"disk","size":4294967296,"model":null,"vendor":"0x1af4","serial":"NEW1","wwn":null,"tran":"virtio","rota":true,"rm":false,"fstype":null,"pttype":null,"label":null,"mountpoints":[null]},
+  {"name":"vde","path":"/dev/vde","type":"disk","size":4294967296,"model":null,"vendor":"0x1af4","serial":"OLD1","wwn":null,"tran":"virtio","rota":true,"rm":false,"fstype":null,"pttype":"dos","label":null,"mountpoints":[null],
+   "children":[{"name":"vde1","path":"/dev/vde1","type":"part","size":4293918720,"fstype":"ext4","pttype":"dos","label":"foto","mountpoints":[null]}]},
+  {"name":"vdf","path":"/dev/vdf","type":"disk","size":8589934592,"model":null,"vendor":"0x1af4","serial":"BIG1","wwn":null,"tran":"virtio","rota":true,"rm":false,"fstype":null,"pttype":null,"label":null,"mountpoints":[null]},
+  {"name":"vdg","path":"/dev/vdg","type":"disk","size":4294967296,"model":null,"vendor":"0x1af4","serial":"SWAP1","wwn":null,"tran":"virtio","rota":true,"rm":false,"fstype":"swap","pttype":null,"label":null,"mountpoints":["[SWAP]"]},
+  {"name":"vdh","path":"/dev/vdh","type":"disk","size":4294967296,"model":null,"vendor":"0x1af4","serial":"LVM1","wwn":null,"tran":"virtio","rota":true,"rm":false,"fstype":"LVM2_member","pttype":null,"label":null,"mountpoints":[null],
+   "children":[{"name":"vg-data","path":"/dev/mapper/vg-data","type":"lvm","size":4290772992,"fstype":"xfs","pttype":null,"label":null,"mountpoints":[null]}]},
+  {"name":"sdi","path":"/dev/sdi","type":"disk","size":15728640000,"model":"Flash Disk","vendor":"Generic","serial":"USB1","wwn":null,"tran":"usb","rota":false,"rm":true,"fstype":null,"pttype":null,"label":null,"mountpoints":[null]}
+]}

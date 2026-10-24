@@ -27,7 +27,7 @@ async function load() {
 async function submit(values: Record<string, string>) {
   const action = wizardActions[wizard.value!.action]
   if (!action) throw new Error(`tindakan wizard tidak dikenal: ${wizard.value!.action}`)
-  return action(values)
+  return action(values, {})
 }
 
 onMounted(load)

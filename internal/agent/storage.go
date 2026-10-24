@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/mehuli-id/sapo/internal/proto"
 )
@@ -65,7 +66,7 @@ var deviceNamePattern = regexp.MustCompile(`^[a-z][a-z0-9]{0,31}$`)
 // Kolom lsblk yang dibaca (nama kolom util-linux).
 var lsblkFlags = []string{
 	"--json", "--bytes", "--tree",
-	"--output", "NAME,PATH,TYPE,SIZE,MODEL,VENDOR,SERIAL,WWN,TRAN,ROTA,RM,FSTYPE,LABEL,MOUNTPOINTS",
+	"--output", "NAME,PATH,TYPE,SIZE,MODEL,VENDOR,SERIAL,WWN,TRAN,ROTA,RM,FSTYPE,PTTYPE,LABEL,MOUNTPOINTS",
 }
 
 // Opsi smartctl: keluaran JSON ringkas, info perangkat, status kesehatan, dan
@@ -183,6 +184,13 @@ func decodeParams(raw json.RawMessage, out any) error {
 	return nil
 }
 
+// forgetDisks membuang daftar disk yang di-cache (setelah disk diubah).
+func (st *Storage) forgetDisks() {
+	st.mu.Lock()
+	st.disks = nil
+	st.mu.Unlock()
+}
+
 func (st *Storage) listDisks(ctx context.Context) ([]proto.Disk, error) {
 	res, err := st.run(ctx, st.t.Lsblk, lsblkFlags)
 	if errors.Is(err, errToolMissing) {
@@ -219,6 +227,7 @@ type lsblkDevice struct {
 	Rota        flexBool      `json:"rota"`
 	RM          flexBool      `json:"rm"`
 	FSType      *string       `json:"fstype"`
+	PTType      *string       `json:"pttype"`
 	Label       *string       `json:"label"`
 	Mountpoints []*string     `json:"mountpoints"`
 	Children    []lsblkDevice `json:"children"`
@@ -247,12 +256,15 @@ func parseLsblk(data []byte, ignore []string) ([]proto.Disk, error) {
 			Transport:  str(b.Tran),
 			Rotational: bool(b.Rota),
 			Removable:  bool(b.RM),
+			FSType:     str(b.FSType),
+			PTType:     str(b.PTType),
 			Partitions: []proto.Partition{},
 		}
 		if d.Path == "" {
 			d.Path = "/dev/" + d.Name
 		}
 		appendChildren(&d.Partitions, b.Children)
+		d.Usage, d.UsageReason = diskUsage(b)
 		disks = append(disks, d)
 	}
 	sort.Slice(disks, func(i, j int) bool { return naturalLess(disks[i].Name, disks[j].Name) })
@@ -278,6 +290,56 @@ func appendChildren(dst *[]proto.Partition, children []lsblkDevice) {
 		*dst = append(*dst, p)
 		appendChildren(dst, c.Children)
 	}
+}
+
+// diskUsage menilai apakah disk boleh dipakai pool baru, dari disk itu dan
+// seluruh turunannya. Urutan alasan penting: yang paling berbahaya bila
+// dihapus (sistem berkas terpasang, swap) didahulukan.
+func diskUsage(b lsblkDevice) (usage, reason string) {
+	rank := map[string]int{proto.UsageMounted: 6, proto.UsageSwap: 5, proto.UsagePool: 4, proto.UsageRAID: 3, proto.UsageLVM: 2, proto.UsageCrypt: 1}
+	hasData := str(b.FSType) != "" || str(b.PTType) != "" || len(b.Children) > 0
+	var walk func(d lsblkDevice)
+	walk = func(d lsblkDevice) {
+		r := ""
+		for _, m := range d.Mountpoints {
+			switch {
+			case m == nil || *m == "":
+			case *m == "[SWAP]":
+				r = pickReason(r, proto.UsageSwap, rank)
+			default:
+				r = pickReason(r, proto.UsageMounted, rank)
+			}
+		}
+		switch fs := str(d.FSType); {
+		case fs == "zfs_member":
+			r = pickReason(r, proto.UsagePool, rank)
+		case fs == "linux_raid_member" || strings.HasPrefix(d.Type, "raid"):
+			r = pickReason(r, proto.UsageRAID, rank)
+		case fs == "LVM2_member" || d.Type == "lvm":
+			r = pickReason(r, proto.UsageLVM, rank)
+		case d.Type == "crypt":
+			r = pickReason(r, proto.UsageCrypt, rank)
+		}
+		reason = pickReason(reason, r, rank)
+		for _, c := range d.Children {
+			walk(c)
+		}
+	}
+	walk(b)
+	switch {
+	case reason != "":
+		return proto.DiskInUse, reason
+	case hasData:
+		return proto.DiskHasData, ""
+	}
+	return proto.DiskFree, ""
+}
+
+func pickReason(cur, next string, rank map[string]int) string {
+	if rank[next] > rank[cur] {
+		return next
+	}
+	return cur
 }
 
 func ignored(name string, patterns []string) bool {
@@ -456,11 +518,17 @@ func addAttr(out *proto.SMART, a proto.SMARTAttr) {
 	}
 }
 
-func clip(s string) string {
-	if len(s) > maxSMARTRawLen {
-		return s[:maxSMARTRawLen] + "…"
+func clip(s string) string { return clipTo(s, maxSMARTRawLen) }
+
+// clipTo memotong s menjadi paling banyak n byte tanpa memotong karakter UTF-8.
+func clipTo(s string, n int) string {
+	if len(s) <= n {
+		return s
 	}
-	return s
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n] + "…"
 }
 
 // smartMessage menggabungkan semua pesan smartctl, termasuk tingkat

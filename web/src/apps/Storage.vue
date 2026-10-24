@@ -1,16 +1,29 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from "vue"
 import { useI18n } from "vue-i18n"
-import { HardDrive, RefreshCw, Thermometer, Timer, TriangleAlert } from "@lucide/vue"
+import { CircleCheck, HardDrive, Plus, RefreshCw, Thermometer, Timer, TriangleAlert } from "@lucide/vue"
+import PoolCard from "@/components/PoolCard.vue"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import type { Disk, Smart, SmartStatus } from "@/lib/api"
-import { api, ApiError } from "@/lib/api"
+import { useSession } from "@/composables/useSession"
+import type { Disk, PoolsResult, Smart, SmartStatus, Wizard } from "@/lib/api"
+import { api, ApiError, wizardActions } from "@/lib/api"
 import { formatBytes } from "@/lib/format"
+import { ineligibleReason } from "@/lib/pool"
+import WizardRunner from "@/wizard/WizardRunner.vue"
 
 const { t, locale } = useI18n()
+const { policy } = useSession()
 const disks = ref<Disk[] | null>(null)
+const pools = ref<PoolsResult | null>(null)
+const poolsError = ref<string | null>(null)
+const scrubbing = reactive<Record<string, boolean>>({})
+const actionError = ref("")
+const created = ref("")
+// Wizard pool baru tampil menggantikan daftar selama dibuka.
+const wizard = ref<Wizard | null>(null)
+const wizardFailed = ref(false)
 const error = ref<string | null>(null)
 const loading = ref(false)
 // SMART dibaca per disk setelah daftar tampil, agar panel tidak menunggu
@@ -24,6 +37,7 @@ async function load() {
   if (loading.value) return
   loading.value = true
   const gen = ++generation
+  loadPools(gen)
   try {
     const list = await api.disks()
     if (gen !== generation) return
@@ -32,14 +46,71 @@ async function load() {
     for (const d of list) loadSmart(d.name, gen)
   } catch (e) {
     disks.value = null
-    if (e instanceof ApiError && e.code === "agent_unavailable") error.value = t("shell.agentDown")
-    else if (e instanceof ApiError && e.code === "unavailable") error.value = t("storage.unavailable")
-    else if (e instanceof ApiError && e.code === "busy") error.value = t("errors.busy")
-    else error.value = t("common.error")
+    error.value = errorText(e, "storage.unavailable")
   } finally {
     loading.value = false
   }
 }
+
+function errorText(e: unknown, unavailableKey: string) {
+  if (e instanceof ApiError && e.code === "agent_unavailable") return t("shell.agentDown")
+  if (e instanceof ApiError && e.code === "unavailable") return t(unavailableKey)
+  if (e instanceof ApiError && e.code === "busy") return t("errors.busy")
+  return t("common.error")
+}
+
+async function loadPools(gen: number) {
+  try {
+    const res = await api.pools()
+    if (gen !== generation) return
+    pools.value = res
+    poolsError.value = null
+  } catch (e) {
+    if (gen !== generation) return
+    pools.value = null
+    poolsError.value = errorText(e, "pool.unavailable")
+  }
+}
+
+async function scrub(name: string, action: "start" | "stop") {
+  scrubbing[name] = true
+  actionError.value = ""
+  try {
+    await api.scrubPool(name, action)
+    await loadPools(generation)
+  } catch (e) {
+    const code = e instanceof ApiError ? e.code : "generic"
+    actionError.value = t(`errors.${code}`) !== `errors.${code}` ? t(`errors.${code}`, { message: e instanceof Error ? e.message : "" }) : t("errors.generic")
+  } finally {
+    scrubbing[name] = false
+  }
+}
+
+async function openWizard() {
+  wizardFailed.value = false
+  created.value = ""
+  try {
+    // Daftar disk dibaca ulang: wizard harus memakai keadaan terbaru.
+    await load()
+    wizard.value = await api.wizard("pool-create")
+  } catch {
+    wizardFailed.value = true
+  }
+}
+
+async function submitWizard(values: Record<string, string>) {
+  const action = wizardActions[wizard.value!.action]
+  if (!action) throw new Error(`tindakan wizard tidak dikenal: ${wizard.value!.action}`)
+  return action(values, { disks: disks.value ?? [], pools: pools.value ?? undefined })
+}
+
+function wizardDone(name: string) {
+  wizard.value = null
+  created.value = name
+  load()
+}
+
+const usableDisks = () => (disks.value ?? []).filter((d) => !ineligibleReason(d, !!pools.value?.allow_removable)).length
 
 async function loadSmart(name: string, gen: number) {
   smart[name] = null
@@ -83,13 +154,52 @@ const num = (n: number) => new Intl.NumberFormat(locale.value).format(n)
 </script>
 
 <template>
-  <div class="space-y-4 p-4">
+  <div v-if="wizard" class="p-4">
+    <h2 class="mb-4 text-sm font-medium text-muted-foreground">{{ wizard.title[locale] ?? wizard.title.en }}</h2>
+    <WizardRunner
+      :wizard="wizard"
+      :policy="policy"
+      :submit="submitWizard"
+      :context="{ disks: disks ?? [], pools: pools ?? undefined }"
+      cancelable
+      @cancel="wizard = null"
+      @done="(v) => wizardDone(v.name ?? '')"
+    />
+  </div>
+
+  <div v-else class="space-y-4 p-4">
     <div class="flex items-start justify-between gap-3">
       <p class="text-sm text-muted-foreground">{{ t("storage.intro") }}</p>
       <Button size="sm" variant="ghost" :disabled="loading" @click="load">
         <RefreshCw :class="loading && 'animate-spin'" />{{ t("storage.refresh") }}
       </Button>
     </div>
+
+    <!-- Pool -->
+    <section class="space-y-3">
+      <div class="flex items-center justify-between gap-3">
+        <h3 class="text-sm font-semibold">{{ t("pool.title") }}</h3>
+        <Button v-if="pools?.available" size="sm" :disabled="!usableDisks()" @click="openWizard"><Plus />{{ t("pool.create") }}</Button>
+      </div>
+      <p v-if="created" class="flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/5 p-3 text-sm">
+        <CircleCheck class="size-4 shrink-0 text-emerald-600" />{{ t("pool.created", { name: created }) }}
+      </p>
+      <p v-if="wizardFailed || actionError" class="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm">{{ actionError || t("errors.generic") }}</p>
+      <p v-if="poolsError" class="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm">{{ poolsError }}</p>
+      <div v-else-if="pools && !pools.available" class="space-y-1 rounded-lg bg-muted p-3 text-sm">
+        <p>{{ t("pool.zfsMissing") }}</p>
+        <p v-if="pools.message" class="font-mono text-xs break-all text-muted-foreground">{{ pools.message }}</p>
+      </div>
+      <p v-else-if="pools && !pools.pools.length" class="rounded-xl border p-4 text-sm text-muted-foreground">
+        {{ usableDisks() ? t("pool.none") : t("pool.noneNoDisks") }}
+      </p>
+      <ul v-if="pools?.pools.length" class="space-y-3">
+        <PoolCard v-for="p in pools.pools" :key="p.name" :pool="p" :busy="!!scrubbing[p.name]" @scrub="(a) => scrub(p.name, a)" />
+      </ul>
+      <Skeleton v-if="!pools && !poolsError" class="h-24 rounded-xl" />
+    </section>
+
+    <h3 class="pt-2 text-sm font-semibold">{{ t("storage.disksTitle") }}</h3>
 
     <div v-if="error" class="flex items-center justify-between gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm">
       <span>{{ error }}</span>
@@ -116,6 +226,7 @@ const num = (n: number) => new Intl.NumberFormat(locale.value).format(n)
               </div>
             </div>
           </div>
+          <div class="flex shrink-0 flex-col items-end gap-1">
           <Skeleton v-if="smart[d.name] === null" class="h-5 w-20 rounded-full" :aria-label="t('storage.smart.loading')" />
           <Badge
             v-else-if="smart[d.name]"
@@ -125,6 +236,8 @@ const num = (n: number) => new Intl.NumberFormat(locale.value).format(n)
             <TriangleAlert v-if="smart[d.name]!.status === 'failed' || smart[d.name]!.status === 'warning'" />
             {{ t(`storage.smart.${smart[d.name]!.status}`) }}
           </Badge>
+          <span class="text-xs text-muted-foreground">{{ t(d.usage === "in_use" ? `storage.usage.${d.usage_reason ?? "mounted"}` : `storage.usage.${d.usage}`) }}</span>
+          </div>
         </div>
 
         <template v-if="smart[d.name]">

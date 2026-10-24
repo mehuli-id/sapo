@@ -179,6 +179,9 @@ func New(o Options) (*Server, error) {
 	s.mux.Handle("GET /api/v1/features", s.requireAuth(s.proxyRead(proto.OpFeaturesList)))
 	s.mux.Handle("GET /api/v1/storage/disks", s.requireAuth(s.proxyRead(proto.OpStorageDisks)))
 	s.mux.Handle("GET /api/v1/storage/disks/{name}/smart", s.requireAuth(http.HandlerFunc(s.handleDiskSMART)))
+	s.mux.Handle("GET /api/v1/storage/pools", s.requireAuth(s.proxyRead(proto.OpStoragePools)))
+	s.mux.Handle("POST /api/v1/storage/pools", s.requireAdmin(http.HandlerFunc(s.handlePoolCreate)))
+	s.mux.Handle("POST /api/v1/storage/pools/{name}/scrub", s.requireAdmin(http.HandlerFunc(s.handlePoolScrub)))
 
 	s.mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "endpoint tidak ada")
@@ -429,6 +432,10 @@ func (s *Server) agentError(w http.ResponseWriter, op string, err error) {
 			status = http.StatusNotFound
 		case proto.ErrUnavailable, proto.ErrBusy:
 			status = http.StatusServiceUnavailable
+		case proto.ErrDiskChanged, proto.ErrDiskInUse, proto.ErrDiskHasData, proto.ErrDiskRemovable, proto.ErrPoolExists, proto.ErrPoolBusy:
+			status = http.StatusConflict
+		case "pool_create_failed", "pool_scrub_failed":
+			status = http.StatusUnprocessableEntity
 		}
 		writeError(w, status, pe.Code, pe.Message)
 		return
@@ -517,3 +524,7 @@ func (r *statusRecorder) WriteHeader(code int) {
 	r.status = code
 	r.ResponseWriter.WriteHeader(code)
 }
+
+// Unwrap agar http.ResponseController (misalnya memperpanjang batas tulis)
+// sampai ke ResponseWriter asli.
+func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }

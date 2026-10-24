@@ -7,4 +7,9 @@ live-config-systemd
 # Membuat user live (user/live) untuk debugging dari konsol.
 user-setup
 sudo
+# Pool ZFS (fitur storage-zfs). Modul dikompilasi DKMS saat ISO dibangun,
+# jadi header kernel ikut terpasang.
+linux-headers-amd64
+zfs-dkms
+zfsutils-linux
 # SSH sengaja tidak dipasang: user live memakai password bawaan.

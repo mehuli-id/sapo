@@ -47,6 +47,14 @@ const (
 	ErrUnavailable = "unavailable"
 	// ErrBusy: sapod sedang mengerjakan terlalu banyak permintaan sejenis.
 	ErrBusy = "busy"
+	// Penolakan operasi pool karena keadaan disk atau pool (bukan karena
+	// parameter salah bentuk). Panel menampilkan pesan khusus per kode.
+	ErrDiskChanged   = "disk_changed"   // disk yang dipilih sudah berbeda (dicabut, diganti)
+	ErrDiskInUse     = "disk_in_use"    // disk sedang dipakai sistem, pool, RAID, atau LVM
+	ErrDiskHasData   = "disk_has_data"  // disk berisi data dan penghapusannya belum dikonfirmasi
+	ErrDiskRemovable = "disk_removable" // disk lepas-pasang tidak diizinkan untuk pool
+	ErrPoolExists    = "pool_exists"
+	ErrPoolBusy      = "pool_busy" // pool sedang resilver atau sibuk dengan operasi lain
 )
 
 // Nama operasi yang dikenal sapod saat ini.
@@ -55,6 +63,13 @@ const (
 	OpFeaturesList = "features.list"
 	OpStorageDisks = "storage.disks"
 	OpStorageSMART = "storage.smart"
+	// OpStoragePools membaca pool ZFS beserta kesehatan dan status scrub.
+	OpStoragePools = "storage.pools"
+	// OpStoragePoolCreate membuat pool ZFS baru. Destruktif: isi disk yang
+	// dipilih dihapus.
+	OpStoragePoolCreate = "storage.pool_create"
+	// OpStoragePoolScrub memulai atau menghentikan scrub pool.
+	OpStoragePoolScrub = "storage.pool_scrub"
 	// OpConsolePanelAddress memperbarui alamat panel (dan sidik jari
 	// sertifikat) di layar login konsol NAS.
 	OpConsolePanelAddress = "console.panel_address"
@@ -108,18 +123,44 @@ type ConsolePanelParams struct {
 
 // Disk adalah satu disk fisik (atau virtual) hasil operasi storage.disks.
 type Disk struct {
-	Name       string      `json:"name"` // nama kernel, misalnya sda atau nvme0n1
-	Path       string      `json:"path"`
-	SizeBytes  uint64      `json:"size_bytes"`
-	Model      string      `json:"model"`
-	Vendor     string      `json:"vendor"`
-	Serial     string      `json:"serial"`
-	WWN        string      `json:"wwn"`
-	Transport  string      `json:"transport"` // sata, sas, nvme, usb, virtio, …
-	Rotational bool        `json:"rotational"`
-	Removable  bool        `json:"removable"`
+	Name       string `json:"name"` // nama kernel, misalnya sda atau nvme0n1
+	Path       string `json:"path"`
+	SizeBytes  uint64 `json:"size_bytes"`
+	Model      string `json:"model"`
+	Vendor     string `json:"vendor"`
+	Serial     string `json:"serial"`
+	WWN        string `json:"wwn"`
+	Transport  string `json:"transport"` // sata, sas, nvme, usb, virtio, …
+	Rotational bool   `json:"rotational"`
+	Removable  bool   `json:"removable"`
+	// FSType dan PTType: tanda tangan sistem berkas dan tabel partisi di
+	// disk itu sendiri (bukan di partisinya).
+	FSType     string      `json:"fstype"`
+	PTType     string      `json:"pttype"`
 	Partitions []Partition `json:"partitions"`
+	// Usage menentukan apakah disk boleh dipakai untuk pool baru:
+	// DiskFree, DiskHasData (boleh, setelah penghapusan dikonfirmasi), atau
+	// DiskInUse (tidak boleh; alasannya di UsageReason).
+	Usage       string `json:"usage"`
+	UsageReason string `json:"usage_reason,omitempty"`
 }
+
+// Nilai Disk.Usage.
+const (
+	DiskFree    = "free"
+	DiskHasData = "data"
+	DiskInUse   = "in_use"
+)
+
+// Nilai Disk.UsageReason untuk DiskInUse.
+const (
+	UsageMounted = "mounted" // ada sistem berkas yang sedang terpasang (termasuk sistem Sapo)
+	UsageSwap    = "swap"
+	UsagePool    = "pool" // anggota pool ZFS
+	UsageRAID    = "raid" // anggota RAID mdadm
+	UsageLVM     = "lvm"
+	UsageCrypt   = "crypt" // volume terenkripsi yang sedang terbuka
+)
 
 // Partition adalah partisi atau perangkat turunan sebuah disk.
 type Partition struct {
@@ -170,4 +211,115 @@ type SMARTAttr struct {
 	// Warning: nilai mentah bukan nol pada atribut yang dipantau
 	// (agent.storage.warn_*), misalnya sektor yang dipindahkan.
 	Warning bool `json:"warning"`
+}
+
+// PoolsResult adalah hasil operasi storage.pools.
+type PoolsResult struct {
+	// Available: alat ZFS terpasang dan modul kernel termuat. Bila false,
+	// Message menjelaskan sebabnya dan pool tidak bisa dibuat.
+	Available bool   `json:"available"`
+	Message   string `json:"message,omitempty"`
+	// Layouts adalah susunan pool yang boleh dibuat (agent.storage.pools).
+	Layouts []PoolLayout `json:"layouts"`
+	// AllowRemovable: disk lepas-pasang (misalnya flashdisk) boleh dipakai.
+	AllowRemovable bool   `json:"allow_removable"`
+	Pools          []Pool `json:"pools"`
+}
+
+// Susunan pool. Artinya tetap di kode (sapod dan panel); konfigurasi hanya
+// memilih yang tersedia dan batas jumlah disknya.
+const (
+	LayoutSingle = "single" // satu disk, tanpa redundansi
+	LayoutMirror = "mirror" // semua disk berisi salinan yang sama
+	LayoutRAIDZ1 = "raidz1" // tahan 1 disk rusak
+	LayoutRAIDZ2 = "raidz2" // tahan 2 disk rusak
+	LayoutRAIDZ3 = "raidz3" // tahan 3 disk rusak
+)
+
+// LayoutFloor adalah jumlah disk paling sedikit yang diterima ZFS untuk
+// setiap susunan. Konfigurasi boleh menaikkan batas ini, tidak menurunkannya.
+var LayoutFloor = map[string]int{
+	LayoutSingle: 1,
+	LayoutMirror: 2,
+	LayoutRAIDZ1: 2,
+	LayoutRAIDZ2: 3,
+	LayoutRAIDZ3: 4,
+}
+
+// PoolLayout adalah satu susunan pool yang boleh dibuat.
+type PoolLayout struct {
+	ID       string `json:"id"`
+	MinDisks int    `json:"min_disks"`
+	MaxDisks int    `json:"max_disks"`
+}
+
+// Pool adalah satu pool ZFS.
+type Pool struct {
+	Name string `json:"name"`
+	// Health: ONLINE, DEGRADED, FAULTED, OFFLINE, UNAVAIL, REMOVED, SUSPENDED.
+	Health         string `json:"health"`
+	SizeBytes      uint64 `json:"size_bytes"`
+	AllocatedBytes uint64 `json:"allocated_bytes"`
+	FreeBytes      uint64 `json:"free_bytes"`
+	CapacityPct    int    `json:"capacity_pct"`
+	// Layout dari vdev teratas: salah satu Layout*, atau "mixed".
+	Layout string `json:"layout"`
+	// Status dan Action: penjelasan ZFS bila pool bermasalah.
+	Status     string    `json:"status,omitempty"`
+	Action     string    `json:"action,omitempty"`
+	ErrorCount uint64    `json:"error_count"`
+	Vdevs      []Vdev    `json:"vdevs"`
+	Scan       *PoolScan `json:"scan,omitempty"`
+}
+
+// Vdev adalah satu perangkat di pohon pool: grup (mirror, raidz) atau disk.
+type Vdev struct {
+	Name           string `json:"name"`
+	Type           string `json:"type"` // mirror, raidz, disk, file, …
+	State          string `json:"state"`
+	Path           string `json:"path,omitempty"`
+	Disk           string `json:"disk,omitempty"` // nama disk kernel (misalnya sdb), bila dikenali
+	ReadErrors     uint64 `json:"read_errors"`
+	WriteErrors    uint64 `json:"write_errors"`
+	ChecksumErrors uint64 `json:"checksum_errors"`
+	Children       []Vdev `json:"children,omitempty"`
+}
+
+// PoolScan adalah scrub atau resilver terakhir (atau yang sedang berjalan).
+type PoolScan struct {
+	Function  string `json:"function"` // scrub, resilver
+	State     string `json:"state"`    // scanning, finished, canceled
+	Paused    bool   `json:"paused"`
+	StartTime int64  `json:"start_time"` // detik Unix
+	EndTime   int64  `json:"end_time,omitempty"`
+	Examined  uint64 `json:"examined_bytes"`
+	ToExamine uint64 `json:"to_examine_bytes"`
+	Issued    uint64 `json:"issued_bytes"`
+	Errors    uint64 `json:"errors"`
+}
+
+// PoolCreateParams adalah parameter storage.pool_create.
+type PoolCreateParams struct {
+	Name   string    `json:"name"`
+	Layout string    `json:"layout"`
+	Disks  []DiskRef `json:"disks"`
+}
+
+// DiskRef menunjuk disk yang dipilih pengguna, beserta identitas yang dilihat
+// pengguna saat memilih. sapod menolak bila disk sekarang berbeda, jadi disk
+// yang tertukar atau baru dicolok tidak pernah ikut terhapus.
+type DiskRef struct {
+	Name      string `json:"name"`
+	Serial    string `json:"serial"`
+	WWN       string `json:"wwn"`
+	SizeBytes uint64 `json:"size_bytes"`
+	// Erase: pengguna sudah mengonfirmasi bahwa data di disk ini dihapus.
+	// Wajib untuk disk berstatus DiskHasData.
+	Erase bool `json:"erase"`
+}
+
+// PoolScrubParams adalah parameter storage.pool_scrub.
+type PoolScrubParams struct {
+	Name   string `json:"name"`
+	Action string `json:"action"` // start atau stop
 }

@@ -10,7 +10,8 @@
     "search": "Cari aplikasi atau pengaturan…",
     "noResults": "Tidak ada yang cocok",
     "comingSoon": "Segera hadir",
-    "phase": "Direncanakan di Fase {n}"
+    "phase": "Direncanakan di Fase {n}",
+    "cancel": "Batal"
   },
   "shell": {
     "mainMenu": "Menu utama",
@@ -106,7 +107,7 @@
     }
   },
   "storage": {
-    "intro": "Versi baca saja: daftar disk dan kesehatannya (SMART). Membuat pool dan RAID menyusul.",
+    "intro": "Pool menggabungkan disk menjadi satu tempat penyimpanan dengan perlindungan RAID. Di bawahnya: setiap disk beserta kesehatannya (SMART).",
     "unavailable": "Daftar disk tidak bisa dibaca di sistem ini. Storage Manager butuh Linux dengan lsblk dan smartctl.",
     "empty": "Tidak ada disk yang terdeteksi.",
     "refresh": "Perbarui",
@@ -142,6 +143,18 @@
       "raw": "Mentah",
       "failingNote": "Atribut bertanda merah sudah melewati ambang batas pabrik.",
       "warningNote": "Atribut bertanda kuning bernilai bukan nol pada penghitung kerusakan yang dipantau."
+    },
+    "disksTitle": "Disk",
+    "usage": {
+      "free": "Kosong",
+      "data": "Berisi data",
+      "mounted": "Sedang dipakai (sistem berkas terpasang)",
+      "swap": "Sedang dipakai sebagai swap",
+      "pool": "Anggota pool ZFS",
+      "raid": "Anggota RAID mdadm",
+      "lvm": "Dipakai LVM",
+      "crypt": "Volume terenkripsi yang sedang terbuka",
+      "removable": "Disk lepas-pasang (flashdisk) tidak dipakai untuk pool"
     }
   },
   "about": {
@@ -253,6 +266,102 @@
     "not_found": "Data yang diminta tidak ditemukan.",
     "https_required": "Gunakan alamat HTTPS untuk membuka panel.",
     "bad_password": "Password salah.",
-    "totp_not_enabled": "Verifikasi dua langkah belum aktif untuk akun ini."
+    "totp_not_enabled": "Verifikasi dua langkah belum aktif untuk akun ini.",
+    "confirm_mismatch": "Nama pool yang diketik ulang tidak sama.",
+    "disk_changed": "Disk yang dipilih sudah berubah (dicabut atau diganti). Tutup wizard dan mulai lagi.",
+    "disk_in_use": "Salah satu disk sedang dipakai. Tutup wizard dan pilih disk lain.",
+    "disk_has_data": "Ada disk berisi data yang penghapusannya belum dikonfirmasi.",
+    "disk_removable": "Disk lepas-pasang tidak bisa dipakai untuk pool.",
+    "pool_exists": "Sudah ada pool dengan nama ini.",
+    "pool_busy": "Pool sedang membangun ulang data (resilver). Coba lagi setelah selesai.",
+    "pool_create_failed": "ZFS gagal membuat pool: {message}",
+    "pool_scrub_failed": "Scrub gagal: {message}",
+    "forbidden": "Hanya administrator yang bisa melakukan ini.",
+    "audit_unavailable": "Log audit tidak bisa ditulis, jadi tindakan ini dibatalkan demi keamanan."
+  },
+  "pool": {
+    "title": "Pool penyimpanan",
+    "create": "Buat pool",
+    "created": "Pool {name} sudah dibuat dan siap dipakai.",
+    "unavailable": "Pool tidak bisa dibaca di sistem ini.",
+    "zfsMissing": "ZFS belum siap di NAS ini, jadi pool belum bisa dibuat. Pasang fitur Storage ZFS lalu nyalakan ulang NAS.",
+    "none": "Belum ada pool. Buat pool untuk mulai menyimpan data.",
+    "noneNoDisks": "Belum ada pool, dan tidak ada disk yang bisa dipakai. Pasang disk tambahan untuk membuat pool.",
+    "disks": "tanpa disk | 1 disk | {n} disk",
+    "health": {
+      "online": "Sehat",
+      "degraded": "Terdegradasi",
+      "offline": "Offline",
+      "faulted": "Rusak",
+      "degradedHelp": "Ada disk yang rusak atau hilang. Data masih utuh, tetapi perlindungan berkurang: ganti disk yang bermasalah secepatnya.",
+      "offlineHelp": "Pool sedang tidak aktif.",
+      "faultedHelp": "Pool tidak bisa dipakai. Jangan menghapus atau memformat disk apa pun; periksa sambungan disk dan pesan ZFS di bawah."
+    },
+    "zfsSays": "Keterangan dari ZFS:",
+    "used": "{used} dari {total} terpakai",
+    "free": "{free} kosong",
+    "almostFull": "Pool hampir penuh. Di atas 80%, ZFS mulai melambat; hapus data atau tambah kapasitas.",
+    "members": "Disk di pool ini",
+    "vdevState": {
+      "ONLINE": "Normal",
+      "DEGRADED": "Terdegradasi",
+      "FAULTED": "Rusak",
+      "OFFLINE": "Offline",
+      "UNAVAIL": "Hilang",
+      "REMOVED": "Dicabut"
+    },
+    "errors": "kesalahan baca {r}, tulis {w}, checksum {c}",
+    "scan": {
+      "scrubRunning": "Scrub berjalan: {pct}%",
+      "resilverRunning": "Membangun ulang data (resilver): {pct}%",
+      "paused": "dijeda",
+      "scrubDone": "Scrub terakhir selesai {date}",
+      "resilverDone": "Resilver terakhir selesai {date}",
+      "errors": "tanpa kesalahan | 1 kesalahan | {n} kesalahan",
+      "canceled": "Scrub terakhir dihentikan {date}",
+      "never": "Belum pernah di-scrub. Scrub membaca semua data dan memperbaiki yang rusak dari salinan yang sehat.",
+      "start": "Mulai scrub",
+      "stop": "Hentikan scrub"
+    },
+    "layout": {
+      "single": {
+        "name": "Satu disk (tanpa RAID)",
+        "desc": "Seluruh kapasitas terpakai, tetapi bila disk rusak semua data hilang."
+      },
+      "mirror": {
+        "name": "Mirror (RAID 1)",
+        "desc": "Setiap disk berisi salinan yang sama. Paling sederhana dan cepat dibangun ulang."
+      },
+      "raidz1": {
+        "name": "RAID-Z1 (mirip RAID 5)",
+        "desc": "Kapasitas satu disk dipakai untuk paritas."
+      },
+      "raidz2": {
+        "name": "RAID-Z2 (mirip RAID 6)",
+        "desc": "Kapasitas dua disk untuk paritas. Disarankan untuk disk besar."
+      },
+      "raidz3": {
+        "name": "RAID-Z3",
+        "desc": "Kapasitas tiga disk untuk paritas, untuk pool dengan banyak disk."
+      },
+      "stripe": {
+        "name": "Stripe (tanpa redundansi)",
+        "desc": ""
+      },
+      "mixed": {
+        "name": "Campuran",
+        "desc": ""
+      }
+    },
+    "recommended": "Disarankan",
+    "capacityAbout": "Kapasitas sekitar {size}",
+    "tolerates": "tidak tahan disk rusak | tahan 1 disk rusak | tahan {n} disk rusak",
+    "needsExactly": "Butuh tepat {n} disk",
+    "needsRange": "Butuh {min} sampai {max} disk",
+    "mixedSizes": "Ukuran disk berbeda. Setiap disk hanya terpakai sebesar disk terkecil ({size}).",
+    "eraseWarning": "Semua data di disk berikut akan dihapus permanen:",
+    "mustConfirmErase": "Centang untuk mengonfirmasi penghapusan.",
+    "pickDisks": "Pilih minimal satu disk.",
+    "pickLayout": "Pilih susunan yang cocok dengan jumlah disk."
   }
 }

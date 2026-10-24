@@ -10,20 +10,29 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { languages, setLocale } from "@/i18n"
-import type { Wizard, WizardField } from "@/lib/api"
-import { ApiError } from "@/lib/api"
+import type { Disk, Wizard, WizardContext, WizardField } from "@/lib/api"
+import { ApiError, splitList } from "@/lib/api"
+import { formatBytes } from "@/lib/format"
 import { pick } from "@/lib/localized"
 import { cn } from "@/lib/utils"
 import type { Enrollment } from "./TotpEnroll.vue"
 import TotpEnroll from "./TotpEnroll.vue"
 import RecoveryCodes from "@/components/RecoveryCodes.vue"
+import { fits } from "@/lib/pool"
+import DiskSelect from "./DiskSelect.vue"
+import EraseConfirm from "./EraseConfirm.vue"
+import PoolLayoutSelect from "./PoolLayoutSelect.vue"
 
 const props = defineProps<{
   wizard: Wizard
   policy: { password_min_length: number; username_pattern: string }
   submit: (values: Record<string, string>) => Promise<unknown>
+  // Data untuk isian tertentu (daftar disk, susunan pool), dari aplikasi pembuka.
+  context?: WizardContext
+  // Wizard di dalam aplikasi bisa dibatalkan dari langkah pertama.
+  cancelable?: boolean
 }>()
-const emit = defineEmits<{ done: [] }>()
+const emit = defineEmits<{ done: [values: Record<string, string>]; cancel: [] }>()
 
 const { t, locale } = useI18n()
 const index = ref(0)
@@ -47,21 +56,43 @@ const values = reactive<Record<string, string>>({})
 for (const st of props.wizard.steps) for (const f of st.fields ?? []) values[f.key] = f.default ?? ""
 if ("language" in values) values.language = String(locale.value)
 
+// Pesan error isian hilang begitu isiannya diubah.
+watch(
+  () => ({ ...values }),
+  (now, before) => {
+    for (const k of Object.keys(now)) if (now[k] !== before[k]) errors[k] = ""
+  },
+)
+
 const step = computed(() => props.wizard.steps[index.value]!)
 const isLast = computed(() => index.value === props.wizard.steps.length - 1)
 const usernameRe = computed(() => new RegExp(props.policy.username_pattern))
+
+// Disk yang dipilih di isian disk-select yang dirujuk f.source.
+function sourceDisks(f: WizardField): Disk[] {
+  const names = new Set(splitList(values[f.source ?? ""]))
+  return (props.context?.disks ?? []).filter((d) => names.has(d.name))
+}
 
 function validateField(f: WizardField): string {
   const v = values[f.key] ?? ""
   // Kotak centang kode cadangan punya pesan sendiri (bukan "wajib diisi").
   if (f.type === "recovery-codes") return v === "yes" ? "" : t("recovery.mustConfirm")
+  if (f.type === "erase-confirm") return v === "yes" ? "" : t("pool.mustConfirmErase")
+  if (f.type === "disk-select" && f.required && !v) return t("pool.pickDisks")
+  if (f.type === "pool-layout") {
+    const l = props.context?.pools?.layouts.find((x) => x.id === v)
+    return l && fits(l, sourceDisks(f).length) ? "" : t("pool.pickLayout")
+  }
   if (f.required && !v.trim()) return t("wizard.required")
+  if (f.pattern && !new RegExp(f.pattern).test(v)) return t("wizard.patternMismatch")
   switch (f.type) {
     case "username":
       return usernameRe.value.test(v) ? "" : t("wizard.patternMismatch")
     case "password":
       return [...v].length >= props.policy.password_min_length ? "" : t("wizard.tooShort", { n: props.policy.password_min_length })
     case "password-confirm":
+    case "confirm":
       return f.match && v !== values[f.match] ? t("wizard.mismatch") : ""
     case "totp-enroll":
       return /^\d{6}$/.test(v) ? "" : t("wizard.codeHint")
@@ -105,7 +136,10 @@ async function finish() {
     for (const st of props.wizard.steps)
       for (const f of st.fields ?? []) if (f.type !== "recovery-codes") payload[f.key] = values[f.key] ?? ""
     await props.submit(enrollment.token ? { ...payload, totp_token: enrollment.token } : payload)
-    emit("done")
+    // Isian rahasia (password) tidak ikut diteruskan ke pembuka wizard.
+    const visible: Record<string, string> = {}
+    for (const st of props.wizard.steps) for (const f of st.fields ?? []) if (!f.secret) visible[f.key] = values[f.key] ?? ""
+    emit("done", visible)
   } catch (e) {
     const code = e instanceof ApiError ? e.code : "generic"
     // Rahasia 2FA kedaluwarsa di server: daftar ulang saat langkah 2FA dibuka.
@@ -114,7 +148,9 @@ async function finish() {
       enrollment.secret = ""
       for (const st of props.wizard.steps) for (const f of st.fields ?? []) if (f.type === "recovery-codes") values[f.key] = ""
     }
-    const msg = t(`errors.${code}`) !== `errors.${code}` ? t(`errors.${code}`) : t("errors.generic")
+    // Pesan dari server (misalnya keluaran zpool) bisa disisipkan terjemahan.
+    const params = { message: e instanceof Error ? e.message : "" }
+    const msg = t(`errors.${code}`) !== `errors.${code}` ? t(`errors.${code}`, params) : t("errors.generic")
     // Lompat ke langkah yang berisi isian bermasalah.
     const field = e instanceof ApiError ? String(e.detail.field ?? "") : ""
     const at = field ? props.wizard.steps.findIndex((s) => s.fields?.some((f) => f.key === field)) : -1
@@ -134,14 +170,26 @@ function onLanguage(code: string) {
   setLocale(code)
 }
 
+// Ringkasan berisi isian dari langkah biasa; isian di langkah ringkasan itu
+// sendiri (konfirmasi, password) tidak diulang.
+const hiddenInReview = new Set(["password-confirm", "confirm", "erase-confirm", "current-password"])
+const size = (b: number) => formatBytes(b, locale.value, 1000)
+
 const reviewRows = computed(() =>
   props.wizard.steps.flatMap((st) =>
-    (st.fields ?? [])
-      .filter((f) => f.type !== "password-confirm")
+    (st.type === "review" ? [] : (st.fields ?? []))
+      .filter((f) => !hiddenInReview.has(f.type))
       .map((f) => {
         let value = values[f.key] ?? ""
         let label = pick(f.label, locale.value)
         if (f.type === "language") value = languages.find((l) => l.code === value)?.label ?? value
+        else if (f.type === "disk-select") {
+          const names = new Set(splitList(value))
+          value = (props.context?.disks ?? [])
+            .filter((d) => names.has(d.name))
+            .map((d) => `${d.name} (${size(d.size_bytes)})`)
+            .join(", ")
+        } else if (f.type === "pool-layout") value = value ? t(`pool.layout.${value}.name`) : ""
         else if (f.type === "totp-enroll") {
           // Yang relevan di ringkasan adalah statusnya, bukan kodenya.
           label = pick(st.title, locale.value)
@@ -207,7 +255,7 @@ const reviewRows = computed(() =>
 
       <div v-for="f in step.fields ?? []" :key="f.key" class="space-y-1.5">
         <!-- Label kode cadangan ada di samping kotak centangnya. -->
-        <Label v-if="f.type !== 'recovery-codes'" :for="`wz-${f.key}`">{{ pick(f.label, locale) }}</Label>
+        <Label v-if="f.type !== 'recovery-codes' && f.type !== 'erase-confirm'" :for="`wz-${f.key}`">{{ pick(f.label, locale) }}</Label>
 
         <!-- Bahasa -->
         <div v-if="f.type === 'language'" :id="`wz-${f.key}`" role="radiogroup" class="grid gap-2 sm:grid-cols-2">
@@ -257,8 +305,37 @@ const reviewRows = computed(() =>
           </label>
         </div>
 
+        <!-- Disk untuk pool -->
+        <DiskSelect
+          v-else-if="f.type === 'disk-select'"
+          v-model="values[f.key]!"
+          :disks="context?.disks ?? []"
+          :allow-removable="!!context?.pools?.allow_removable"
+          :input-id="`wz-${f.key}`"
+          :invalid="!!errors[f.key]"
+        />
+
+        <!-- Susunan pool -->
+        <PoolLayoutSelect
+          v-else-if="f.type === 'pool-layout'"
+          v-model="values[f.key]!"
+          :layouts="context?.pools?.layouts ?? []"
+          :disks="sourceDisks(f)"
+          :input-id="`wz-${f.key}`"
+          :invalid="!!errors[f.key]"
+        />
+
+        <!-- Konfirmasi penghapusan disk -->
+        <EraseConfirm
+          v-else-if="f.type === 'erase-confirm'"
+          v-model="values[f.key]!"
+          :disks="sourceDisks(f)"
+          :label="pick(f.label, locale)"
+          :input-id="`wz-${f.key}`"
+        />
+
         <!-- Password -->
-        <div v-else-if="f.type === 'password' || f.type === 'password-confirm'" class="relative">
+        <div v-else-if="f.type === 'password' || f.type === 'password-confirm' || f.type === 'current-password'" class="relative">
           <Input
             :id="`wz-${f.key}`"
             v-model="values[f.key]"
@@ -303,12 +380,15 @@ const reviewRows = computed(() =>
       </Alert>
 
       <div class="flex items-center justify-between gap-3 pt-2">
-        <Button type="button" variant="ghost" :disabled="index === 0 || busy" @click="back">
+        <Button v-if="cancelable && index === 0" type="button" variant="ghost" :disabled="busy" @click="emit('cancel')">
+          {{ t("common.cancel") }}
+        </Button>
+        <Button v-else type="button" variant="ghost" :disabled="index === 0 || busy" @click="back">
           <ArrowLeft />{{ t("wizard.back") }}
         </Button>
-        <Button type="submit" :disabled="busy">
+        <Button type="submit" :disabled="busy" :variant="isLast && wizard.destructive ? 'destructive' : 'default'">
           <template v-if="busy"><LoaderCircle class="animate-spin" />{{ t("wizard.finishing") }}</template>
-          <template v-else-if="isLast"><Check />{{ t("wizard.finish") }}</template>
+          <template v-else-if="isLast"><Check />{{ wizard.finish_label ? pick(wizard.finish_label, locale) : t("wizard.finish") }}</template>
           <template v-else>{{ t("wizard.next") }}<ArrowRight /></template>
         </Button>
       </div>

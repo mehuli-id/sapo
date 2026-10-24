@@ -15,7 +15,7 @@ agent:
   console:
     issue_file: /run/sapo/console.issue
     agetty: /usr/sbin/agetty
-  # Storage Manager (baca saja): daftar disk dan SMART.
+  # Storage Manager: daftar disk, SMART, dan pool ZFS.
   storage:
     # Program yang dijalankan sapod, dengan path absolut (tidak lewat PATH).
     lsblk: /usr/bin/lsblk
@@ -35,6 +35,36 @@ agent:
     # terkoreksi, 197 sektor menunggu, 198 sektor tak terbaca.
     warn_ata_raw_ids: [5, 187, 197, 198]
     warn_nvme_fields: [media_errors, critical_warning]
+    # Pool ZFS (ADR 0005). Membuat pool menghapus isi disk yang dipilih:
+    # sapod hanya menerima disk yang tidak sedang dipakai, yang identitasnya
+    # (nomor seri, WWN, ukuran) sama dengan yang dilihat pengguna, dan disk
+    # berisi data hanya bila penghapusannya dikonfirmasi.
+    pools:
+      zpool: /usr/sbin/zpool
+      # Pool dipasang di <mount_base>/<nama pool>.
+      mount_base: /srv/sapo
+      # 12 = sektor 4 KiB. Tidak bisa diubah setelah pool dibuat.
+      ashift: 12
+      # Properti dataset akar setiap pool baru. lz4: kompresi ringan yang
+      # hampir selalu mempercepat; atime off: membaca file tidak menulis ke
+      # disk; xattr sa + acltype posixacl: izin ala Windows/Samba nantinya.
+      # Menulis di /etc/sapo/sapo.yaml menambah atau mengganti nilai di sini.
+      root_properties:
+        compression: lz4
+        atime: "off"
+        xattr: sa
+        acltype: posixacl
+      # Susunan yang bisa dipilih di wizard dan batas jumlah disknya.
+      # single tanpa redundansi: satu disk rusak = data hilang.
+      layouts:
+        - { id: single, min_disks: 1, max_disks: 1 }
+        - { id: mirror, min_disks: 2, max_disks: 4 }
+        - { id: raidz1, min_disks: 3, max_disks: 8 }
+        - { id: raidz2, min_disks: 4, max_disks: 12 }
+        - { id: raidz3, min_disks: 5, max_disks: 16 }
+      # Flashdisk dan kartu memori mudah tercabut dan cepat aus.
+      allow_removable: false
+      create_timeout_seconds: 120
 
 api:
   # Port panel. Siapa yang boleh membuka panel diatur oleh allowed_networks.

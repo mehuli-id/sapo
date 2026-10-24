@@ -2,7 +2,9 @@
 
 ## ISO live dev (sekarang)
 
-ISO live Debian 13 berisi paket `sapo`, untuk mencoba panel dan wizard setup awal tanpa memasang apa pun. Sistem berjalan dari RAM: **tidak ada yang ditulis ke disk**, dan semua perubahan (akun, pengaturan) hilang saat dimatikan.
+ISO live Debian 13 berisi paket `sapo` dan ZFS, untuk mencoba panel tanpa memasang apa pun. Sistem berjalan dari RAM, dan akun serta pengaturan hilang saat dimatikan.
+
+> **Peringatan:** wizard **Buat pool penyimpanan** di Storage Manager benar-benar menghapus disk yang dipilih. Jalankan ISO ini hanya di VM dengan disk virtual kosong, jangan di komputer yang disknya berisi data.
 
 ### Mengunduh
 
@@ -17,6 +19,14 @@ Selalu di VM, bukan di mesin berisi data. Dengan QEMU:
 ```bash
 qemu-system-x86_64 -accel kvm -m 2048 -smp 2 -cdrom sapo-dev_<versi>_amd64.iso \
   -nic user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:5000-:5000,hostfwd=tcp:127.0.0.1:5001-:5001
+```
+
+Untuk mencoba pool, tambahkan disk virtual kosong, misalnya dua file 4 GB:
+
+```bash
+truncate -s 4G disk1.img disk2.img
+# tambahkan ke perintah qemu di atas:
+#   -drive file=disk1.img,if=virtio,format=raw -drive file=disk2.img,if=virtio,format=raw
 ```
 
 Lalu buka `http://localhost:5000`. Halaman itu menjelaskan peringatan sertifikat dan menampilkan sidik jarinya, lalu mengarahkan ke `https://localhost:5001` (HTTPS wajib, lihat ADR 0004). Setelah itu ikuti wizard setup awal.
@@ -65,7 +75,8 @@ Hasilnya `dist/sapo-dev_<versi>_amd64.iso` beserta `.sha256`. Di macOS atau dist
 | `packages.list` | Paket sistem live; paket sistem inti ikut lewat `Depends` paket `sapo` |
 | `includes.chroot/` | File yang disalin ke sistem live, misalnya keterangan "ISO dev" di layar login (`/etc/issue.d/sapo-iso.issue`). Alamat panel dan sidik jari ditulis `sapod` (`/etc/issue.d/sapo.issue` dari paket) |
 | `build.sh` | Menjalankan `lb config` dan `lb build` dari data di atas |
-| `smoke-test.sh` | Boot ISO di QEMU tanpa disk. Cek panel dan API lewat HTTPS, HTTP hanya halaman petunjuk, sidik jari yang diumumkan sama dengan sertifikat server, dan sidik jari tampil di konsol |
+| `smoke-test.sh` | Boot ISO di QEMU dengan tiga disk virtual sementara. Cek panel dan API lewat HTTPS, HTTP hanya halaman petunjuk, dan sidik jari (diumumkan, dipakai server, dan di konsol). Lalu jalankan setup awal lewat API, buat pool ZFS mirror, pastikan disk berisi data dan password salah ditolak, dan jalankan scrub (ADR 0005) |
+| `hooks/` | Pemeriksaan di dalam chroot saat build, misalnya modul ZFS terkompilasi untuk kernel ISO |
 
 ## Installer ISO (Fase 3)
 

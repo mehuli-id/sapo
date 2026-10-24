@@ -10,7 +10,8 @@
     "search": "Search apps or settings…",
     "noResults": "No matches",
     "comingSoon": "Coming soon",
-    "phase": "Planned for Phase {n}"
+    "phase": "Planned for Phase {n}",
+    "cancel": "Cancel"
   },
   "shell": {
     "mainMenu": "Main menu",
@@ -106,7 +107,7 @@
     }
   },
   "storage": {
-    "intro": "Read-only version: your disks and their health (SMART). Creating pools and RAID comes next.",
+    "intro": "A pool combines disks into one storage space protected by RAID. Below: every disk and its health (SMART).",
     "unavailable": "Disks cannot be read on this system. Storage Manager needs Linux with lsblk and smartctl.",
     "empty": "No disks detected.",
     "refresh": "Refresh",
@@ -142,6 +143,18 @@
       "raw": "Raw",
       "failingNote": "Attributes marked red have crossed the manufacturer's threshold.",
       "warningNote": "Attributes marked yellow have a non-zero value on a monitored damage counter."
+    },
+    "disksTitle": "Disks",
+    "usage": {
+      "free": "Empty",
+      "data": "Has data",
+      "mounted": "In use (file system mounted)",
+      "swap": "In use as swap",
+      "pool": "Member of a ZFS pool",
+      "raid": "Member of an mdadm RAID",
+      "lvm": "Used by LVM",
+      "crypt": "Open encrypted volume",
+      "removable": "Removable disks (USB sticks) are not used for pools"
     }
   },
   "about": {
@@ -253,6 +266,102 @@
     "not_found": "The requested item was not found.",
     "https_required": "Use the HTTPS address to open the panel.",
     "bad_password": "Wrong password.",
-    "totp_not_enabled": "Two-step verification is not enabled for this account."
+    "totp_not_enabled": "Two-step verification is not enabled for this account.",
+    "confirm_mismatch": "The pool name you typed again doesn’t match.",
+    "disk_changed": "A chosen disk has changed (removed or replaced). Close the wizard and start again.",
+    "disk_in_use": "One of the disks is in use. Close the wizard and choose another disk.",
+    "disk_has_data": "A disk with data hasn’t been confirmed for erasing.",
+    "disk_removable": "Removable disks can’t be used for a pool.",
+    "pool_exists": "A pool with this name already exists.",
+    "pool_busy": "The pool is rebuilding data (resilver). Try again when it finishes.",
+    "pool_create_failed": "ZFS couldn’t create the pool: {message}",
+    "pool_scrub_failed": "Scrub failed: {message}",
+    "forbidden": "Only administrators can do this.",
+    "audit_unavailable": "The audit log can’t be written, so this action was cancelled for safety."
+  },
+  "pool": {
+    "title": "Storage pools",
+    "create": "Create pool",
+    "created": "Pool {name} has been created and is ready to use.",
+    "unavailable": "Pools can’t be read on this system.",
+    "zfsMissing": "ZFS isn’t ready on this NAS, so pools can’t be created yet. Install the ZFS storage feature, then restart the NAS.",
+    "none": "No pools yet. Create a pool to start storing data.",
+    "noneNoDisks": "No pools yet, and no disk is available. Add a disk to create a pool.",
+    "disks": "no disks | 1 disk | {n} disks",
+    "health": {
+      "online": "Healthy",
+      "degraded": "Degraded",
+      "offline": "Offline",
+      "faulted": "Faulted",
+      "degradedHelp": "A disk has failed or is missing. Your data is still intact, but protection is reduced: replace the failing disk as soon as possible.",
+      "offlineHelp": "The pool is not active.",
+      "faultedHelp": "The pool can’t be used. Don’t erase or format any disk; check the disk connections and the ZFS message below."
+    },
+    "zfsSays": "ZFS reports:",
+    "used": "{used} of {total} used",
+    "free": "{free} free",
+    "almostFull": "The pool is almost full. Above 80% ZFS slows down; delete data or add capacity.",
+    "members": "Disks in this pool",
+    "vdevState": {
+      "ONLINE": "Online",
+      "DEGRADED": "Degraded",
+      "FAULTED": "Faulted",
+      "OFFLINE": "Offline",
+      "UNAVAIL": "Missing",
+      "REMOVED": "Removed"
+    },
+    "errors": "read errors {r}, write {w}, checksum {c}",
+    "scan": {
+      "scrubRunning": "Scrub in progress: {pct}%",
+      "resilverRunning": "Rebuilding data (resilver): {pct}%",
+      "paused": "paused",
+      "scrubDone": "Last scrub finished {date}",
+      "resilverDone": "Last resilver finished {date}",
+      "errors": "no errors | 1 error | {n} errors",
+      "canceled": "Last scrub was stopped {date}",
+      "never": "Never scrubbed. A scrub reads all data and repairs damage from healthy copies.",
+      "start": "Start scrub",
+      "stop": "Stop scrub"
+    },
+    "layout": {
+      "single": {
+        "name": "Single disk (no RAID)",
+        "desc": "All capacity is usable, but if the disk fails all data is lost."
+      },
+      "mirror": {
+        "name": "Mirror (RAID 1)",
+        "desc": "Every disk holds the same copy. Simplest, and quickest to rebuild."
+      },
+      "raidz1": {
+        "name": "RAID-Z1 (like RAID 5)",
+        "desc": "One disk’s worth of capacity is used for parity."
+      },
+      "raidz2": {
+        "name": "RAID-Z2 (like RAID 6)",
+        "desc": "Two disks’ worth of capacity for parity. Recommended for large disks."
+      },
+      "raidz3": {
+        "name": "RAID-Z3",
+        "desc": "Three disks’ worth of capacity for parity, for pools with many disks."
+      },
+      "stripe": {
+        "name": "Stripe (no redundancy)",
+        "desc": ""
+      },
+      "mixed": {
+        "name": "Mixed",
+        "desc": ""
+      }
+    },
+    "recommended": "Recommended",
+    "capacityAbout": "About {size} usable",
+    "tolerates": "no disk can fail | 1 disk can fail | {n} disks can fail",
+    "needsExactly": "Needs exactly {n} disk(s)",
+    "needsRange": "Needs {min} to {max} disks",
+    "mixedSizes": "The disks differ in size. Each disk is only used up to the smallest one ({size}).",
+    "eraseWarning": "All data on these disks will be permanently erased:",
+    "mustConfirmErase": "Tick to confirm erasing.",
+    "pickDisks": "Choose at least one disk.",
+    "pickLayout": "Choose a layout that fits the number of disks."
   }
 }

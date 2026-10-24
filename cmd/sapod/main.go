@@ -56,6 +56,24 @@ func main() {
 	})
 	reg.Register(proto.OpStorageDisks, storage.DisksOp())
 	reg.Register(proto.OpStorageSMART, storage.SMARTOp())
+	pc := sc.Pools
+	layouts := make([]proto.PoolLayout, 0, len(pc.Layouts))
+	for _, l := range pc.Layouts {
+		layouts = append(layouts, proto.PoolLayout{ID: l.ID, MinDisks: l.MinDisks, MaxDisks: l.MaxDisks})
+	}
+	pools := agent.NewPools(storage, agent.PoolTools{
+		Zpool:          pc.Zpool,
+		MountBase:      pc.MountBase,
+		Ashift:         pc.Ashift,
+		RootProperties: pc.RootProperties,
+		Layouts:        layouts,
+		AllowRemovable: pc.AllowRemovable,
+		CreateTimeout:  time.Duration(pc.CreateTimeoutSeconds) * time.Second,
+		Log:            log,
+	})
+	reg.Register(proto.OpStoragePools, pools.PoolsOp())
+	reg.Register(proto.OpStoragePoolCreate, pools.PoolCreateOp())
+	reg.Register(proto.OpStoragePoolScrub, pools.PoolScrubOp())
 	reg.Register(proto.OpConsolePanelAddress, agent.ConsolePanelAddressOp(agent.ConsoleTools{
 		IssueFile: cfg.Agent.Console.IssueFile,
 		Agetty:    cfg.Agent.Console.Agetty,
