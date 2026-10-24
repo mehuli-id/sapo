@@ -93,6 +93,7 @@ func main() {
 		Exportfs: shc.Exportfs, Systemctl: shc.Systemctl, ExportsFile: shc.ExportsFile, NFSService: shc.NFSService,
 		IDMin: ac.IDMin, IDMax: ac.IDMax,
 	})
+	shares.SetAccounts(accounts)
 	reg.Register(proto.OpSharesApply, shares.ApplyOp())
 	reg.Register(proto.OpSharesDelete, shares.DeleteOp())
 	reg.Register(proto.OpSharesUsage, shares.UsageOp())

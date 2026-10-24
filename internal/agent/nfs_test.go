@@ -47,9 +47,9 @@ func TestSharesNFSExport(t *testing.T) {
 	}
 	exports, _ := os.ReadFile(s.t.ExportsFile)
 	want := filepath.Join(root, "tank/keluarga") +
-		" 192.168.1.0/24(rw," + nfsOptions + ",anonuid=20011,anongid=20000)" +
-		" 10.0.2.2/32(rw," + nfsOptions + ",anonuid=20011,anongid=20000)\n"
-	if !strings.Contains(string(exports), want) || !strings.Contains(string(exports), " fd00::/64(ro,") {
+		" 192.168.1.0/24(sec=sys,rw," + nfsOptions + ",anonuid=20011,anongid=20000)" +
+		" 10.0.2.2/32(sec=sys,rw," + nfsOptions + ",anonuid=20011,anongid=20000)\n"
+	if !strings.Contains(string(exports), want) || !strings.Contains(string(exports), " fd00::/64(sec=sys,ro,") {
 		t.Fatalf("file ekspor:\n%s", exports)
 	}
 	calls, _ := os.ReadFile(log)
@@ -57,7 +57,7 @@ func TestSharesNFSExport(t *testing.T) {
 	for _, w := range []string{
 		"g:ortu:rwx,u:ani:rwx", // akun NFS punya entri ACL sendiri
 		"m::rwx,u:budi:r-x,d:", // tanpa entri ganda
-		"systemctl start -- nfs-server.service\nexportfs -ra --",
+		"systemctl enable --now -- nfs-server.service\nexportfs -ra --",
 	} {
 		if !strings.Contains(c, w) {
 			t.Errorf("panggilan tanpa %q:\n%s", w, c)
@@ -76,7 +76,7 @@ func TestSharesNFSExport(t *testing.T) {
 	if b, _ := os.ReadFile(s.t.ExportsFile); strings.Contains(string(b), root) {
 		t.Fatalf("ekspor harus kosong:\n%s", b)
 	}
-	if b, _ := os.ReadFile(log); !strings.Contains(string(b), "exportfs -ra --\nsystemctl stop -- nfs-server.service") {
+	if b, _ := os.ReadFile(log); !strings.Contains(string(b), "exportfs -ra --\nsystemctl disable --now -- nfs-server.service") {
 		t.Fatalf("panggilan:\n%s", b)
 	}
 }
@@ -93,6 +93,8 @@ func TestSharesNFSRejectsBadSpecs(t *testing.T) {
 		"opsi disisipkan":   {"10.0.0.0/8(rw,no_root_squash)"},
 		"ganda":             {"10.0.0.0/8", "10.0.0.0/8"},
 		"IPv6 terlalu luas": {"::/0"},
+		"jaringan publik":   {"8.8.8.0/24"},
+		"IPv6 publik":       {"2001:db8::/64"},
 		"kosong":            {},
 	} {
 		sp := proto.ShareSpec{Name: "data", Pool: "tank", Write: []string{"user:budi"}, NFS: &proto.NFSExport{Clients: clients, User: "budi"}}
@@ -111,8 +113,8 @@ func TestSharesNFSRejectsBadSpecs(t *testing.T) {
 	}
 }
 
-func TestSharesNFSRestoresOnExportfsFailure(t *testing.T) {
-	s, _, _ := testNFS(t, "1")
+func TestSharesNFSFailsClosedOnExportfsFailure(t *testing.T) {
+	s, _, log := testNFS(t, "1")
 	if err := os.MkdirAll(filepath.Dir(s.t.ExportsFile), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -123,8 +125,13 @@ func TestSharesNFSRestoresOnExportfsFailure(t *testing.T) {
 	if _, err := applyShares(t, s, sp); err == nil {
 		t.Fatal("exportfs gagal harus menjadi error")
 	}
-	if b, _ := os.ReadFile(s.t.ExportsFile); string(b) != "lama\n" {
-		t.Fatalf("file ekspor lama harus dipulihkan: %q", b)
+	// File lama tidak dipulihkan (bisa memberi akses yang baru dicabut):
+	// semua ekspor Sapo dicabut dan server NFS dimatikan.
+	if b, _ := os.ReadFile(s.t.ExportsFile); string(b) != string(renderExports(nil)) {
+		t.Fatalf("file ekspor harus kosong: %q", b)
+	}
+	if b, _ := os.ReadFile(log); !strings.Contains(string(b), "systemctl disable --now -- nfs-server.service") {
+		t.Fatalf("server NFS harus dimatikan:\n%s", b)
 	}
 }
 
@@ -147,7 +154,39 @@ func TestSharesDeleteUnexportsFirst(t *testing.T) {
 		t.Fatalf("file ekspor:\n%s", b)
 	}
 	calls, _ := os.ReadFile(log)
-	if !strings.Contains(string(calls), "exportfs -ra --\nzfs unmount -- tank/data") || strings.Contains(string(calls), "systemctl stop") {
+	if !strings.Contains(string(calls), "exportfs -ra --\nzfs unmount -- tank/data") || strings.Contains(string(calls), "systemctl disable") {
 		t.Fatalf("panggilan:\n%s", calls)
+	}
+}
+
+func TestPoolDestroyUnexportsShares(t *testing.T) {
+	s, root, _ := testNFS(t, "0")
+	nfs := &proto.NFSExport{Clients: []string{"10.0.0.0/8"}, User: "budi"}
+	if _, err := applyShares(t, s, proto.ShareSpec{Name: "data", Pool: "tank", Write: []string{"user:budi"}, NFS: nfs}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.p.beforeDestroy(context.Background(), "tank"); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(s.t.ExportsFile); strings.Contains(string(b), filepath.Join(root, "tank")) {
+		t.Fatalf("ekspor folder di pool yang dihapus harus dicabut:\n%s", b)
+	}
+}
+
+func TestSharesApplyExportsEvenWhenSMBFails(t *testing.T) {
+	s, root, _ := testNFS(t, "0")
+	nfs := &proto.NFSExport{Clients: []string{"10.0.0.0/8"}, User: "budi"}
+	if _, err := applyShares(t, s, proto.ShareSpec{Name: "data", Pool: "tank", Write: []string{"user:budi"}, NFS: nfs}); err != nil {
+		t.Fatal(err)
+	}
+	// testparm menolak: ekspor NFS tetap dicabut sesuai daftar baru.
+	if err := os.WriteFile(s.t.Testparm, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := applyShares(t, s, proto.ShareSpec{Name: "data", Pool: "tank", Write: []string{"user:budi"}}); err == nil {
+		t.Fatal("galat Samba harus dilaporkan")
+	}
+	if b, _ := os.ReadFile(s.t.ExportsFile); strings.Contains(string(b), filepath.Join(root, "tank/data")) {
+		t.Fatalf("ekspor harus dicabut walau Samba gagal:\n%s", b)
 	}
 }

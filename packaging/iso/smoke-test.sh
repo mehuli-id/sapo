@@ -19,6 +19,8 @@ PORT="${PORT:-15000}"              # port HTTP di host, diteruskan ke 5000 di VM
 TLS_PORT="${TLS_PORT:-15001}"      # port HTTPS di host, diteruskan ke 5001 di VM
 SMB_PORT="${SMB_PORT:-14450}"      # port SMB di host, diteruskan ke 445 di VM
 NFS_PORT="${NFS_PORT:-12049}"      # port NFS di host, diteruskan ke 2049 di VM
+RPCBIND_PORT="${RPCBIND_PORT:-10111}" # diteruskan ke 111 (rpcbind) di VM, harus tertutup
+MOUNTD_PORT="${MOUNTD_PORT:-20048}"   # diteruskan ke 20048 (mountd) di VM, harus tertutup
 TIMEOUT_S="${TIMEOUT_S:-600}"      # batas waktu boot sampai panel siap
 VM_RAM_MB="${VM_RAM_MB:-2048}"
 LOG="${LOG:-$(dirname "$ISO")/smoke-test-console.log}"
@@ -39,7 +41,7 @@ if [[ -w /dev/kvm ]]; then accel=(-accel kvm -cpu host); fi
 
 qemu-system-x86_64 "${accel[@]}" -m "$VM_RAM_MB" -smp 2 \
   -cdrom "$ISO" -boot d "${disks[@]}" \
-  -nic "user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:$PORT-:5000,hostfwd=tcp:127.0.0.1:$TLS_PORT-:5001,hostfwd=tcp:127.0.0.1:$SMB_PORT-:445,hostfwd=tcp:127.0.0.1:$NFS_PORT-:2049" \
+  -nic "user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:$PORT-:5000,hostfwd=tcp:127.0.0.1:$TLS_PORT-:5001,hostfwd=tcp:127.0.0.1:$SMB_PORT-:445,hostfwd=tcp:127.0.0.1:$NFS_PORT-:2049,hostfwd=tcp:127.0.0.1:$RPCBIND_PORT-:111,hostfwd=tcp:127.0.0.1:$MOUNTD_PORT-:20048" \
   -display none -serial "file:$LOG" &
 qemu=$!
 trap 'sudo umount -f -l "$WORK/nfs" 2>/dev/null || true; kill "$qemu" 2>/dev/null || true; rm -rf "$WORK"' EXIT
@@ -230,6 +232,26 @@ if sudo sh -c "echo x > '$WORK/nfs/coba.txt'" 2>/dev/null; then fail "NFS sebaga
 nfs_umount
 echo "NFS: baca saja sebagai ani, root klien tidak mendapat hak lebih"
 
+# Hanya NFSv4 di port 2049: rpcbind dan mountd tidak menjawab dari jaringan.
+# QEMU menerima koneksi di host lalu meneruskannya, jadi yang diperiksa
+# adalah jawaban RPC (panggilan NULL), bukan sekadar koneksi.
+rpc_answers() { # rpc_answers PORT PROGRAM VERSI → sukses bila ada jawaban
+  python3 - "$@" <<'PY'
+import socket, struct, sys
+port, prog, vers = map(int, sys.argv[1:])
+call = struct.pack(">IIIIIIIIII", 0x5A90, 0, 2, prog, vers, 0, 0, 0, 0, 0)
+try:
+    s = socket.create_connection(("127.0.0.1", port), timeout=5)
+    s.sendall(struct.pack(">I", 0x80000000 | len(call)) + call)
+    sys.exit(0 if s.recv(64) else 1)
+except OSError:
+    sys.exit(1)
+PY
+}
+if rpc_answers "$RPCBIND_PORT" 100000 2; then fail "rpcbind tidak boleh terbuka di jaringan (NFS hanya versi 4)"; fi
+if rpc_answers "$MOUNTD_PORT" 100005 3; then fail "mountd tidak boleh terbuka di jaringan (NFS hanya versi 4)"; fi
+echo "NFS: hanya versi 4; rpcbind dan mountd tidak terbuka"
+
 res="$(nfs_set '{"user":"budi","clients":["10.0.2.0/24"]}')"
 [[ "$res" == *' 200' && "$res" != *'system_sync_failed'* ]] || fail "NFS sebagai budi: $res"
 out="$(nfs_mount)" || fail "pasang NFS (budi, tulis): $out"
@@ -241,6 +263,13 @@ rm -f "$WORK/salinan.txt"
 out="$(smb cici "get nfs.txt $WORK/salinan.txt")"
 [[ "$(cat "$WORK/salinan.txt" 2>/dev/null)" == "dari NFS" ]] || fail "file dari NFS harus mewarisi izin folder (cici baca lewat SMB): $out"
 echo "NFS: tulis sebagai budi (file milik UID $owner), izin folder diwarisi"
+
+# Mencabut izin budi di folder langsung mencabut ekspor NFS-nya.
+res="$(api POST /api/v1/shares/keluarga "{\"permissions\":{\"user:ani\":\"read\",\"user:cici\":\"read\"},\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' && "$res" != *'system_sync_failed'* ]] || fail "cabut izin budi: $res"
+if out="$(nfs_mount)"; then nfs_umount; fail "NFS sebagai budi tanpa izin tidak boleh bisa dipasang"; fi
+res="$(api POST /api/v1/shares/keluarga "{\"permissions\":{\"user:budi\":\"write\",\"user:ani\":\"read\",\"user:cici\":\"read\"},\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "kembalikan izin budi: $res"
 
 res="$(nfs_set '{"user":"budi","clients":["10.0.3.0/24"]}')"
 [[ "$res" == *' 200' ]] || fail "NFS klien lain: $res"

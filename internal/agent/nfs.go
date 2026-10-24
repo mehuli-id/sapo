@@ -22,30 +22,43 @@ import (
 // (all_squash, anonuid/anongid), jadi UID yang dikirim klien tidak pernah
 // dipercaya dan izin NFS sama dengan izin akun itu di ACL folder.
 
-// nfsOptions adalah opsi tetap setiap ekspor (selain ro/rw dan ID akun).
-// secure: klien harus memakai port istimewa; sec=sys tanpa kepercayaan UID
-// karena all_squash; no_subtree_check aman karena setiap folder adalah
-// sistem berkas (dataset) tersendiri.
-const nfsOptions = "sync,all_squash,secure,sec=sys,no_subtree_check"
+// nfsOptions adalah opsi tetap setiap ekspor, setelah sec=sys dan ro/rw
+// (opsi berlaku untuk sec= yang mendahuluinya). sec=sys tanpa kepercayaan
+// UID karena all_squash; secure: klien harus memakai port istimewa;
+// no_subtree_check aman karena setiap folder adalah sistem berkas (dataset)
+// tersendiri, dan mp memastikan itu: folder yang belum terpasang (misalnya
+// gagal dipasang saat boot) tidak diekspor sebagai direktori biasa di
+// sistem berkas pool.
+const nfsOptions = "sync,all_squash,secure,no_subtree_check,mp"
 
-// Panjang prefiks paling kecil untuk jaringan klien: jaringan yang lebih
-// luas praktis berarti "semua orang".
-const (
-	minNFSPrefix4 = 8
-	minNFSPrefix6 = 32
-)
+// nfsNetworks: klien NFS hanya boleh di jaringan lokal (privat IPv4, CGNAT
+// yang dipakai VPN, IPv6 ULA). Jaringan yang lebih luas dari jaringan ini
+// ditolak.
+var nfsNetworks = []netip.Prefix{
+	netip.MustParsePrefix("10.0.0.0/8"),
+	netip.MustParsePrefix("172.16.0.0/12"),
+	netip.MustParsePrefix("192.168.0.0/16"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("fc00::/7"),
+}
 
-// validNFSClient: alamat atau jaringan dalam bentuk kanonis (bukan nama
-// host, karena nama bisa dipalsukan lewat DNS).
+// validNFSClient: alamat atau jaringan lokal dalam bentuk kanonis (bukan
+// nama host, karena nama bisa dipalsukan lewat DNS).
 func validNFSClient(c string) bool {
 	p, err := netip.ParsePrefix(c)
-	if err != nil || p.String() != c || p.Masked() != p {
+	if err != nil || p.String() != c || p.Masked() != p || p.Addr().Zone() != "" || p.Addr().Is4In6() {
 		return false
 	}
-	if p.Addr().Is4() {
-		return p.Bits() >= minNFSPrefix4
+	return inNFSNetworks(p)
+}
+
+func inNFSNetworks(p netip.Prefix) bool {
+	for _, n := range nfsNetworks {
+		if n.Bits() <= p.Bits() && n.Contains(p.Addr()) {
+			return true
+		}
 	}
-	return p.Addr().Is6() && !p.Addr().Is4In6() && p.Bits() >= minNFSPrefix6 && p.Addr().Zone() == ""
+	return false
 }
 
 func checkNFSSpec(sp proto.ShareSpec) error {
@@ -94,9 +107,9 @@ type nfsConf struct {
 	readOnly bool
 }
 
-// nfsAccount mencari UID dan GID akun NFS. Hanya akun buatan Sapo (rentang
-// ID agent.accounts), jadi ekspor tidak pernah memetakan klien ke root atau
-// akun sistem lain.
+// nfsAccount mencari UID dan GID akun NFS. Hanya akun buatan Sapo (di
+// rentang ID agent.accounts dan tercatat di catatan akun sapod), jadi
+// ekspor tidak pernah memetakan klien ke root atau akun sistem lain.
 func (s *Shares) nfsAccount(ids shareIDs, name string) (int, int, error) {
 	u, ok := ids.users[name]
 	if !ok {
@@ -104,6 +117,12 @@ func (s *Shares) nfsAccount(ids shareIDs, name string) (int, int, error) {
 	}
 	if u.UID < s.t.IDMin || u.UID > s.t.IDMax || u.GID < s.t.IDMin || u.GID > s.t.IDMax {
 		return 0, 0, fmt.Errorf("akun NFS %s bukan akun Sapo", name)
+	}
+	if s.managed != nil {
+		uid, gid, ok := s.managed(name)
+		if !ok || uid != u.UID || gid != u.GID {
+			return 0, 0, fmt.Errorf("akun NFS %s bukan akun Sapo", name)
+		}
 	}
 	return u.UID, u.GID, nil
 }
@@ -123,7 +142,7 @@ func renderExports(exports []nfsConf) []byte {
 		}
 		b.WriteString(e.path)
 		for _, c := range e.clients {
-			fmt.Fprintf(&b, " %s(%s,%s,anonuid=%d,anongid=%d)", c, mode, nfsOptions, e.uid, e.gid)
+			fmt.Fprintf(&b, " %s(sec=sys,%s,%s,anonuid=%d,anongid=%d)", c, mode, nfsOptions, e.uid, e.gid)
 		}
 		b.WriteString("\n")
 	}
@@ -131,33 +150,28 @@ func renderExports(exports []nfsConf) []byte {
 }
 
 // writeExports menulis file ekspor lalu meminta kernel memakainya
-// (exportfs -ra). Server NFS hanya berjalan selama ada folder yang
-// diekspor. Bila exportfs menolak, file lama dipulihkan. Hasil: "applied",
-// atau "unavailable" bila server NFS tidak terpasang.
+// (exportfs -ra). Server NFS hanya berjalan (dan menyala saat boot) selama
+// ada folder yang diekspor. Bila gagal, semua ekspor Sapo dicabut
+// (gagal-tertutup): file lama bisa saja memberi akses yang baru dicabut.
+// Hasil: "applied", atau "unavailable" bila server NFS tidak terpasang.
 func (s *Shares) writeExports(ctx context.Context, exports []nfsConf) (string, error) {
 	if _, err := os.Stat(s.t.Exportfs); err != nil {
 		return "unavailable", nil
 	}
-	data := renderExports(exports)
-	old, err := os.ReadFile(s.t.ExportsFile)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return "", err
+	err := s.replaceExports(renderExports(exports))
+	if err == nil && len(exports) > 0 {
+		err = s.nfsService(ctx, "start")
 	}
-	if err := s.replaceExports(data); err != nil {
-		return "", err
+	if err == nil {
+		err = s.exportfs(ctx)
 	}
-	if len(exports) > 0 {
-		if err := s.nfsService(ctx, "start"); err != nil {
-			return "", err
-		}
-	}
-	if err := s.exportfs(ctx); err != nil {
-		if old == nil {
+	if err != nil {
+		s.p.logWarn("ekspor NFS gagal diterapkan; semua ekspor Sapo dicabut", "err", err)
+		if rmErr := s.replaceExports(renderExports(nil)); rmErr != nil {
 			_ = os.Remove(s.t.ExportsFile)
-		} else {
-			_ = s.replaceExports(old)
 		}
 		_ = s.exportfs(ctx)
+		_ = s.nfsService(ctx, "stop")
 		return "", err
 	}
 	if len(exports) == 0 {
@@ -206,8 +220,14 @@ func (s *Shares) exportfs(ctx context.Context) error {
 	return nil
 }
 
+// nfsService menyalakan (start) atau mematikan (stop) server NFS, sekaligus
+// menyalakan atau tidak saat boot.
 func (s *Shares) nfsService(ctx context.Context, action string) error {
-	res, err := s.p.st.run(ctx, s.t.Systemctl, []string{action}, s.t.NFSService)
+	flags := []string{"enable", "--now"}
+	if action == "stop" {
+		flags = []string{"disable", "--now"}
+	}
+	res, err := s.p.st.run(ctx, s.t.Systemctl, flags, s.t.NFSService)
 	if err != nil {
 		return err
 	}
@@ -217,10 +237,10 @@ func (s *Shares) nfsService(ctx context.Context, action string) error {
 	return nil
 }
 
-// unexport mengeluarkan satu folder dari file ekspor (sebelum folder
-// dilepas dan dihapus). File itu buatan sapod sendiri: satu baris per
-// folder, diawali path folder.
-func (s *Shares) unexport(ctx context.Context, path string) error {
+// unexport mengeluarkan folder dengan path yang cocok dari file ekspor
+// (sebelum folder atau pool dilepas dan dihapus). File itu buatan sapod
+// sendiri: satu baris per folder, diawali path folder.
+func (s *Shares) unexport(ctx context.Context, match func(path string) bool) error {
 	if _, err := os.Stat(s.t.Exportfs); err != nil {
 		return nil
 	}
@@ -236,7 +256,7 @@ func (s *Shares) unexport(ctx context.Context, path string) error {
 	sc := bufio.NewScanner(bytes.NewReader(old))
 	for sc.Scan() {
 		line := sc.Text()
-		if first, _, _ := strings.Cut(line, " "); first == path {
+		if first, _, _ := strings.Cut(line, " "); strings.HasPrefix(first, "/") && match(first) {
 			found = true
 			continue
 		}
@@ -261,4 +281,11 @@ func (s *Shares) unexport(ctx context.Context, path string) error {
 		return s.nfsService(ctx, "stop")
 	}
 	return nil
+}
+
+// unexportPool mengeluarkan semua folder di pool dari file ekspor, sebelum
+// pool dihapus.
+func (s *Shares) unexportPool(ctx context.Context, pool string) error {
+	base := filepath.Join(s.t.MountBase, pool) + "/"
+	return s.unexport(ctx, func(path string) bool { return strings.HasPrefix(path, base) })
 }

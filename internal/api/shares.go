@@ -274,13 +274,18 @@ func (s *Server) syncSystem(ctx context.Context) (res proto.SharesApplyResult, e
 }
 
 // nfsAccess: izin efektif pengguna u di folder ("write", "read", atau "")
-// dari izin langsung dan grup yang diikutinya. Hanya izin yang ikut
-// diterapkan (ada di exists) yang dihitung.
+// menurut aturan ACL POSIX di sistem berkas: izin langsung pengguna berlaku
+// bila ada; bila tidak, izin terluas dari grup yang diikutinya. Hanya izin
+// yang ikut diterapkan (ada di exists) yang dihitung.
 func nfsAccess(sh Share, u auth.User, exists map[string]bool) string {
+	if p := "user:" + u.Username; exists[p] && sh.Permissions[p] != "" {
+		return sh.Permissions[p]
+	}
 	best := ""
-	consider := func(p string) {
+	for _, g := range u.Groups {
+		p := "group:" + g
 		if !exists[p] {
-			return
+			continue
 		}
 		switch sh.Permissions[p] {
 		case "write":
@@ -290,10 +295,6 @@ func nfsAccess(sh Share, u auth.User, exists map[string]bool) string {
 				best = "read"
 			}
 		}
-	}
-	consider("user:" + u.Username)
-	for _, g := range u.Groups {
-		consider("group:" + g)
 	}
 	return best
 }
@@ -448,11 +449,20 @@ func (s *Server) shareStatus(v *shareView) {
 	}
 }
 
+// nfsNetworks: klien NFS hanya di jaringan lokal (sama dengan sapod).
+var nfsNetworks = []netip.Prefix{
+	netip.MustParsePrefix("10.0.0.0/8"),
+	netip.MustParsePrefix("172.16.0.0/12"),
+	netip.MustParsePrefix("192.168.0.0/16"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("fc00::/7"),
+}
+
 // normalizeNFS memeriksa ekspor NFS dari panel: pengguna harus ada, klien
-// berupa alamat IP atau jaringan (nama host tidak diterima karena bisa
+// berupa alamat IP atau jaringan lokal (nama host tidak diterima karena bisa
 // dipalsukan lewat DNS). Alamat tunggal menjadi /32 atau /128, jaringan
-// disamakan ke bentuk kanonis, dan duplikat dibuang. Jaringan yang terlalu
-// luas (lebih luas dari /8 untuk IPv4, /32 untuk IPv6) ditolak.
+// disamakan ke bentuk kanonis, dan duplikat dibuang. Alamat publik dan
+// jaringan yang lebih luas dari jaringan lokal ditolak.
 func (s *Server) normalizeNFS(in *ShareNFS) (*ShareNFS, bool) {
 	if in == nil {
 		return nil, true
@@ -471,7 +481,7 @@ func (s *Server) normalizeNFS(in *ShareNFS) (*ShareNFS, bool) {
 		}
 		p = p.Masked()
 		a := p.Addr()
-		if a.Zone() != "" || a.Is4In6() || (a.Is4() && p.Bits() < 8) || (a.Is6() && p.Bits() < 32) {
+		if a.Zone() != "" || a.Is4In6() || !slices.ContainsFunc(nfsNetworks, func(n netip.Prefix) bool { return n.Bits() <= p.Bits() && n.Contains(a) }) {
 			return nil, false
 		}
 		if !slices.Contains(out.Clients, p.String()) {
