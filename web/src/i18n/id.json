@@ -313,7 +313,9 @@
       "FAULTED": "Rusak",
       "OFFLINE": "Offline",
       "UNAVAIL": "Hilang",
-      "REMOVED": "Dicabut"
+      "REMOVED": "Dicabut",
+      "AVAIL": "Cadangan siap",
+      "INUSE": "Cadangan dipakai"
     },
     "errors": "kesalahan baca {r}, tulis {w}, checksum {c}",
     "scan": {
@@ -373,6 +375,13 @@
     "replaced": "Disk sedang diganti. ZFS membangun ulang data ke disk baru (resilver); pool tetap bisa dipakai selama proses ini.",
     "destroy": "Hapus pool",
     "destroyTitle": "Hapus pool {pool}",
-    "destroyed": "Pool {name} sudah dihapus."
+    "destroyed": "Pool {name} sudah dihapus.",
+    "class": {
+      "special": "special",
+      "dedup": "dedup",
+      "logs": "log (SLOG)",
+      "cache": "cache (L2ARC)",
+      "spares": "cadangan (spare)"
+    }
   }
 }

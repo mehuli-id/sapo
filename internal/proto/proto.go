@@ -142,6 +142,7 @@ type Disk struct {
 	// disk itu sendiri (bukan di partisinya).
 	FSType     string      `json:"fstype"`
 	PTType     string      `json:"pttype"`
+	Label      string      `json:"label"`
 	Partitions []Partition `json:"partitions"`
 	// Usage menentukan apakah disk boleh dipakai untuk pool baru:
 	// DiskFree, DiskHasData (boleh, setelah penghapusan dikonfirmasi), atau

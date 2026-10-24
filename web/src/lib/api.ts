@@ -46,6 +46,7 @@ export interface Disk {
   removable: boolean
   fstype: string
   pttype: string
+  label: string
   partitions: Partition[]
   // Apakah disk boleh dipakai pool baru (dinilai sapod).
   usage: DiskUsage
