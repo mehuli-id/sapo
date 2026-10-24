@@ -148,7 +148,9 @@ func (s *Server) syncSystem(ctx context.Context) (res proto.SharesApplyResult, e
 	defer s.syncMu.Unlock()
 	defer func() {
 		s.syncStateMu.Lock()
-		s.syncLastErr, s.syncLastAt = "", s.now().UTC()
+		// Jam sistem (bukan s.now): fungsi ini juga berjalan di goroutine
+		// latar belakang.
+		s.syncLastErr, s.syncLastAt = "", time.Now().UTC()
 		if err != nil {
 			s.syncLastErr = clipText(err.Error(), 2000)
 		}
