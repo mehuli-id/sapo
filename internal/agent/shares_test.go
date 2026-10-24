@@ -66,6 +66,19 @@ esac
 		Workgroup: "WORKGROUP", ServerString: "Sapo NAS", MinProtocol: "SMB2",
 		MountBase: root, PasswdFile: passwd, GroupFile: group,
 	})
+	// Pekerjaan ACL latar belakang dihentikan sebelum direktori sementara
+	// dihapus (cleanup berjalan terbalik, jadi ini lebih dulu).
+	t.Cleanup(func() {
+		s.jobsMu.Lock()
+		var ds []string
+		for d := range s.jobs {
+			ds = append(ds, d)
+		}
+		s.jobsMu.Unlock()
+		for _, d := range ds {
+			s.stopACLJob(d)
+		}
+	})
 	s.chown = func(string, int, int) error { return nil }
 	s.isMount = func(string) bool { return true }
 	s.aclTree = func(_ context.Context, root string, acl shareACL) error {
