@@ -28,7 +28,9 @@ var timezonePattern = regexp.MustCompile(`^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+){0,2
 // TimeStatusOp mengembalikan handler time.status.
 func TimeStatusOp(t TimeTools) Handler {
 	return func(ctx context.Context, _ json.RawMessage) (any, error) {
-		res, err := runTool(ctx, t.Timeout, t.Timedatectl, []string{"show", "--property=Timezone,NTP,NTPSynchronized"})
+		// Semua properti dibaca (filter --property tidak menerima daftar di
+		// semua versi timedatectl), yang dibutuhkan dipilih di bawah.
+		res, err := runTool(ctx, t.Timeout, t.Timedatectl, []string{"show"})
 		if err != nil {
 			return nil, err
 		}
