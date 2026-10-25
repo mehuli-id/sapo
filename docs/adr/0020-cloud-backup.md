@@ -14,11 +14,16 @@ Backup ke pool lain (ADR 0017) dan ke NAS lain (ADR 0019) butuh disk atau NAS ke
   - Rantai `zfs send` inkremental di objek tidak bisa dipangkas tanpa mengunggah ulang salinan penuh.
   - Yang dicadangkan adalah isi file: ACL POSIX dan atribut ikut sebagai xattr. Riwayat snapshot ZFS tidak ikut.
 - **sapod tidak ke jaringan.** sapod menjalankan restic lewat `systemd-run --wait --pipe` di unit sementara yang dikunci:
-  - `ProtectSystem=strict`, `NoNewPrivileges`, `PrivateTmp`/`PrivateDevices`/`PrivateIPC`, `Protect*`, `RestrictNamespaces`, `MemoryDenyWriteExecute`, dan `RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX`;
-  - backup: `CapabilityBoundingSet=CAP_DAC_READ_SEARCH` (membaca semua file, tidak bisa menulis selain cache);
-  - perintah baca: tanpa kapabilitas;
-  - pemulihan: kapabilitas pemilik file, dan hanya boleh menulis ke folder baru tujuan pemulihan (`ReadWritePaths`).
+  - restic **bukan root**: `DynamicUser=yes`, kapabilitas hanya lewat `AmbientCapabilities` sesuai mode;
+  - `ProtectSystem=strict`, `NoNewPrivileges`, `PrivateTmp`/`PrivateDevices`/`PrivateIPC`, `Protect*`, `RestrictNamespaces`, `MemoryDenyWriteExecute`;
+  - `RestrictAddressFamilies=AF_INET AF_INET6`, **tanpa socket unix**: pengguna dengan `CAP_DAC_OVERRIDE` bisa menyambung ke socket mana pun, termasuk D-Bus/systemd/sapod (jalur ke root). Resolver Go murni (`GODEBUG=netdns=go`);
+  - `InaccessiblePaths` untuk rahasia dan state sapod, data sapo-api (`/var/lib/sapo`, `/etc/sapo`), `/etc/shadow`, `/run/sapo`, `/run/dbus`, `/run/systemd`, `/var/lib/samba`;
+  - cache restic di `CacheDirectory` milik pengguna dinamis;
+  - backup: `CAP_DAC_READ_SEARCH` saja (membaca semua file, tidak bisa menulis apa pun selain cache);
+  - perintah baca (`init`, `snapshots`, `forget`): tanpa kapabilitas;
+  - pemulihan: `CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE`, dan hanya boleh menulis ke folder baru tujuan pemulihan (`ReadWritePaths`).
   - Unit dihentikan (`systemctl stop`) bila operasi dibatalkan.
+  - Risiko sisa: dataset yang dipasang di host *selama* pemulihan berjalan mungkin ikut terlihat bisa ditulis di namespace unit (propagasi mount); pemulihan jarang dan dimulai admin.
 - **Rahasia.**
   - Password repo dan kunci S3 hanya disimpan sapod di `agent.cloud.secrets_dir` (0600, root).
   - Keduanya masuk ke unit lewat `LoadCredential` (`--password-file` dan `AWS_SHARED_CREDENTIALS_FILE` menunjuk direktori kredensial unit), tidak pernah lewat argumen atau variabel lingkungan, yang bisa dibaca pengguna mana pun lewat `systemctl show`.
@@ -26,13 +31,16 @@ Backup ke pool lain (ADR 0017) dan ke NAS lain (ADR 0019) butuh disk atau NAS ke
 - **Password enkripsi.** Repo baru diberi password acak 160 bit (base32 berkelompok), ditampilkan **sekali** di panel. Admin wajib menyatakan sudah mencatatnya di luar NAS sebelum kotak itu ditutup. Tanpa password itu, backup tidak bisa dibuka siapa pun. "Sambungkan backup cloud yang ada" memeriksa password (`restic cat config`) dan dipakai di NAS pengganti setelah NAS lama rusak. Repo kedua di tempat yang sama ditolak (`cloud_repo_exists`).
 - **Backup konsisten.**
   - Snapshot ZFS sementara bernama tetap (`@sapo-cloud-<tugas>`) dibuat, dibaca restic, lalu dibuang. Path yang sama setiap kali membuat restic hanya membaca file yang berubah. Snapshot dipasang (automount) di namespace sapod sebelum unit dimulai.
-  - Tag `sapo`, `job:<id>`, `share:<nama>`. Retensi `forget --keep-within <N>d --keep-last 1 --prune` per tugas (yang terbaru selalu tetap).
+  - Tag `sapo`, `job:<id>`, `share:<nama>`, host = nama host NAS.
+  - Retensi `forget --host <nama host> --group-by host,tags --keep-within <N>d --keep-daily 7 --keep-last 1 --prune`: per NAS dan tugas, paling sedikit 7 salinan harian. Pemangkasan **ditunda** bila jam NAS belum tersinkron NTP (kecuali NTP sengaja dimatikan), karena `--keep-within` dihitung dari salinan terbaru dan salinan bertanggal masa depan bisa membuat salinan asli terbuang.
   - Satu restic pada satu waktu. Jadwal harian (waktu NAS), percobaan gagal diulang paling cepat sejam kemudian.
 - **Data dulu.**
   - Backup tidak mengubah folder asal.
   - Menghapus tugas atau "melupakan" repo tidak menghapus data di cloud.
   - Shared folder dan pool yang dipakai tugas tidak bisa dihapus.
-  - Pemulihan selalu ke shared folder **baru**: dataset dibuat sapod, dan bila pemulihan gagal, dataset baru itu dibuang lagi. Pendaftaran folder lewat mekanisme klaim yang sama dengan ADR 0017.
+  - Pemulihan selalu ke shared folder **baru**: dataset dibuat sapod, dan bila pemulihan gagal, dataset baru itu dibuang lagi.
+  - **Pemilik dan ACL dari salinan dibuang** setelah pemulihan (`root:root`, tanpa ACL POSIX, tanpa setuid/setgid, tanpa mengikuti symlink, tanpa keluar dari dataset). UID di NAS lama bisa milik orang lain di NAS ini; izin lalu ditetapkan ulang dari izin shared folder. Ini juga berlaku untuk pemulihan salinan dari NAS lain (ADR 0019).
+  - ID salinan harus unik (awalan yang cocok dengan beberapa salinan ditolak). Pendaftaran folder lewat mekanisme klaim yang sama dengan ADR 0017.
   - Mengubah atau menghapus tugas, menambah atau melupakan repo, dan memulihkan butuh password admin dan tercatat di audit.
   - Backup cloud yang gagal memicu email `backup_failed` (ADR 0018). Masalah cloud hanya dianggap pulih bila daftar cloud terbaca.
 - `insecure_http` hanya untuk server S3 di jaringan lokal (misalnya MinIO). Data tetap terenkripsi restic, tetapi permintaan S3 tidak terlindungi TLS.

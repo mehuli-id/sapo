@@ -47,10 +47,10 @@ var (
 
 // CloudTools mengatur backup cloud (agent.cloud di sapo.yaml).
 type CloudTools struct {
-	Restic, SystemdRun, Systemctl string
-	StateFile, SecretsDir         string
-	CacheDir                      string
-	MaxRun                        time.Duration
+	Restic, SystemdRun, Systemctl, Timedatectl string
+	StateFile, SecretsDir                      string
+	CacheDir                                   string
+	MaxRun                                     time.Duration
 }
 
 // Cloud melayani cloud.* dan menjalankan jadwalnya.
@@ -63,6 +63,9 @@ type Cloud struct {
 	// exec menjalankan perintah lengkap (systemd-run …) dan mengembalikan
 	// stdout; diganti di test.
 	exec func(ctx context.Context, unit string, argv []string) ([]byte, error)
+	// clockOK: jam NAS bisa dipercaya untuk memangkas salinan (diganti di
+	// test).
+	clockOK func(ctx context.Context) bool
 }
 
 type cloudJobState struct {
@@ -88,6 +91,7 @@ func NewCloud(t CloudTools, b *Backups) *Cloud {
 	}
 	c := &Cloud{t: t, b: b, running: map[string]bool{}}
 	c.exec = c.systemdExec
+	c.clockOK = c.ntpOK
 	b.shares.cloud = c
 	b.shares.p.beforeDestroy = append(b.shares.p.beforeDestroy, c.refusePool)
 	return c
@@ -215,17 +219,19 @@ func newRepoPassword() string {
 	return strings.Join(parts, "-")
 }
 
-// resticMode: hak unit restic.
+// resticMode: hak unit restic. restic berjalan sebagai pengguna dinamis
+// (DynamicUser, bukan root); caps diberikan sebagai ambient capability.
 type resticMode struct {
-	caps     string   // CapabilityBoundingSet (kosong = tanpa kapabilitas)
+	caps     string   // kapabilitas (kosong = tanpa kapabilitas)
 	writable []string // ReadWritePaths tambahan selain cache
 }
 
 var (
-	modeRead    = resticMode{}
-	modeBackup  = resticMode{caps: "CAP_DAC_READ_SEARCH"}
+	modeRead   = resticMode{}
+	modeBackup = resticMode{caps: "CAP_DAC_READ_SEARCH"}
+	// Pemulihan menulis file milik pengguna lain (pemilik di-reset setelahnya).
 	modeRestore = func(target string) resticMode {
-		return resticMode{caps: "CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE CAP_FSETID CAP_DAC_READ_SEARCH", writable: []string{target}}
+		return resticMode{caps: "CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE", writable: []string{target}}
 	}
 )
 
@@ -235,27 +241,43 @@ func (c *Cloud) command(r proto.CloudRepo, mode resticMode, args ...string) (str
 	_, _ = rand.Read(raw)
 	unit := "sapo-cloud-" + hex.EncodeToString(raw)
 	creds := "/run/credentials/" + unit + ".service/"
-	rw := strings.Join(append([]string{c.t.CacheDir}, mode.writable...), " ")
+
+	// Tidak terlihat sama sekali dari unit: rahasia, data panel, socket
+	// sapod/D-Bus/systemd (jalur ke root), dan cache restic sebenarnya
+	// dipakai lewat CacheDirectory milik pengguna dinamis.
+	hidden := strings.Join([]string{c.t.SecretsDir, filepath.Dir(c.t.StateFile), "/var/lib/sapo", "/etc/sapo", "/etc/shadow", "/etc/gshadow",
+		"/run/sapo", "/run/dbus", "/run/systemd", "/var/lib/samba"}, " ")
 	argv := []string{c.t.SystemdRun,
 		"--unit=" + unit, "--description=Backup cloud Sapo", "--collect", "--quiet", "--wait", "--pipe",
 		"--property=Type=exec",
 		fmt.Sprintf("--property=RuntimeMaxSec=%d", int(c.t.MaxRun.Seconds())),
+		"--property=DynamicUser=yes", "--property=CacheDirectory=" + filepath.Base(c.t.CacheDir), "--property=CacheDirectoryMode=0700",
+		"--property=InaccessiblePaths=-" + strings.ReplaceAll(hidden, " ", " -"),
 		"--property=NoNewPrivileges=yes", "--property=ProtectSystem=strict", "--property=ProtectHome=yes",
 		"--property=PrivateTmp=yes", "--property=PrivateDevices=yes", "--property=PrivateIPC=yes",
 		"--property=ProtectKernelTunables=yes", "--property=ProtectKernelModules=yes", "--property=ProtectKernelLogs=yes",
 		"--property=ProtectControlGroups=yes", "--property=ProtectClock=yes", "--property=ProtectHostname=yes",
 		"--property=RestrictNamespaces=yes", "--property=RestrictSUIDSGID=yes", "--property=RestrictRealtime=yes",
 		"--property=LockPersonality=yes", "--property=MemoryDenyWriteExecute=yes", "--property=SystemCallArchitectures=native",
-		"--property=RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX",
+		// Tanpa socket unix: pengguna dengan CAP_DAC_OVERRIDE (pemulihan) bisa
+		// menyambung ke socket mana pun.
+		"--property=RestrictAddressFamilies=AF_INET AF_INET6",
 		"--property=CapabilityBoundingSet=" + mode.caps,
-		"--property=ReadWritePaths=" + rw,
+		"--property=AmbientCapabilities=" + mode.caps,
+		// Resolver Go murni (tanpa nss/socket lokal).
+		"--setenv=GODEBUG=netdns=go",
+		// Cache restic: CacheDirectory (milik pengguna dinamis), bukan
+		// ReadWritePaths.
 		"--property=LoadCredential=restic-pw:" + c.pwFile(r.ID),
 		"--property=LoadCredential=s3:" + c.s3File(r.ID),
 		"--setenv=AWS_SHARED_CREDENTIALS_FILE=" + creds + "s3",
 		"--setenv=RESTIC_CACHE_DIR=" + c.t.CacheDir,
 		"--setenv=HOME=" + c.t.CacheDir,
-		"--", c.t.Restic, "--repo", repoURL(r), "--password-file", creds + "restic-pw",
 	}
+	if len(mode.writable) > 0 {
+		argv = append(argv, "--property=ReadWritePaths="+strings.Join(mode.writable, " "))
+	}
+	argv = append(argv, "--", c.t.Restic, "--repo", repoURL(r), "--password-file", creds+"restic-pw")
 	if r.Region != "" {
 		argv = append(argv, "-o", "s3.region="+r.Region)
 	}
@@ -279,7 +301,9 @@ func (t *tailBuffer) Write(p []byte) (int, error) {
 func (c *Cloud) systemdExec(ctx context.Context, unit string, argv []string) ([]byte, error) {
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Env = toolEnv
-	out, errb := &tailBuffer{max: 256 << 10}, &tailBuffer{max: 8 << 10}
+	// Daftar salinan bisa besar setelah bertahun-tahun (ratusan salinan per
+	// folder): buffer cukup besar agar JSON tidak terpotong.
+	out, errb := &tailBuffer{max: 64 << 20}, &tailBuffer{max: 8 << 10}
 	cmd.Stdout, cmd.Stderr = out, errb
 	if err := cmd.Start(); err != nil {
 		return nil, err
@@ -379,7 +403,7 @@ func (c *Cloud) RepoAddOp() Handler {
 		if err := os.MkdirAll(c.t.SecretsDir, 0o700); err != nil {
 			return nil, err
 		}
-		if err := os.MkdirAll(c.t.CacheDir, 0o700); err != nil {
+		if err := os.Chmod(c.t.SecretsDir, 0o700); err != nil {
 			return nil, err
 		}
 		s3 := "[default]\naws_access_key_id = " + p.AccessKey + "\naws_secret_access_key = " + p.SecretKey + "\n"
@@ -702,8 +726,14 @@ func (c *Cloud) backup(ctx context.Context, j proto.CloudJob, r proto.CloudRepo)
 			added, total = m.Added, m.Total
 		}
 	}
-	if _, err := c.restic(ctx, r, modeRead, "forget", "--tag", "job:"+j.ID, "--group-by", "tags",
-		"--keep-within", strconv.Itoa(j.KeepDays)+"d", "--keep-last", "1", "--prune"); err != nil {
+	// Pemangkasan hanya bila jam NAS bisa dipercaya: --keep-within dihitung
+	// dari salinan terbaru, jadi salinan bertanggal masa depan (jam yang
+	// salah) bisa membuat semua salinan asli terbuang. Per NAS (host) dan
+	// tugas; minimal 7 salinan harian selalu tersisa.
+	if !c.clockOK(ctx) {
+		c.b.shares.p.logWarn("jam NAS belum tersinkron; pemangkasan backup cloud ditunda", "tugas", j.ID)
+	} else if _, err := c.restic(ctx, r, modeRead, "forget", "--host", host, "--tag", "job:"+j.ID, "--group-by", "host,tags",
+		"--keep-within", strconv.Itoa(j.KeepDays)+"d", "--keep-daily", "7", "--keep-last", "1", "--prune"); err != nil {
 		// Backup sudah aman; pemangkasan dicoba lagi di backup berikutnya.
 		c.b.shares.p.logWarn("pemangkasan backup cloud gagal", "tugas", j.ID, "err", err)
 	}
@@ -783,11 +813,16 @@ func (c *Cloud) RestoreOp() Handler {
 		if err != nil {
 			return nil, err
 		}
-		i := slices.IndexFunc(snaps, func(s proto.CloudSnapshot) bool { return s.ID == p.Snapshot || strings.HasPrefix(s.ID, p.Snapshot) })
-		if i < 0 {
-			return nil, &OpError{Code: proto.ErrNotFound, Message: "salinan tidak ditemukan di repo"}
+		var match []proto.CloudSnapshot
+		for _, s := range snaps {
+			if strings.HasPrefix(s.ID, p.Snapshot) {
+				match = append(match, s)
+			}
 		}
-		snap := snaps[i]
+		if len(match) != 1 {
+			return nil, &OpError{Code: proto.ErrNotFound, Message: "salinan tidak ditemukan di repo (atau ID tidak unik)"}
+		}
+		snap := match[0]
 		target := p.Pool + "/" + p.Name
 		mp := filepath.Join(c.b.shares.t.MountBase, p.Pool, p.Name)
 		repo := *r
@@ -804,7 +839,31 @@ func (c *Cloud) RestoreOp() Handler {
 				_, _ = c.b.zfs(context.WithoutCancel(ctx), []string{"destroy", "-r"}, target)
 				return resticError(err)
 			}
+			// UID dan ACL dari repo bisa milik orang lain di NAS ini.
+			if err := c.b.resetFn(mp); err != nil {
+				_, _ = c.b.zfs(context.WithoutCancel(ctx), []string{"destroy", "-r"}, target)
+				return err
+			}
 			return nil
 		})
 	}
+}
+
+// ntpOK: jam tersinkron NTP, atau NTP sengaja dimatikan admin (jam diatur
+// manual).
+func (c *Cloud) ntpOK(ctx context.Context) bool {
+	if c.t.Timedatectl == "" {
+		return false
+	}
+	res, err := runTool(ctx, 20*time.Second, c.t.Timedatectl, []string{"show"})
+	if err != nil || res.ExitCode != 0 {
+		return false
+	}
+	props := map[string]string{}
+	for _, l := range strings.Split(string(res.Stdout), "\n") {
+		if k, v, ok := strings.Cut(l, "="); ok {
+			props[k] = strings.TrimSpace(v)
+		}
+	}
+	return props["NTPSynchronized"] == "yes" || props["NTP"] == "no"
 }

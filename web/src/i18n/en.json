@@ -1033,7 +1033,7 @@
     "deleteRepoHelp": "This NAS forgets the storage and its keys. Data in the cloud is NOT deleted and can be connected again with its encryption password.",
     "repoDeleted": "Storage forgotten. Data in the cloud remains.",
     "noSnapshots": "No Sapo copies in this storage yet.",
-    "restoreHelp": "The copy is restored as a new shared folder on the chosen pool. If its original folder exists on this NAS, permissions are taken from it; otherwise grant permissions in Shared Folders afterwards. Copies from an old NAS are listed here too.",
+    "restoreHelp": "The copy is restored as a new shared folder on the chosen pool, without user permissions: file owners and old permissions from the copy are discarded (users on the old NAS may differ). Grant permissions in Shared Folders afterwards. Copies from an old NAS are listed here too.",
     "pool": "To pool",
     "schedule": "Every day at {hour}:00, copies from the last {days} days are kept",
     "sizes": "{added} newly uploaded of {total}",

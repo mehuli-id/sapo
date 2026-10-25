@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 
 	"github.com/mehuli-id/sapo/internal/proto"
@@ -83,6 +84,8 @@ func testCloud(t *testing.T) (*Cloud, *fakeRestic, *fakeZFS, *Backups) {
 		StateFile: filepath.Join(dir, "cloud.json"), SecretsDir: filepath.Join(dir, "rahasia"), CacheDir: filepath.Join(dir, "cache")}, b)
 	fr := &fakeRestic{fail: map[string]error{}, out: map[string]string{}}
 	c.exec = fr.exec
+	c.clockOK = func(context.Context) bool { return true }
+	b.resetFn = func(string) error { return nil }
 	// Snapshot ZFS sementara harus bisa "dibuka".
 	b.shares.t.MountBase = filepath.Join(dir, "srv")
 	_ = os.MkdirAll(filepath.Join(dir, "srv/tank/keluarga/.zfs/snapshot", cloudSnapName("keluarga-cabcdef")), 0o755)
@@ -130,7 +133,7 @@ func TestCloudRepoAndBackup(t *testing.T) {
 	all := strings.Join(init, " ")
 	for _, want := range []string{"--property=ProtectSystem=strict", "--property=NoNewPrivileges=yes", "--property=CapabilityBoundingSet= ",
 		"--property=LoadCredential=restic-pw:" + c.pwFile(added.ID), "--repo s3:https://s3.us-west-002.backblazeb2.com/sapo-rumah/nas1",
-		"-o s3.region=us-west-002", "--property=RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX"} {
+		"-o s3.region=us-west-002", "--property=RestrictAddressFamilies=AF_INET AF_INET6 ", "--property=DynamicUser=yes", "-/run/dbus", "-/run/sapo"} {
 		if !strings.Contains(all+" ", want) {
 			t.Errorf("init tidak memuat %q:\n%s", want, all)
 		}
@@ -174,13 +177,13 @@ func TestCloudRepoAndBackup(t *testing.T) {
 		t.Fatal(err)
 	}
 	bk := strings.Join(fr.find("backup"), " ")
-	for _, want := range []string{"--property=CapabilityBoundingSet=CAP_DAC_READ_SEARCH", "--tag job:" + id, "--tag share:keluarga",
+	for _, want := range []string{"--property=CapabilityBoundingSet=CAP_DAC_READ_SEARCH", "--property=AmbientCapabilities=CAP_DAC_READ_SEARCH", "--tag job:" + id, "--tag share:keluarga",
 		"-- " + filepath.Join(b.shares.t.MountBase, "tank/keluarga/.zfs/snapshot", cloudSnapName(id))} {
 		if !strings.Contains(bk, want) {
 			t.Errorf("backup tidak memuat %q:\n%s", want, bk)
 		}
 	}
-	if fg := strings.Join(fr.find("forget"), " "); !strings.Contains(fg, "--keep-within 30d --keep-last 1 --prune") || !strings.Contains(fg, "--tag job:"+id) {
+	if fg := strings.Join(fr.find("forget"), " "); !strings.Contains(fg, "--group-by host,tags --keep-within 30d --keep-daily 7 --keep-last 1 --prune") || !strings.Contains(fg, "--tag job:"+id) {
 		t.Fatalf("forget: %s", fg)
 	}
 	if _, ok := f.snaps["tank/keluarga@"+cloudSnapName(id)]; ok {
@@ -240,7 +243,7 @@ func TestCloudRestore(t *testing.T) {
 	b.runMu.Lock()
 	b.runMu.Unlock()
 	rs := strings.Join(fr.find("restore"), " ")
-	for _, want := range []string{"--property=ReadWritePaths=" + c.t.CacheDir + " " + mp, "CAP_CHOWN",
+	for _, want := range []string{"--property=ReadWritePaths=" + mp + " ", "--property=AmbientCapabilities=CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE",
 		"restore 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef:/srv/sapo/tank/keluarga/.zfs/snapshot/sapo-cloud-x --target " + mp} {
 		if !strings.Contains(rs, want) {
 			t.Errorf("restore tidak memuat %q:\n%s", want, rs)
@@ -262,5 +265,50 @@ func TestCloudRestore(t *testing.T) {
 	b.runMu.Unlock()
 	if !strings.Contains(strings.Join(f.calls, "\n"), "destroy -r tank/pulih2") {
 		t.Fatalf("folder gagal harus dibuang:\n%s", strings.Join(f.calls, "\n"))
+	}
+}
+
+// Jam belum tersinkron: backup tetap jalan, pemangkasan ditunda.
+func TestCloudSkipsPruneWithoutClock(t *testing.T) {
+	c, fr, _, b := testCloud(t)
+	c.clockOK = func(context.Context) bool { return false }
+	res, err := cloudCall(t, c.RepoAddOp(), proto.CloudRepoParams{Name: "x", Endpoint: "s3.example.com", Bucket: "abc", AccessKey: "a", SecretKey: "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := res.(proto.CloudRepoAdded).ID
+	res, err = cloudCall(t, c.JobSetOp(), proto.CloudJob{Repo: repo, Pool: "tank", Share: "keluarga", Hour: 3, KeepDays: 30})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := res.(map[string]string)["id"]
+	_ = os.MkdirAll(filepath.Join(b.shares.t.MountBase, "tank/keluarga/.zfs/snapshot", cloudSnapName(id)), 0o755)
+	if err := c.execute(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	if fr.find("backup") == nil || fr.find("forget") != nil {
+		t.Fatal("backup harus jalan, pemangkasan harus ditunda")
+	}
+}
+
+func TestResetOwnership(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("butuh root (chown)")
+	}
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, "a/b"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "a/b/f"), []byte("x"), 0o4755)
+	_ = os.Lchown(filepath.Join(dir, "a/b/f"), 1001, 1001)
+	_ = os.Symlink("/etc/shadow", filepath.Join(dir, "a/l"))
+	if err := resetOwnership(dir); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := os.Lstat(filepath.Join(dir, "a/b/f"))
+	if sys, ok := st.Sys().(*syscall.Stat_t); !ok || sys.Uid != 0 || sys.Gid != 0 || st.Mode()&os.ModeSetuid != 0 {
+		t.Fatalf("pemilik/mode tidak di-reset: %v %+v", st.Mode(), st.Sys())
+	}
+	// Symlink tidak diikuti: /etc/shadow tidak tersentuh.
+	if lt, _ := os.Lstat(filepath.Join(dir, "a/l")); lt.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("symlink harus tetap symlink")
 	}
 }
