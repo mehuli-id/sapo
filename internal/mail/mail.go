@@ -183,7 +183,10 @@ func Send(ctx context.Context, s Server, m Message) error {
 	if err := w.Close(); err != nil {
 		return fmt.Errorf("email ditolak server: %w", err)
 	}
-	return c.Quit()
+	// Email sudah diterima server: galat saat QUIT tidak boleh membuatnya
+	// dianggap gagal (dan dikirim ulang).
+	_ = c.Quit()
+	return nil
 }
 
 func hasMech(list, m string) bool {

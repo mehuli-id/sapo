@@ -352,7 +352,7 @@
     "email_invalid": "Alamat email tidak valid.",
     "email_recipients": "Isi 1 sampai {max} alamat penerima.",
     "smtp_invalid": "Pengaturan server SMTP tidak valid.",
-    "smtp_password_required": "Isi password SMTP: server atau username berubah.",
+    "smtp_password_required": "Isi password SMTP: server, port, keamanan, atau username berubah.",
     "notify_failed": "Email gagal dikirim. Periksa pengaturan server di bawah ini.",
     "notify_not_configured": "Notifikasi email belum diatur."
   },

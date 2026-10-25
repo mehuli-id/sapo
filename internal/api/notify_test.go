@@ -186,3 +186,61 @@ func TestNotifyWizardLoads(t *testing.T) {
 		t.Fatalf("wizard = %+v, %v", wz, err)
 	}
 }
+
+// Disk yang tidur, tidak terbaca, atau hilang tidak dianggap pulih; pool
+// penuh pulih dengan histeresis; sapod lama bukan "pulih".
+func TestNotifyNoFalseResolve(t *testing.T) {
+	agent := shareAgent()
+	agent.results[proto.OpStoragePools] = proto.PoolsResult{Available: true, Pools: []proto.Pool{{Name: "tank", Health: "ONLINE", CapacityPct: 91}}}
+	agent.results[proto.OpStorageDisks] = []proto.Disk{{Name: "sda", Serial: "S1", Model: "Disk"}}
+	agent.results[proto.OpStorageSMART] = proto.SMART{Device: "sda", Status: proto.SMARTWarning}
+	agent.results[proto.OpBackupsList] = proto.BackupsListResult{Jobs: []proto.BackupStatus{{BackupJob: proto.BackupJob{ID: "kel-usb", Share: "kel", DestPool: "usb"}, LastError: "gagal"}}}
+	h := newHarness(t, agent)
+	shipped, err := config.Load("../../config/sapo.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.s.cfg.API.Notify.Messages = shipped.API.Notify.Messages
+	h.s.cfg.API.Notify.SMARTMinutes = 0
+	h.runSetup()
+	sent := &sentMail{}
+	h.s.notify.send = sent.send
+	if rec := h.do(http.MethodPost, "/api/v1/notify", map[string]any{"enabled": true, "host": "127.0.0.1", "port": 2525, "security": "none", "from": "sapo@uji.local", "to": []string{"admin@uji.local"}, "admin_password": adminPassword}); rec.Code != http.StatusOK {
+		t.Fatalf("simpan: %d %s", rec.Code, rec.Body)
+	}
+	ctx := context.Background()
+	h.s.notifyCheck(ctx)
+	if sent.count() != 1 || !strings.Contains(sent.last().Subject, "3 masalah") {
+		t.Fatalf("awal: %d %+v", sent.count(), sent.last())
+	}
+	set := func(op string, v any) {
+		agent.mu.Lock()
+		agent.results[op] = v
+		agent.mu.Unlock()
+	}
+	// Disk tidur, kapasitas turun ke 89 (masih di atas ambang−2), sapod lama
+	// tanpa backups.list: tidak ada yang pulih.
+	set(proto.OpStorageSMART, proto.SMART{Device: "sda", Status: proto.SMARTStandby})
+	set(proto.OpStoragePools, proto.PoolsResult{Available: true, Pools: []proto.Pool{{Name: "tank", Health: "ONLINE", CapacityPct: 89}}})
+	agent.setErrs(map[string]error{proto.OpBackupsList: &proto.Error{Code: proto.ErrUnknownOp, Message: "x"}})
+	h.s.notifyCheck(ctx)
+	if sent.count() != 1 {
+		t.Fatalf("tidak boleh ada email pulih palsu: %+v", sent.last())
+	}
+	// Disk hilang dari daftar: tetap tidak pulih.
+	set(proto.OpStorageDisks, []proto.Disk{})
+	h.s.notifyCheck(ctx)
+	if sent.count() != 1 {
+		t.Fatalf("disk hilang bukan pulih: %+v", sent.last())
+	}
+	// Disk kembali sehat, kapasitas di bawah ambang−2, backup terbaca: pulih.
+	agent.setErrs(nil)
+	set(proto.OpStorageDisks, []proto.Disk{{Name: "sda", Serial: "S1", Model: "Disk"}})
+	set(proto.OpStorageSMART, proto.SMART{Device: "sda", Status: proto.SMARTPassed})
+	set(proto.OpStoragePools, proto.PoolsResult{Available: true, Pools: []proto.Pool{{Name: "tank", Health: "ONLINE", CapacityPct: 87}}})
+	set(proto.OpBackupsList, proto.BackupsListResult{Jobs: []proto.BackupStatus{}})
+	h.s.notifyCheck(ctx)
+	if sent.count() != 2 || strings.Count(sent.last().Body, "\n- ") != 3 {
+		t.Fatalf("pulih: %d\n%s", sent.count(), sent.last().Body)
+	}
+}
