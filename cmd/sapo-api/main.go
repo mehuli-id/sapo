@@ -106,6 +106,8 @@ func main() {
 	}
 	// Akun sistem dan shared folder disamakan dengan data panel.
 	go handler.SyncLoop(ctx)
+	// Notifikasi email (ADR 0018).
+	go handler.NotifyLoop(ctx)
 	newServer := func(addr string) *http.Server {
 		return &http.Server{
 			Addr:              addr,

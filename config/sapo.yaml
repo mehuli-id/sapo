@@ -343,6 +343,44 @@ api:
       weekly: 4
       hour: 2
 
+  # Notifikasi email (ADR 0018). Server SMTP dan penerima diatur admin di
+  # Control Panel. Kondisi diperiksa setiap check_minutes (SMART setiap
+  # smart_minutes, disk yang tidur tidak dibangunkan). Satu email berisi semua
+  # masalah baru; email "pulih" dikirim saat masalah hilang. Bahasa email
+  # mengikuti bahasa yang dipilih saat setup awal.
+  notify:
+    check_minutes: 5
+    smart_minutes: 60
+    max_recipients: 5
+    default_capacity_pct: 90
+    messages:
+      id:
+        subject_alert: "[{host}] {n} masalah perlu perhatian"
+        subject_resolved: "[{host}] Masalah sudah pulih"
+        subject_test: "[{host}] Email uji dari Sapo"
+        intro: "NAS {host} menemukan masalah berikut:"
+        resolved_header: "Sudah pulih:"
+        test: "Email ini dikirim dari Control Panel Sapo di NAS {host}. Bila Anda menerimanya, notifikasi email sudah bekerja."
+        footer: "Buka panel Sapo di jaringan Anda untuk detail. Email ini dikirim otomatis; matikan di Control Panel → Notifikasi."
+        events:
+          pool_health: "Pool {name} tidak sehat ({detail}). Periksa disknya di Storage Manager dan ganti disk yang rusak."
+          pool_full: "Pool {name} sudah terisi {detail}%. Hapus data yang tidak perlu atau tambah kapasitas."
+          disk_smart: "Disk {name} melaporkan masalah kesehatan (SMART: {detail}). Pastikan backup berjalan dan siapkan disk pengganti."
+          backup_failed: "Backup {name} gagal: {detail}"
+      en:
+        subject_alert: "[{host}] {n} issues need attention"
+        subject_resolved: "[{host}] Issues resolved"
+        subject_test: "[{host}] Test email from Sapo"
+        intro: "NAS {host} found the following issues:"
+        resolved_header: "Resolved:"
+        test: "This email was sent from the Sapo Control Panel on NAS {host}. If you received it, email notifications work."
+        footer: "Open the Sapo panel on your network for details. This email was sent automatically; turn it off in Control Panel → Notifications."
+        events:
+          pool_health: "Pool {name} is not healthy ({detail}). Check its disks in Storage Manager and replace the failed disk."
+          pool_full: "Pool {name} is {detail}% full. Delete data you don't need or add capacity."
+          disk_smart: "Disk {name} reports a health problem (SMART: {detail}). Make sure backups run and prepare a replacement disk."
+          backup_failed: "Backup {name} failed: {detail}"
+
 auth:
   password_min_length: 10
   username_pattern: "^[a-z][a-z0-9._-]{2,31}$"

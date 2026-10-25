@@ -348,7 +348,13 @@
     "install_not_live": "The installer is only available while Sapo runs from the ISO.",
     "install_disk_small": "The disk is too small for the Sapo system.",
     "backup_diverged": "The copy on the destination no longer matches the original folder. Delete the task with its copies, then create it again.",
-    "backup_same_pool": "The destination pool must be different from the folder's pool."
+    "backup_same_pool": "The destination pool must be different from the folder's pool.",
+    "email_invalid": "The email address is not valid.",
+    "email_recipients": "Enter 1 to {max} recipient addresses.",
+    "smtp_invalid": "The SMTP server settings are not valid.",
+    "smtp_password_required": "Enter the SMTP password: the server or username changed.",
+    "notify_failed": "The email could not be sent. Check the server settings below.",
+    "notify_not_configured": "Email notifications are not set up yet."
   },
   "pool": {
     "title": "Storage pools",
@@ -935,5 +941,32 @@
     "deleted": "Backup task deleted.",
     "restores": "Recent restores",
     "restoreRow": "{name} (started {when})"
+  },
+  "notify": {
+    "title": "Email notifications",
+    "help": "Sapo sends email when a pool or disk has problems, a pool is nearly full, or a backup fails, and again when the problem is resolved. The same problem isn't sent repeatedly.",
+    "setup": "Set up email notifications",
+    "change": "Change server",
+    "saved": "Notification settings saved. Send a test email to make sure it works.",
+    "test": "Send test email",
+    "testSent": "Test email sent to {to}. Check the inbox (and spam folder).",
+    "to": "Sent to {to}",
+    "lastSent": "Last email sent: {when}",
+    "lastError": "Sending failed ({when})",
+    "active": "Ongoing problems",
+    "enabled": "Send email notifications",
+    "eventsTitle": "Send email for",
+    "capacity": "Pool counts as nearly full from (%)",
+    "security": {
+      "starttls": "STARTTLS",
+      "tls": "TLS",
+      "none": "no encryption"
+    },
+    "events": {
+      "pool_health": "Pool not healthy (disk failed or missing)",
+      "pool_full": "Pool nearly full",
+      "disk_smart": "Disk reports a problem (SMART)",
+      "backup_failed": "Backup failed"
+    }
   }
 }

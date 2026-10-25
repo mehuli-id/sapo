@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Control Panel (hanya admin): pintasan ke aplikasi pengaturan, layanan
-// berbagi file (SMB, NFS), serta waktu dan tanggal.
+// berbagi file (SMB, NFS), notifikasi email, serta waktu dan tanggal.
 import { computed, onMounted, onUnmounted, reactive, ref } from "vue"
 import { useI18n } from "vue-i18n"
 import { CircleCheck, Clock, LoaderCircle, PackageCheck, Share2, TriangleAlert } from "@lucide/vue"
@@ -8,6 +8,7 @@ import { findApp, iconFor } from "@/apps/registry"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import NotifyPanel from "@/components/NotifyPanel.vue"
 import { useLauncher } from "@/composables/useLauncher"
 import { api, ApiError } from "@/lib/api"
 
@@ -208,6 +209,9 @@ onMounted(async () => {
       <p v-if="svcMsg" class="flex items-center gap-2 text-sm"><CircleCheck class="size-4 text-emerald-600" />{{ svcMsg }}</p>
       <p v-if="svcError" class="flex items-center gap-2 text-sm text-destructive" role="alert"><TriangleAlert class="size-4" />{{ svcError }}</p>
     </section>
+
+    <!-- Notifikasi email -->
+    <NotifyPanel />
 
     <!-- Pembaruan sistem -->
     <section class="space-y-3 rounded-xl border p-4">

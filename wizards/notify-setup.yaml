@@ -1,0 +1,124 @@
+# Wizard notifikasi email (ADR 0018): server SMTP, akun, dan penerima.
+# sapo-api memeriksa ulang semuanya; password SMTP tidak pernah ditampilkan
+# lagi di panel.
+id: notify-setup
+action: notify.setup
+admin_only: true
+title:
+  id: Atur notifikasi email
+  en: Set up email notifications
+finish_label:
+  id: Simpan
+  en: Save
+
+steps:
+  - id: server
+    title: { id: Server email (SMTP), en: Mail server (SMTP) }
+    description:
+      id: >-
+        Sapo mengirim email saat pool atau disk bermasalah, pool hampir
+        penuh, atau backup gagal. Isi server SMTP dari penyedia email Anda.
+      en: >-
+        Sapo sends email when a pool or disk has problems, a pool is nearly
+        full, or a backup fails. Enter the SMTP server of your email
+        provider.
+    help:
+      id: >-
+        Contoh Gmail: server smtp.gmail.com, port 587, STARTTLS, lalu login
+        dengan password aplikasi Google (bukan password akun). Penyedia lain
+        mencantumkan pengaturan SMTP di halaman bantuannya.
+      en: >-
+        Gmail example: server smtp.gmail.com, port 587, STARTTLS, then sign
+        in with a Google app password (not your account password). Other
+        providers list their SMTP settings in their help pages.
+    fields:
+      - key: host
+        type: text
+        required: true
+        autocomplete: "off"
+        pattern: "^[A-Za-z0-9][A-Za-z0-9.:\\[\\]-]{0,252}$"
+        label: { id: Server SMTP, en: SMTP server }
+        placeholder: { id: smtp.gmail.com, en: smtp.gmail.com }
+      - key: port
+        type: text
+        required: true
+        default: "587"
+        pattern: "^[0-9]{1,5}$"
+        autocomplete: "off"
+        label: { id: Port, en: Port }
+      - key: security
+        type: choice
+        required: true
+        default: starttls
+        label: { id: Keamanan koneksi, en: Connection security }
+        options:
+          - value: starttls
+            label: { id: STARTTLS (biasanya port 587), en: STARTTLS (usually port 587) }
+          - value: tls
+            label: { id: TLS langsung (biasanya port 465), en: Direct TLS (usually port 465) }
+          - value: none
+            label: { id: Tanpa enkripsi, en: No encryption }
+            help:
+              id: Hanya untuk relay email di jaringan lokal. Login tidak bisa dipakai tanpa enkripsi.
+              en: Only for a mail relay on your local network. Sign-in can't be used without encryption.
+
+  - id: account
+    title: { id: Login ke server, en: Server sign-in }
+    description:
+      id: >-
+        Biasanya alamat email dan password aplikasi dari penyedia email.
+        Kosongkan bila server tidak meminta login.
+      en: >-
+        Usually your email address and an app password from your email
+        provider. Leave empty if the server doesn't need sign-in.
+    help:
+      id: >-
+        Password ini disimpan di NAS hanya untuk mengirim email, tidak
+        pernah ditampilkan lagi, dan hanya dikirim ke server di langkah
+        sebelumnya. Sebaiknya pakai password aplikasi khusus Sapo.
+      en: >-
+        This password is stored on the NAS only for sending email, is never
+        shown again, and is only sent to the server from the previous step.
+        Preferably use an app password just for Sapo.
+    fields:
+      - key: username
+        type: text
+        autocomplete: "off"
+        label: { id: Username, en: Username }
+      - key: password
+        type: current-password
+        secret: true
+        autocomplete: "off"
+        label: { id: Password SMTP, en: SMTP password }
+
+  - id: recipients
+    title: { id: Pengirim dan penerima, en: Sender and recipients }
+    fields:
+      - key: from
+        type: text
+        required: true
+        autocomplete: "off"
+        pattern: "^[^\\s@<>,;]+@[^\\s@<>,;]+$"
+        label: { id: Alamat pengirim, en: Sender address }
+        help:
+          id: Banyak penyedia hanya mengizinkan alamat akun login sebagai pengirim.
+          en: Many providers only allow the sign-in account's address as sender.
+      - key: to
+        type: text
+        required: true
+        autocomplete: "off"
+        label: { id: Kirim ke (pisahkan dengan koma), en: Send to (separate with commas) }
+
+  - id: summary
+    type: review
+    title: { id: Ringkasan, en: Summary }
+    description:
+      id: Setelah disimpan, kirim email uji dari Control Panel untuk memastikan semuanya bekerja.
+      en: After saving, send a test email from Control Panel to make sure everything works.
+    fields:
+      - key: admin_password
+        type: current-password
+        required: true
+        secret: true
+        autocomplete: current-password
+        label: { id: Password Anda, en: Your password }
