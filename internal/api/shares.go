@@ -487,6 +487,10 @@ func (s *Server) normalizeNFS(in *ShareNFS) (*ShareNFS, bool) {
 		if a.Zone() != "" || a.Is4In6() || !slices.ContainsFunc(nfsNetworks, func(n netip.Prefix) bool { return n.Bits() <= p.Bits() && n.Contains(a) }) {
 			return nil, false
 		}
+		// Jaringan container App Center tidak pernah menjadi klien NFS.
+		if apps, err := netip.ParsePrefix(s.cfg.Agent.Apps.Subnet); err == nil && apps.Overlaps(p) {
+			return nil, false
+		}
 		if !slices.Contains(out.Clients, p.String()) {
 			out.Clients = append(out.Clients, p.String())
 		}

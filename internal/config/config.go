@@ -112,6 +112,8 @@ type Apps struct {
 	IDMax int `yaml:"id_max"`
 	// Port yang tidak boleh dipakai aplikasi (panel, SMB, NFS, …).
 	ReservedPorts []int `yaml:"reserved_ports"`
+	// Subnet jaringan container: ditolak Samba dan NFS.
+	Subnet string `yaml:"subnet"`
 }
 
 func (a Apps) validate() error {
@@ -122,6 +124,9 @@ func (a Apps) validate() error {
 	}
 	if a.IDMin < 1000 || a.IDMax > 59999 || a.IDMin >= a.IDMax {
 		return errors.New("agent.apps: id_min/id_max tidak valid")
+	}
+	if p, err := netip.ParsePrefix(a.Subnet); err != nil || p.Masked() != p {
+		return errors.New("agent.apps.subnet harus jaringan CIDR, misalnya 10.88.0.0/16")
 	}
 	return nil
 }
@@ -397,7 +402,7 @@ func Default() Config {
 			Stats: Stats{IntervalSeconds: 2, History: 300, IdleStopSeconds: 60},
 			Time:  Time{Timedatectl: "/usr/bin/timedatectl"},
 			Apps: Apps{CatalogDir: "/usr/share/sapo/apps", Podman: "/usr/bin/podman", QuadletDir: "/etc/containers/systemd",
-				StateFile: "/var/lib/sapod/apps.json", IDMin: 30000, IDMax: 30999,
+				StateFile: "/var/lib/sapod/apps.json", IDMin: 30000, IDMax: 30999, Subnet: "10.88.0.0/16",
 				ReservedPorts: []int{22, 53, 80, 111, 139, 443, 445, 2049, 5000, 5001, 5353, 20048}},
 			Updates: Updates{AptGet: "/usr/bin/apt-get", Dpkg: "/usr/bin/dpkg", SystemdRun: "/usr/bin/systemd-run", Unit: "sapo-updates.service",
 				LogFile: "/var/lib/sapod/updates.log", ResultFile: "/var/lib/sapod/updates-result.json", CheckTimeoutSeconds: 240,
@@ -449,7 +454,7 @@ func Default() Config {
 				"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", // LAN IPv4
 				"fc00::/7", "fe80::/10", // LAN IPv6
 			},
-			DeniedNetworks: []string{"172.17.0.0/16"}, // bridge Docker bawaan
+			DeniedNetworks: []string{"172.17.0.0/16", "10.88.0.0/16"}, // bridge Docker dan Podman bawaan
 			AuditMaxMB:     10,
 			TLS: TLS{
 				Enabled:         true,

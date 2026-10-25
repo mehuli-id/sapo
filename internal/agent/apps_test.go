@@ -35,10 +35,23 @@ memory_mb: 128
 `), 0o644)
 	// Entri tidak valid (image tanpa digest, opsi berbahaya diabaikan) dilewati.
 	_ = os.WriteFile(filepath.Join(cat, "jahat.yaml"), []byte("id: jahat\nimage: docker.io/x/y:latest\nweb_port: 80\ndefault_port: 8000\ndata_path: /data\nmemory_mb: 64\n"), 0o644)
+	// useradd/groupadd menambah baris ke passwd/group tiruan; userdel/
+	// groupdel membuangnya.
+	passwd, group := s.t.PasswdFile, s.t.GroupFile
+	add := `for a; do last="$a"; done; id=""; prev=""; for a; do case "$prev" in --uid|--gid) id="$a" ;; esac; prev="$a"; done; `
 	for _, name := range []string{"useradd", "userdel", "groupadd", "groupdel", "systemctl"} {
 		script := "#!/bin/sh\nprintf '%s %s\\n' " + name + " \"$*\" >> '" + log + "'\n"
-		if name == "systemctl" {
+		switch name {
+		case "systemctl":
 			script += "case \"$1\" in is-active) echo active ;; esac\n"
+		case "useradd":
+			script += add + "echo \"$last:x:$id:$id::/nonexistent:/usr/sbin/nologin\" >> '" + passwd + "'\n"
+		case "groupadd":
+			script += add + "echo \"$last:x:$id:\" >> '" + group + "'\n"
+		case "userdel":
+			script += "for a; do last=\"$a\"; done; grep -v \"^$last:\" '" + passwd + "' > '" + passwd + ".n'; mv '" + passwd + ".n' '" + passwd + "'\n"
+		case "groupdel":
+			script += "for a; do last=\"$a\"; done; grep -v \"^$last:\" '" + group + "' > '" + group + ".n'; mv '" + group + ".n' '" + group + "'\n"
 		}
 		_ = os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755)
 	}
@@ -48,6 +61,7 @@ memory_mb: 128
 		Groupadd: filepath.Join(dir, "groupadd"), Groupdel: filepath.Join(dir, "groupdel"),
 		IDMin: 30000, IDMax: 30999, ReservedPorts: []int{5000, 5001, 445}, MountBase: root, Timeout: 5 * time.Second,
 	}, s)
+	a.portFree = func(int) bool { return true }
 	var chowned []string
 	a.chown = func(p string, uid, gid int) error {
 		chowned = append(chowned, p)
@@ -165,5 +179,37 @@ func TestAppsRefusesTakenAccount(t *testing.T) {
 	var oe *OpError
 	if _, err := appCall(t, a.InstallOp(), proto.AppInstallParams{ID: "homer", Pool: "tank", Port: 8090}); !errors.As(err, &oe) || oe.Code != proto.ErrConflict {
 		t.Fatalf("UID dipakai: %v", err)
+	}
+}
+
+func TestAppsGuards(t *testing.T) {
+	a, _, log := testApps(t)
+	if _, err := appCall(t, a.InstallOp(), proto.AppInstallParams{ID: "homer", Pool: "tank", Port: 8090}); err != nil {
+		t.Fatal(err)
+	}
+	// Pool berisi data aplikasi tidak boleh dihapus.
+	var oe *OpError
+	if err := a.shares.p.beforeDestroy[0](context.Background(), "tank"); !errors.As(err, &oe) || oe.Code != proto.ErrConflict {
+		t.Fatalf("hapus pool berisi data aplikasi: %v", err)
+	}
+	// Katalog membawa digest baru: file Quadlet ditulis ulang dan aplikasi
+	// di-restart saat sapod menyala.
+	cat := filepath.Join(a.t.CatalogDir, "homer.yaml")
+	b, _ := os.ReadFile(cat)
+	_ = os.WriteFile(cat, []byte(strings.Replace(string(b), testDigest, "sha256:"+strings.Repeat("a", 64), 1)), 0o644)
+	a.Reconcile(context.Background())
+	if q, _ := os.ReadFile(a.quadletPath("homer")); !strings.Contains(string(q), strings.Repeat("a", 64)) {
+		t.Fatalf("quadlet tidak diperbarui:\n%s", q)
+	}
+	if calls, _ := os.ReadFile(log); !strings.Contains(string(calls), "systemctl try-restart -- sapo-app-homer.service") {
+		t.Fatal("aplikasi yang berubah harus di-restart")
+	}
+	// Port yang sudah dipakai program lain.
+	a.portFree = func(int) bool { return false }
+	if _, err := appCall(t, a.RemoveOp(), proto.AppRemoveParams{ID: "homer"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := appCall(t, a.InstallOp(), proto.AppInstallParams{ID: "homer", Pool: "tank", Port: 8090}); !errors.As(err, &oe) || oe.Code != proto.ErrConflict {
+		t.Fatalf("port dipakai: %v", err)
 	}
 }

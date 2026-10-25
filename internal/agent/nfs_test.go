@@ -165,7 +165,7 @@ func TestPoolDestroyUnexportsShares(t *testing.T) {
 	if _, err := applyShares(t, s, proto.ShareSpec{Name: "data", Pool: "tank", Write: []string{"user:budi"}, NFS: nfs}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.p.beforeDestroy(context.Background(), "tank"); err != nil {
+	if err := s.p.beforeDestroy[0](context.Background(), "tank"); err != nil {
 		t.Fatal(err)
 	}
 	if b, _ := os.ReadFile(s.t.ExportsFile); strings.Contains(string(b), filepath.Join(root, "tank")) {
@@ -202,5 +202,21 @@ func inOrder(t *testing.T, calls string, want ...string) {
 			t.Fatalf("panggilan tanpa %q (berurutan):\n%s", w, calls)
 		}
 		rest = rest[i+len(w):]
+	}
+}
+
+func TestSharesDenyAppNetwork(t *testing.T) {
+	s, _, _ := testNFS(t, "0")
+	s.t.DenyNetworks = []string{"10.88.0.0/16"}
+	var oe *OpError
+	nfs := &proto.NFSExport{Clients: []string{"10.0.0.0/8"}, User: "budi"}
+	if _, err := applyShares(t, s, proto.ShareSpec{Name: "data", Pool: "tank", Write: []string{"user:budi"}, NFS: nfs}); !errors.As(err, &oe) || oe.Code != proto.ErrInvalidParams {
+		t.Fatalf("klien NFS yang mencakup jaringan aplikasi: %v", err)
+	}
+	if _, err := applyShares(t, s, proto.ShareSpec{Name: "data", Pool: "tank", Write: []string{"user:budi"}}); err != nil {
+		t.Fatal(err)
+	}
+	if conf, _ := os.ReadFile(s.t.SMBConf); !strings.Contains(string(conf), "hosts deny = 10.88.0.0/16") {
+		t.Fatalf("smb.conf:\n%s", conf)
 	}
 }

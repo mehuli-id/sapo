@@ -39,6 +39,9 @@ type ShareTools struct {
 	// NFS: file ekspor yang ditulis utuh oleh sapod, exportfs, dan layanan
 	// server NFS (dijalankan hanya selama ada folder yang diekspor).
 	Exportfs, Systemctl, ExportsFile, NFSService string
+	// DenyNetworks: jaringan yang tidak pernah boleh memakai SMB atau NFS
+	// (jaringan container App Center).
+	DenyNetworks []string
 	// SMBService: layanan Samba, dimatikan bila SMB dimatikan di Control
 	// Panel.
 	SMBService string
@@ -84,7 +87,7 @@ type aclJob struct {
 func NewShares(p *Pools, t ShareTools) *Shares {
 	s := &Shares{p: p, t: t, chown: os.Lchown, isMount: isMountPoint, aclTree: applyACLTree, jobs: map[string]*aclJob{}}
 	// Ekspor NFS folder di pool dicabut sebelum pool dihapus.
-	p.beforeDestroy = s.unexportPool
+	p.beforeDestroy = append(p.beforeDestroy, s.unexportPool)
 	return s
 }
 
@@ -155,6 +158,9 @@ func (s *Shares) checkSpecs(specs []proto.ShareSpec) error {
 			if _, _, ok := principal(p); !ok {
 				return invalid("izin tidak valid di " + sp.Name + ": " + clip(p))
 			}
+		}
+		if err := s.checkNFSDeny(sp); err != nil {
+			return invalid(err.Error())
 		}
 		if err := checkNFSSpec(sp); err != nil {
 			return invalid(err.Error())
@@ -573,6 +579,7 @@ func (s *Shares) renderSMBConf(shares []shareConf) []byte {
 		{"disable spoolss", "yes"},
 		{"unix password sync", "no"},
 		{"invalid users", "root"},
+		{"hosts deny", strings.Join(s.t.DenyNetworks, " ")},
 		{"logging", "file"},
 		{"log file", "/var/log/samba/log.%m"},
 		{"max log size", "1000"},

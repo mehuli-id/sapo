@@ -198,7 +198,7 @@ func TestShareNFS(t *testing.T) {
 		"nama host":      map[string]any{"user": "ani", "clients": []string{"pc-ani.lan"}},
 		"alamat publik":  map[string]any{"user": "ani", "clients": []string{"8.8.8.8"}},
 		"tanpa klien":    map[string]any{"user": "ani", "clients": []string{}},
-		"pengguna asing": map[string]any{"user": "hantu", "clients": []string{"10.0.0.0/8"}},
+		"pengguna asing": map[string]any{"user": "hantu", "clients": []string{"10.1.0.0/16"}},
 	} {
 		rec := h.do(http.MethodPost, "/api/v1/shares/keluarga", map[string]any{"nfs": nfs, "admin_password": adminPassword})
 		if errCode(rec) != "nfs_invalid" {
@@ -206,7 +206,7 @@ func TestShareNFS(t *testing.T) {
 		}
 	}
 	// Mengubah ekspor NFS butuh password admin.
-	nfsBudi := map[string]any{"user": "budi", "clients": []string{"10.0.0.0/8"}}
+	nfsBudi := map[string]any{"user": "budi", "clients": []string{"10.1.0.0/16"}}
 	if rec := h.do(http.MethodPost, "/api/v1/shares/keluarga", map[string]any{"nfs": nfsBudi}); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("ubah NFS tanpa password: %d", rec.Code)
 	}
@@ -234,7 +234,7 @@ func TestShareNFS(t *testing.T) {
 		t.Fatalf("NFS pengguna terhapus harus mati: %+v", sh.NFS)
 	}
 	// null mematikan ekspor.
-	h.do(http.MethodPost, "/api/v1/shares/keluarga", map[string]any{"nfs": map[string]any{"user": "ani", "clients": []string{"10.0.0.0/8"}}, "admin_password": adminPassword})
+	h.do(http.MethodPost, "/api/v1/shares/keluarga", map[string]any{"nfs": map[string]any{"user": "ani", "clients": []string{"10.1.0.0/16"}}, "admin_password": adminPassword})
 	h.do(http.MethodPost, "/api/v1/shares/keluarga", map[string]any{"nfs": nil, "admin_password": adminPassword})
 	if sh, _ := h.s.shares.get("keluarga"); sh.NFS != nil {
 		t.Fatalf("NFS harus mati: %+v", sh.NFS)

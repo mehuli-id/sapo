@@ -122,6 +122,9 @@ agent:
     state_file: /var/lib/sapod/apps.json
     id_min: 30000
     id_max: 30999
+    # Jaringan container (bawaan Podman). Ditolak panel (api.denied_networks),
+    # Samba (hosts deny), dan tidak bisa menjadi klien NFS.
+    subnet: 10.88.0.0/16
     reserved_ports: [22, 53, 80, 111, 139, 443, 445, 2049, 5000, 5001, 5353, 20048]
 
   # Pembaruan sistem (ADR 0011): apt-get upgrade (tanpa menghapus paket)
@@ -202,6 +205,9 @@ api:
   # Selalu ditolak, misalnya jaringan container Docker.
   denied_networks:
     - 172.17.0.0/16
+    # Jaringan container App Center (Podman): aplikasi tidak dianggap
+    # komputer LAN (juga ditolak Samba dan NFS, agent.apps.subnet).
+    - 10.88.0.0/16
   # Nama host tambahan untuk membuka panel (alamat IP, localhost, nama host
   # mesin, dan <nama host>.local selalu diizinkan). Mencegah DNS rebinding.
   # Huruf kecil, tanpa port, misalnya [nas.kantor.lan].
