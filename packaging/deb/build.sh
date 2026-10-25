@@ -59,6 +59,8 @@ cp -r "$ROOT/web/dist" "$PKG$PREFIX_SHARE/web"
 cp -r "$ROOT/features" "$PKG$PREFIX_SHARE/features"
 rm -f "$PKG$PREFIX_SHARE/features/README.md"
 cp -r "$ROOT/wizards" "$PKG$PREFIX_SHARE/wizards"
+# Katalog App Center (ADR 0012).
+cp -r "$ROOT/apps" "$PKG$PREFIX_SHARE/apps"
 cp "$ROOT/branding.yaml" "$PKG$PREFIX_SHARE/branding.yaml"
 # Nilai bawaan ikut diperbarui paket; /etc/sapo/sapo.yaml (perubahan admin
 # atau panel) dibuat oleh postinst dan tidak pernah ditimpa upgrade.

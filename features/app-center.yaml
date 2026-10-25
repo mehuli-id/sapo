@@ -1,9 +1,10 @@
 id: app-center
 name: { id: App Center, en: App Center }
 group: apps
-# Docker dari mirror repo Sapo (versi dikunci & diuji).
-packages: [docker-ce, docker-compose-plugin]
-services: [docker]
+# Podman dari Debian (ADR 0012): tanpa daemon root; aplikasi dijalankan
+# systemd lewat Quadlet.
+packages: [podman]
+services: []
 requires: [core]
 # always: selalu terpasang · setup: dipilih saat instalasi · optional: diaktifkan dari panel
 activation: optional

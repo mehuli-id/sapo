@@ -667,5 +667,33 @@
     "installFailed": "The last update installation failed (code {code}). See the log.",
     "updateLog": "Installation log",
     "installInterrupted": "The last update installation stopped before finishing. Install again: the interrupted installation is resumed first."
+  },
+  "appCenter": {
+    "intro": "Additional apps from the Sapo catalog. Each app runs separately with its own account, without special privileges, and keeps its data on the pool you choose. Apps can’t open shared folders yet.",
+    "install": "Install",
+    "open": "Open",
+    "start": "Start",
+    "stop": "Stop",
+    "remove": "Remove app",
+    "pool": "Pool for app data",
+    "port": "Port on the NAS",
+    "installHelp": "The app image is downloaded the first time it starts (may take a few minutes). Memory limit {memory} MB.",
+    "onPool": "data on pool {pool}, port {port}",
+    "dataKept": "Removed, data kept",
+    "status": {
+      "running": "Running",
+      "starting": "Starting (downloading image)…",
+      "stopped": "Stopped",
+      "failed": "Failed to run"
+    },
+    "installed": "{name} installed.",
+    "removed": "{name} removed; its data was kept.",
+    "removedData": "{name} and its data were removed.",
+    "started": "{name} started.",
+    "stopped": "{name} stopped.",
+    "removeHelp": "{name} is stopped and removed. Its data is kept, so you can install it again at any time.",
+    "removeData": "Also delete the app’s data",
+    "removeDataHelp": "The app’s data ({id}) will be deleted permanently and can’t be recovered.",
+    "typeId": "Type {id} to confirm"
   }
 }

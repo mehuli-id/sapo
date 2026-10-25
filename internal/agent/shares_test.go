@@ -40,15 +40,25 @@ func testShares(t *testing.T, testparmExit string) (*Shares, string, string) {
 	// Operand terakhir adalah nama dataset (setelah "--").
 	zfs := write("zfs", `for a; do ds="$a"; done
 key=$(echo "$ds" | tr / _)
-prop() { cat "`+props+`/$key.$1" 2>/dev/null || echo -; }
+prop() { cat "`+props+`/$key.$(echo "$1" | tr : _)" 2>/dev/null || echo -; }
 case "$1" in
 get)
   if [ "$ds" = tank ]; then printf 'mountpoint\t%s\n' "`+root+`/tank"; exit 0; fi
   [ -d "`+root+`/$ds" ] || { echo "cannot open '$ds': dataset does not exist" >&2; exit 1; }
-  printf 'type\tfilesystem\nmountpoint\t%s\nmounted\tyes\nsapo:share\t%s\nsapo:acl\t%s\n' "`+root+`/$ds" "$(prop share)" "$(prop acl)" ;;
+  for p in $(echo "$6" | tr , ' '); do
+    case "$p" in
+    type) v=filesystem ;;
+    mountpoint) v="`+root+`/$ds" ;;
+    mounted) v=yes ;;
+    *) v=$(prop "$p") ;;
+    esac
+    printf '%s\t%s\n' "$p" "$v"
+  done ;;
 list) [ -d "`+root+`/$ds" ] && echo "$ds" ;;
-create) mkdir -p "`+root+`/$ds"; echo "${3#sapo:share=}" > "`+props+`/$key.share" ;;
-set) echo "${2#sapo:acl=}" > "`+props+`/$key.acl" ;;
+create)
+  mkdir -p "`+root+`/$ds"; shift
+  while [ "$1" = -o ]; do echo "${2#*=}" > "`+props+`/$key.$(echo "${2%%=*}" | tr : _)"; shift 2; done ;;
+set) echo "${2#*=}" > "`+props+`/$key.$(echo "${2%%=*}" | tr : _)" ;;
 destroy) rm -rf "`+root+`/$ds"; rm -f "`+props+`/$key".* ;;
 esac
 `)

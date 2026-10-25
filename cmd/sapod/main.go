@@ -126,6 +126,19 @@ func main() {
 		Timeout: time.Duration(fc.TimeoutSeconds) * time.Second, DeleteTimeout: time.Duration(fc.DeleteTimeoutSeconds) * time.Second,
 		IDMin: ac.IDMin, IDMax: ac.IDMax,
 	}, shares, accounts.Managed)
+	apc := cfg.Agent.Apps
+	apps := agent.NewApps(agent.AppsTools{
+		CatalogDir: apc.CatalogDir, Podman: apc.Podman, QuadletDir: apc.QuadletDir, StateFile: apc.StateFile,
+		Systemctl: shc.Systemctl, Useradd: ac.Useradd, Userdel: ac.Userdel, Groupadd: ac.Groupadd, Groupdel: ac.Groupdel,
+		IDMin: apc.IDMin, IDMax: apc.IDMax, ReservedPorts: apc.ReservedPorts, MountBase: pc.MountBase,
+		Timeout: time.Minute, Log: log,
+	}, shares)
+	reg.Register(proto.OpAppsCatalog, apps.CatalogOp())
+	reg.Register(proto.OpAppsList, apps.ListOp())
+	reg.Register(proto.OpAppsInstall, apps.InstallOp())
+	reg.Register(proto.OpAppsStart, apps.StartOp())
+	reg.Register(proto.OpAppsStop, apps.StopOp())
+	reg.Register(proto.OpAppsRemove, apps.RemoveOp())
 	uc := cfg.Agent.Updates
 	updates := agent.NewUpdates(agent.UpdatesTools{
 		AptGet: uc.AptGet, Dpkg: uc.Dpkg, SystemdRun: uc.SystemdRun, Systemctl: cfg.Agent.Shares.Systemctl, Self: self,
