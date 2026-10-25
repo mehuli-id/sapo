@@ -47,10 +47,10 @@ var (
 
 // CloudTools mengatur backup cloud (agent.cloud di sapo.yaml).
 type CloudTools struct {
-	Restic, SystemdRun, Systemctl, Timedatectl string
-	StateFile, SecretsDir                      string
-	CacheDir                                   string
-	MaxRun                                     time.Duration
+	Restic, SystemdRun, Systemctl, Timedatectl, Journalctl string
+	StateFile, SecretsDir                                  string
+	CacheDir                                               string
+	MaxRun                                                 time.Duration
 }
 
 // Cloud melayani cloud.* dan menjalankan jadwalnya.
@@ -242,11 +242,12 @@ func (c *Cloud) command(r proto.CloudRepo, mode resticMode, args ...string) (str
 	unit := "sapo-cloud-" + hex.EncodeToString(raw)
 	creds := "/run/credentials/" + unit + ".service/"
 
-	// Tidak terlihat sama sekali dari unit: rahasia, data panel, socket
-	// sapod/D-Bus/systemd (jalur ke root), dan cache restic sebenarnya
-	// dipakai lewat CacheDirectory milik pengguna dinamis.
+	// Tidak terlihat sama sekali dari unit: rahasia, data panel, dan socket
+	// sapod/D-Bus. /run/systemd tidak bisa disembunyikan (systemd memakai
+	// /run/systemd/inaccessible untuk InaccessiblePaths); socket systemd
+	// tetap tak terjangkau karena unit tanpa AF_UNIX.
 	hidden := strings.Join([]string{c.t.SecretsDir, filepath.Dir(c.t.StateFile), "/var/lib/sapo", "/etc/sapo", "/etc/shadow", "/etc/gshadow",
-		"/run/sapo", "/run/dbus", "/run/systemd", "/var/lib/samba"}, " ")
+		"/run/sapo", "/run/dbus", "/var/lib/samba"}, " ")
 	argv := []string{c.t.SystemdRun,
 		"--unit=" + unit, "--description=Backup cloud Sapo", "--collect", "--quiet", "--wait", "--pipe",
 		"--property=Type=exec",
@@ -317,6 +318,15 @@ func (c *Cloud) systemdExec(ctx context.Context, unit string, argv []string) ([]
 	if err != nil {
 		if msg := lastLine(errb.b); msg != "" {
 			return out.b, errors.New(msg)
+		}
+		// Unit gagal sebelum restic berjalan (misalnya sandbox): alasan dari
+		// journal unit.
+		if c.t.Journalctl != "" {
+			if res, jerr := runTool(context.Background(), 15*time.Second, c.t.Journalctl, []string{"-u", unit + ".service", "-n", "5", "-o", "cat", "--no-pager"}); jerr == nil {
+				if msg := lastLine(res.Stdout); msg != "" {
+					return out.b, fmt.Errorf("restic: %w (%s)", err, msg)
+				}
+			}
 		}
 		return out.b, fmt.Errorf("restic: %w", err)
 	}

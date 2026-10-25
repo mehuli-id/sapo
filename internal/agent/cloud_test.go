@@ -138,6 +138,9 @@ func TestCloudRepoAndBackup(t *testing.T) {
 			t.Errorf("init tidak memuat %q:\n%s", want, all)
 		}
 	}
+	if strings.Contains(all, "-/run/systemd") {
+		t.Fatal("/run/systemd tidak boleh disembunyikan (dipakai systemd sendiri untuk InaccessiblePaths)")
+	}
 	if strings.Contains(all, "rahasia/sekali") || strings.Contains(all, added.Password) || strings.Contains(all, "KUNCI-AKSES") {
 		t.Fatalf("rahasia bocor ke argumen/lingkungan unit:\n%s", all)
 	}
