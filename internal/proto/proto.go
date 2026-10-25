@@ -113,6 +113,10 @@ const (
 	OpAppsStop    = "apps.stop"
 	OpAppsRemove  = "apps.remove"
 
+	// Installer ke disk (ADR 0016).
+	OpInstallStatus = "install.status"
+	OpInstallStart  = "install.start"
+
 	// Penyimpanan eksternal (USB, ADR 0015).
 	OpExternalList    = "external.list"
 	OpExternalMount   = "external.mount"
@@ -1003,4 +1007,31 @@ type ExternalListParams struct {
 // ExternalParams menunjuk folder eksternal.
 type ExternalParams struct {
 	Name string `json:"name"`
+}
+
+// InstallStartParams memasang Sapo ke disk sistem (disk dihapus).
+type InstallStartParams struct {
+	Disk DiskRef `json:"disk"`
+}
+
+// InstallStatus: Live = berjalan dari ISO (installer tersedia).
+type InstallStatus struct {
+	Live    bool        `json:"live"`
+	Running bool        `json:"running"`
+	Last    *InstallRun `json:"last,omitempty"`
+	Log     []string    `json:"log"`
+	// MinDiskBytes: ukuran disk sistem paling kecil.
+	MinDiskBytes uint64 `json:"min_disk_bytes"`
+}
+
+// InstallRun adalah hasil pemasangan terakhir. Step: langkah yang sedang
+// atau terakhir dijalankan.
+type InstallRun struct {
+	Disk        string    `json:"disk"`
+	StartedAt   time.Time `json:"started_at"`
+	FinishedAt  time.Time `json:"finished_at,omitempty"`
+	OK          bool      `json:"ok"`
+	Step        string    `json:"step"`
+	Error       string    `json:"error,omitempty"`
+	Interrupted bool      `json:"interrupted,omitempty"`
 }

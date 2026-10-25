@@ -263,6 +263,8 @@ func New(o Options) (*Server, error) {
 	s.mux.Handle("GET /api/v1/account/app-passwords", s.requireAuth(http.HandlerFunc(s.handleAppPasswords)))
 	s.mux.Handle("POST /api/v1/account/app-passwords", s.requireAuth(http.HandlerFunc(s.handleAppPasswordCreate)))
 	s.mux.Handle("POST /api/v1/account/app-passwords/{id}/delete", s.requireAuth(http.HandlerFunc(s.handleAppPasswordDelete)))
+	s.mux.Handle("GET /api/v1/system/install", s.requireAdmin(s.proxyRead(proto.OpInstallStatus)))
+	s.mux.Handle("POST /api/v1/system/install", s.requireAdmin(http.HandlerFunc(s.handleInstall)))
 	s.mux.Handle("GET /api/v1/storage/external", s.requireAdmin(http.HandlerFunc(s.handleExternalList)))
 	s.mux.Handle("POST /api/v1/storage/external/mount", s.requireAdmin(http.HandlerFunc(s.handleExternalMount)))
 	s.mux.Handle("POST /api/v1/storage/external/{name}/unmount", s.requireAdmin(http.HandlerFunc(s.handleExternalUnmount)))

@@ -224,3 +224,28 @@ func writeRaw(w http.ResponseWriter, raw json.RawMessage) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(raw)
 }
+
+// --- Installer ke disk (ADR 0016) ---------------------------------------------
+
+// handleInstall memasang Sapo ke disk sistem: menghapus seluruh disk itu,
+// jadi nama disk diketik ulang, password admin, dan log audit.
+func (s *Server) handleInstall(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Disk        proto.DiskRef `json:"disk"`
+		ConfirmName string        `json:"confirm_name"`
+		Password    string        `json:"password"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if req.Disk.Name == "" || req.ConfirmName != req.Disk.Name {
+		writeErrorDetail(w, http.StatusBadRequest, "confirm_mismatch", "nama disk yang diketik ulang tidak sama", map[string]any{"field": "confirm_name"})
+		return
+	}
+	user, ok := s.reauth(w, r, req.Password)
+	if !ok {
+		return
+	}
+	detail := map[string]string{"disk": auditText(req.Disk.Name), "serial": auditText(req.Disk.Serial), "erase": strconv.FormatBool(req.Disk.Erase)}
+	s.destructive(w, r, user, "system.install", detail, proto.OpInstallStart, proto.InstallStartParams{Disk: req.Disk}, nil)
+}

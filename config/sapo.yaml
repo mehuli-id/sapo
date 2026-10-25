@@ -159,6 +159,68 @@ agent:
     restore_label: "dipulihkan {time}"
     replaced_label: "sebelum dipulihkan {time}"
 
+  # Installer ke disk (ADR 0016): hanya saat berjalan dari ISO (live_marker
+  # ada). Sistem disalin dari squashfs ISO ke disk sistem (partisi BIOS boot,
+  # EFI, root ext4), lalu pengaturan sesi live di copy_paths disalin, berkas
+  # khusus ISO di remove_paths dibuang, akun dan paket live dihapus, dan
+  # GRUB dipasang untuk BIOS dan UEFI.
+  install:
+    live_marker: /run/live/medium
+    squashfs_root: /run/live/rootfs/filesystem.squashfs
+    min_disk_gb: 16
+    unit: sapo-install.service
+    params_file: /var/lib/sapod/install-params.json
+    log_file: /var/lib/sapod/install.log
+    result_file: /var/lib/sapod/install-result.json
+    timeout_seconds: 3600
+    target: /mnt/sapo-install
+    kernel_cmdline: "quiet"
+    programs:
+      wipefs: /usr/sbin/wipefs
+      sgdisk: /usr/sbin/sgdisk
+      mkfs_vfat: /usr/sbin/mkfs.vfat
+      mkfs_ext4: /usr/sbin/mkfs.ext4
+      mount: /usr/bin/mount
+      umount: /usr/bin/umount
+      cp: /usr/bin/cp
+      chroot: /usr/sbin/chroot
+      blkid: /usr/sbin/blkid
+      udevadm: /usr/bin/udevadm
+      sync: /usr/bin/sync
+    copy_paths:
+      - /etc/passwd
+      - /etc/group
+      - /etc/shadow
+      - /etc/gshadow
+      - /etc/subuid
+      - /etc/subgid
+      - /etc/sapo
+      - /etc/hostname
+      - /etc/hosts
+      - /etc/network/interfaces
+      - /etc/samba/smb.conf
+      - /etc/exports.d
+      - /etc/containers/systemd
+      - /etc/zfs/zpool.cache
+      # hostid sama: ZFS mengimpor pool tanpa menganggapnya milik sistem lain.
+      - /etc/hostid
+      - /etc/localtime
+      - /etc/timezone
+      - /var/lib/sapo
+      - /var/lib/sapod
+      - /var/lib/samba
+    remove_paths:
+      - /etc/issue.d/sapo-iso.issue
+      - /etc/systemd/journald.conf.d/sapo-iso-console.conf
+      - /etc/systemd/system/var-lib-containers.mount
+      - /etc/systemd/system/local-fs.target.wants/var-lib-containers.mount
+      - /etc/systemd/system/sapo-app-.service.d/sapo-iso-console.conf
+      - /var/lib/sapod/install-params.json
+      - /var/lib/sapod/install.log
+      - /var/lib/sapod/install-result.json
+    remove_users: [user]
+    purge_packages: [live-config-systemd, live-config, live-boot, live-boot-initramfs-tools, user-setup]
+
   # Penyimpanan eksternal (USB, ADR 0015): drive exFAT/FAT/NTFS dipasang
   # di <mount_base>/<nama> (di luar mount_base pool), konfigurasinya diingat
   # per UUID di state_file.

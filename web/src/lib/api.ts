@@ -337,6 +337,15 @@ export interface AppPassword {
   last_used_at?: string
 }
 
+// Installer ke disk (ADR 0016).
+export interface InstallStatus {
+  live: boolean
+  running: boolean
+  last?: { disk: string; started_at: string; finished_at?: string; ok: boolean; step: string; error?: string; interrupted?: boolean }
+  log: string[]
+  min_disk_bytes: number
+}
+
 // Penyimpanan eksternal (USB, ADR 0015).
 export interface ExternalVolume {
   uuid: string
@@ -643,6 +652,8 @@ export const api = {
   setTime: (timezone: string, ntp: boolean) => post<{ ok: boolean }>("/api/v1/settings/time", { timezone, ntp }),
   fileShares: () => get<FileShare[]>("/api/v1/files/shares"),
   drive: () => get<DriveInfo>("/api/v1/drive"),
+  installStatus: () => get<InstallStatus>("/api/v1/system/install"),
+  installSystem: (req: { disk: DiskRef; confirm_name: string; password: string }) => post<{ ok: boolean }>("/api/v1/system/install", req),
   externalVolumes: () => get<ExternalVolume[]>("/api/v1/storage/external"),
   mountExternal: (req: { uuid: string; name: string; read_only: boolean; group: string; smb: boolean; admin_password: string }) =>
     post<{ ok: boolean }>("/api/v1/storage/external/mount", req),
@@ -779,6 +790,11 @@ export const wizardActions: Record<string, (values: Record<string, string>, ctx:
       password: v.password ?? "",
       allow_usb: v.allow_usb === "yes",
     }),
+  "system.install": (v, ctx) => {
+    const [disk] = diskRefs(splitList(v.disk), ctx, v.erase_ok === "yes")
+    if (!disk) throw new ApiError(409, "disk_changed", "")
+    return api.installSystem({ disk, confirm_name: v.confirm_name ?? "", password: v.password ?? "" })
+  },
   "storage.pool_replace": (v, ctx) => {
     const [disk] = diskRefs(splitList(v.disk), ctx, v.erase_ok === "yes")
     if (!ctx.pool || !ctx.vdev?.guid || !disk) throw new ApiError(409, "disk_changed", "")

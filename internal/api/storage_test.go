@@ -197,3 +197,28 @@ func TestPoolReplaceAndDestroyWizardsLoad(t *testing.T) {
 		}
 	}
 }
+
+func TestInstallAPI(t *testing.T) {
+	if wz, err := LoadWizard("../../wizards", "install"); err != nil || wz.Action != "system.install" || !wz.AdminOnly {
+		t.Fatalf("wizard: %+v %v", wz, err)
+	}
+	agent := &fakeAgent{results: map[string]any{proto.OpInstallStart: map[string]bool{"ok": true}, proto.OpInstallStatus: proto.InstallStatus{Live: true}}}
+	h := newHarness(t, agent)
+	h.runSetup()
+	disk := proto.DiskRef{Name: "vdd", Serial: "S4", SizeBytes: 32 << 30, Usage: proto.DiskFree}
+	if rec := h.do(http.MethodPost, "/api/v1/system/install", map[string]any{"disk": disk, "confirm_name": "vdx", "password": adminPassword}); errCode(rec) != "confirm_mismatch" {
+		t.Fatalf("nama salah: %d %s", rec.Code, rec.Body)
+	}
+	if rec := h.do(http.MethodPost, "/api/v1/system/install", map[string]any{"disk": disk, "confirm_name": "vdd", "password": "salah-sekali"}); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("password salah: %d", rec.Code)
+	}
+	if rec := h.do(http.MethodPost, "/api/v1/system/install", map[string]any{"disk": disk, "confirm_name": "vdd", "password": adminPassword}); rec.Code != http.StatusOK {
+		t.Fatalf("pasang: %d %s", rec.Code, rec.Body)
+	}
+	if p, _ := agent.param(proto.OpInstallStart).(proto.InstallStartParams); p.Disk != disk {
+		t.Fatalf("install.start = %+v", p)
+	}
+	if rec := h.do(http.MethodGet, "/api/v1/system/install", nil); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"live":true`) {
+		t.Fatalf("status: %d %s", rec.Code, rec.Body)
+	}
+}

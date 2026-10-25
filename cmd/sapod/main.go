@@ -30,6 +30,10 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "apt-run" {
 		os.Exit(agent.AptRunMain(os.Args[2:]))
 	}
+	// Pemasangan ke disk (dijalankan systemd-run oleh sapod sendiri).
+	if len(os.Args) > 1 && os.Args[1] == "install-run" {
+		os.Exit(agent.InstallRunMain(os.Args[2:]))
+	}
 	cfgPath := flag.String("config", config.DefaultPath, "lokasi sapo.yaml milik admin")
 	defaultsPath := flag.String("defaults", "", "lokasi nilai bawaan paket (misalnya "+config.DefaultsPath+")")
 	socket := flag.String("socket", "", "timpa agent.socket (untuk pengembangan)")
@@ -161,6 +165,19 @@ func main() {
 		CheckTimeout:   time.Duration(uc.CheckTimeoutSeconds) * time.Second,
 		InstallTimeout: time.Duration(uc.InstallTimeoutSeconds) * time.Second,
 	})
+	ic := cfg.Agent.Install
+	pg := ic.Programs
+	install := agent.NewInstall(agent.InstallTools{
+		LiveMarker: ic.LiveMarker, SquashfsRoot: ic.SquashfsRoot, MinDiskBytes: uint64(ic.MinDiskGB) * 1e9,
+		SystemdRun: uc.SystemdRun, Systemctl: cfg.Agent.Shares.Systemctl, Self: self, Unit: ic.Unit,
+		ParamsFile: ic.ParamsFile, LogFile: ic.LogFile, ResultFile: ic.ResultFile,
+		Timeout: time.Duration(ic.TimeoutSeconds) * time.Second, Target: ic.Target, KernelCmdline: ic.KernelCmdline,
+		Programs: agent.InstallPrograms{Wipefs: pg["wipefs"], Sgdisk: pg["sgdisk"], MkfsVfat: pg["mkfs_vfat"], MkfsExt4: pg["mkfs_ext4"],
+			Mount: pg["mount"], Umount: pg["umount"], Cp: pg["cp"], Chroot: pg["chroot"], Blkid: pg["blkid"], Udevadm: pg["udevadm"], Sync: pg["sync"]},
+		CopyPaths: ic.CopyPaths, RemovePaths: ic.RemovePaths, RemoveUsers: ic.RemoveUsers, PurgePackages: ic.PurgePackages,
+	}, storage, pools)
+	reg.Register(proto.OpInstallStatus, install.StatusOp())
+	reg.Register(proto.OpInstallStart, install.StartOp())
 	reg.Register(proto.OpUpdatesCheck, updates.CheckOp())
 	reg.Register(proto.OpUpdatesInstall, updates.InstallOp())
 	reg.Register(proto.OpUpdatesStatus, updates.StatusOp())

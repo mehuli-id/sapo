@@ -340,7 +340,9 @@
     "restore_too_large": "Terlalu besar untuk dipulihkan sekaligus. Pulihkan folder di dalamnya satu per satu, atau pakai Previous Versions di Windows.",
     "disk_usb": "Disk USB tidak dipakai untuk pool kecuali diizinkan di langkah pemilihan disk.",
     "disk_identity": "Disk punya nomor seri atau WWN yang sama dengan disk lain, jadi tidak bisa dipastikan. Sambungkan disk itu langsung (SATA) atau pakai enclosure lain.",
-    "external_unsupported": "Drive ini tidak bisa dipasang: {message}"
+    "external_unsupported": "Drive ini tidak bisa dipasang: {message}",
+    "install_not_live": "Installer hanya tersedia saat Sapo berjalan dari ISO.",
+    "install_disk_small": "Disk terlalu kecil untuk sistem Sapo."
   },
   "pool": {
     "title": "Pool penyimpanan",
@@ -880,5 +882,15 @@
       "duplicate_uuid": "Ada drive lain dengan UUID yang sama (hasil kloning): cabut salah satunya dulu.",
       "system_partition": "Partisi sistem (EFI, Microsoft Reserved, atau Recovery): tidak dipasang di sini."
     }
+  },
+  "install": {
+    "title": "Sapo berjalan dari RAM",
+    "help": "Semua perubahan hilang saat NAS dimatikan. Pasang Sapo ke satu disk sistem agar NAS menyala dari disk itu; akun, pengaturan, dan pool dari sesi ini ikut terbawa.",
+    "start": "Pasang ke disk",
+    "started": "Pemasangan ke {name} dimulai.",
+    "running": "Sedang memasang ({step})… Jangan matikan NAS.",
+    "done": "Sapo terpasang di {disk}. Cabut media ISO (atau ubah urutan boot), lalu nyalakan ulang NAS.",
+    "failed": "Pemasangan gagal di langkah {step}: {error}. Data di pool tidak tersentuh; perbaiki lalu coba lagi.",
+    "interrupted": "terputus sebelum selesai"
   }
 }

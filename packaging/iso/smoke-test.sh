@@ -39,6 +39,9 @@ disks=()
 for i in 1 2 3; do
   disks+=(-drive "file=$WORK/disk$i.img,if=none,format=raw,id=d$i" -device "virtio-blk-pci,drive=d$i,serial=SAPOUJI$i")
 done
+# Disk keempat: disk sistem untuk uji installer (ADR 0016).
+truncate -s 20G "$WORK/disk4.img"
+disks+=(-drive "file=$WORK/disk4.img,if=none,format=raw,id=d4" -device "virtio-blk-pci,drive=d4,serial=SAPOUJI4")
 # Dua drive USB exFAT di satu "dock" murah: nomor seri yang sama untuk
 # keduanya (penyimpanan eksternal, ADR 0015).
 truncate -s 256M "$WORK/usb1.img" "$WORK/usb2.img"
@@ -762,6 +765,35 @@ else
   echo "pembaruan: pemasangan dilewati di uji asap (daftar besar atau menyentuh kernel/ZFS/Sapo): $pkgs" | cut -c1-300
 fi
 
+# --- Installer ke disk (ADR 0016) ---------------------------------------------------
+# Pool dan shared folder "tetap" dibuat dulu (pool uji sudah dihapus di atas),
+# lalu Sapo dipasang ke SAPOUJI4. Di akhir uji, VM dinyalakan ulang dari disk
+# itu tanpa ISO.
+disks_json="$(api GET /api/v1/storage/disks)"
+res="$(api POST /api/v1/storage/pools "{\"name\":\"tetap\",\"layout\":\"single\",\"disks\":$(refs "('SAPOUJI1',True)"),\"confirm_name\":\"tetap\",\"password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "pool tetap: $res"
+res="$(api POST /api/v1/shares "{\"name\":\"tetap\",\"pool\":\"tetap\",\"permissions\":{\"user:budi\":\"write\"},\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "folder tetap: $res"
+echo "tersimpan di disk" > "$WORK/tetap.txt"
+out="$(smbclient //127.0.0.1/tetap -p "$SMB_PORT" -m SMB3 -U "budi%$UPASS" -c "put $WORK/tetap.txt catatan.txt" 2>&1 || true)"
+[[ "$out" != *NT_STATUS* ]] || fail "tulis ke folder tetap: $out"
+res="$(api GET /api/v1/system/install)"
+json 'assert v["live"] and not v["running"], v' <<<"$res" || fail "installer harus tersedia di ISO: $res"
+sysref="$(json "
+d=[x for x in v if x['serial']=='SAPOUJI4'][0]
+import json as j; print(j.dumps(dict(name=d['name'],serial=d['serial'],wwn=d['wwn'],size_bytes=d['size_bytes'],usage=d['usage'],erase=d['usage']!='free')))" <<<"$disks_json")"
+sysdisk="$(json 'print(v["name"])' <<<"$sysref")"
+res="$(api POST /api/v1/system/install "{\"disk\":$sysref,\"confirm_name\":\"$sysdisk\",\"password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "mulai pasang ke disk: $res"
+start=$SECONDS
+for _ in $(seq 1 300); do
+  st="$(api GET /api/v1/system/install)"
+  json 'import sys; sys.exit(0 if not v["running"] and (v.get("last") or {}).get("finished_at") else 1)' <<<"$st" 2>/dev/null && break
+  sleep 4
+done
+json 'assert v["last"]["ok"], v' <<<"$st" || fail "pemasangan ke disk: $st"
+echo "installer: Sapo terpasang di $sysdisk dalam $((SECONDS - start)) detik"
+
 # --- Menu darurat di konsol (port serial) ----------------------------------------
 # console_chat POLA KIRIM [POLA KIRIM ...]: tunggu POLA (regex) di keluaran
 # serial lalu kirim teks (\n = Enter). Mencetak grup pertama dari pola
@@ -810,4 +842,48 @@ start=$SECONDS
 wait_panel 120 || fail "panel tidak kembali setelah reset jaringan"
 echo "menu darurat: jaringan di-reset (DHCP), panel kembali dalam $((SECONDS - start)) detik"
 JAR="$old_jar"
+
+# --- Boot dari disk terpasang (tanpa ISO) -------------------------------------------
+# Pengaturan yang tersalin adalah keadaan saat pemasangan (sebelum reset
+# password admin di menu darurat).
+kill "$qemu" 2>/dev/null || true
+wait "$qemu" 2>/dev/null || true
+disks2=()
+for i in 1 2 3; do
+  disks2+=(-drive "file=$WORK/disk$i.img,if=none,format=raw,id=d$i" -device "virtio-blk-pci,drive=d$i,serial=SAPOUJI$i")
+done
+disks2+=(-drive "file=$WORK/disk4.img,if=none,format=raw,id=d4" -device "virtio-blk-pci,drive=d4,serial=SAPOUJI4,bootindex=0")
+qemu-system-x86_64 "${accel[@]}" -m "$VM_RAM_MB" -smp 2 "${disks2[@]}" \
+  -nic "user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:$PORT-:5000,hostfwd=tcp:127.0.0.1:$TLS_PORT-:5001,hostfwd=tcp:127.0.0.1:$SMB_PORT-:445" \
+  -display none \
+  -chardev "socket,id=ser1,path=$WORK/serial2.sock,server=on,wait=off,logfile=$LOG.disk" -serial chardev:ser1 &
+qemu=$!
+deadline=$((SECONDS + TIMEOUT_S))
+until curl -kfsS --max-time 5 "$HTTPS/api/v1/health" 2>/dev/null | grep -q '"agent":true'; do
+  kill -0 "$qemu" 2>/dev/null || fail "QEMU (boot dari disk) berhenti sebelum panel siap; lihat $LOG.disk"
+  (( SECONDS <= deadline )) || fail "panel dari disk terpasang tidak siap dalam ${TIMEOUT_S} detik; lihat $LOG.disk"
+  sleep 5
+done
+served2="$(openssl s_client -connect "127.0.0.1:$TLS_PORT" -servername localhost </dev/null 2>/dev/null \
+  | openssl x509 -noout -fingerprint -sha256 | cut -d= -f2)"
+[[ "$served2" == "$served" ]] || fail "sertifikat panel harus ikut terbawa: $served2 ≠ $served"
+JAR="$WORK/cookies-disk"
+sleep 31 # kode 2FA berikutnya (kode yang sama tidak bisa dipakai ulang)
+res="$(api POST /api/v1/auth/login "{\"username\":\"penguji\",\"password\":\"$PASS\",\"totp_code\":\"$(totp "$secret")\"}")"
+[[ "$res" == *' 200' ]] || fail "login di sistem terpasang: $res"
+res="$(api GET /api/v1/system/install)"
+json 'assert not v["live"], v' <<<"$res" || fail "sistem terpasang tidak boleh dianggap ISO: $res"
+for _ in $(seq 1 30); do
+  pools="$(api GET /api/v1/storage/pools)"
+  json 'import sys; sys.exit(0 if any(p["name"]=="tetap" and p["health"]=="ONLINE" for p in v["pools"]) else 1)' <<<"$pools" && break
+  sleep 3
+done
+json 'assert any(p["name"]=="tetap" and p["health"]=="ONLINE" for p in v["pools"]), v' <<<"$pools" || fail "pool tetap tidak diimpor saat boot: $pools"
+rm -f "$WORK/salinan.txt"
+for _ in $(seq 1 20); do
+  smbclient //127.0.0.1/tetap -p "$SMB_PORT" -m SMB3 -U "budi%$UPASS" -c "get catatan.txt $WORK/salinan.txt" >/dev/null 2>&1 && break
+  sleep 3
+done
+cmp -s "$WORK/tetap.txt" "$WORK/salinan.txt" || fail "file di folder tetap tidak terbaca lewat SMB setelah boot dari disk"
+echo "boot dari disk: panel, sertifikat, akun admin dan 2FA, pool tetap, dan SMB budi sama dengan sebelum dipasang"
 echo "Uji asap lulus."
