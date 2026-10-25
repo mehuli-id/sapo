@@ -125,6 +125,7 @@ func main() {
 	files := agent.NewFiles(agent.FilesTools{
 		Helper: self, MountBase: pc.MountBase, GroupFile: ac.GroupFile, MaxEntries: fc.MaxEntries,
 		Timeout: time.Duration(fc.TimeoutSeconds) * time.Second, DeleteTimeout: time.Duration(fc.DeleteTimeoutSeconds) * time.Second,
+		RestoreMaxFiles: fc.RestoreMaxFiles, RestoreMaxBytes: int64(fc.RestoreMaxGB) << 30,
 		IDMin: ac.IDMin, IDMax: ac.IDMax,
 	}, shares, accounts.Managed)
 	apc := cfg.Agent.Apps
@@ -155,6 +156,7 @@ func main() {
 	reg.Register(proto.OpUpdatesStatus, updates.StatusOp())
 	reg.Register(proto.OpFilesList, files.ListOp())
 	reg.Register(proto.OpFilesStat, files.StatOp())
+	reg.Register(proto.OpFilesRestore, files.RestoreOp())
 	reg.Register(proto.OpFilesMkdir, files.MkdirOp())
 	reg.Register(proto.OpFilesRename, files.RenameOp())
 	reg.Register(proto.OpFilesDelete, files.DeleteOp())

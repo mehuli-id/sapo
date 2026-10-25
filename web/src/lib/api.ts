@@ -402,10 +402,12 @@ export interface FileList {
   truncated?: boolean
 }
 
-const fileQuery = (share: string, path: string) => `share=${encodeURIComponent(share)}&path=${encodeURIComponent(path)}`
+// snapshot: versi sebelumnya (ADR 0014), baca saja.
+const fileQuery = (share: string, path: string, snapshot = "") =>
+  `share=${encodeURIComponent(share)}&path=${encodeURIComponent(path)}` + (snapshot ? `&snapshot=${encodeURIComponent(snapshot)}` : "")
 
 // downloadURL: dibuka langsung oleh browser (lampiran), tidak lewat fetch.
-export const fileDownloadURL = (share: string, path: string) => `/api/v1/files/download?${fileQuery(share, path)}`
+export const fileDownloadURL = (share: string, path: string, snapshot = "") => `/api/v1/files/download?${fileQuery(share, path, snapshot)}`
 
 // uploadFile mengunggah satu file lewat XMLHttpRequest (ada kemajuan).
 export function uploadFile(share: string, dir: string, file: File, overwrite: boolean, onProgress: (loaded: number) => void): Promise<void> {
@@ -631,7 +633,10 @@ export const api = {
     post<{ ok: boolean; warning?: string }>(`/api/v1/drive/users/${encodeURIComponent(user)}/quota`, req),
   deleteHome: (pool: string, user: string, req: { confirm_name: string; admin_password: string }) =>
     post<{ ok: boolean }>(`/api/v1/drive/homes/${encodeURIComponent(pool)}/${encodeURIComponent(user)}/delete`, req),
-  listFiles: (share: string, path: string) => get<FileList>(`/api/v1/files/list?${fileQuery(share, path)}`),
+  listFiles: (share: string, path: string, snapshot = "") => get<FileList>(`/api/v1/files/list?${fileQuery(share, path, snapshot)}`),
+  fileVersions: (share: string) => get<{ name: string; kind: string; created: string }[]>(`/api/v1/files/snapshots?share=${encodeURIComponent(share)}`),
+  restoreFile: (share: string, path: string, snapshot: string, overwrite: boolean) =>
+    post<{ name: string; files: number; bytes: number; skipped?: number }>("/api/v1/files/restore", { share, path, snapshot, overwrite }),
   mkdir: (share: string, path: string) => post<{ ok: boolean }>("/api/v1/files/mkdir", { share, path }),
   renameFile: (share: string, path: string, to: string) => post<{ ok: boolean }>("/api/v1/files/rename", { share, path, to }),
   deleteFile: (share: string, path: string) => post<{ ok: boolean }>("/api/v1/files/delete", { share, path }),

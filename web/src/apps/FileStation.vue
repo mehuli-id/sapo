@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // File Station (semua pengguna, ADR 0010): menjelajah shared folder yang
 // boleh dibuka pengguna, unduh, unggah, buat folder, ganti nama, dan hapus.
-// Izin ditegakkan sapod lewat akun Linux pengguna (sama dengan SMB).
+// Izin ditegakkan sapod lewat akun Linux pengguna (sama dengan SMB). Versi
+// sebelumnya (snapshot, ADR 0014) dijelajah baca saja dan bisa dipulihkan.
 import { computed, onMounted, reactive, ref } from "vue"
 import { useI18n } from "vue-i18n"
 import {
@@ -11,9 +12,11 @@ import {
   Folder,
   FolderLock,
   FolderPlus,
+  History,
   LoaderCircle,
   Pencil,
   RefreshCw,
+  RotateCcw,
   Trash2,
   Upload,
 } from "@lucide/vue"
@@ -60,7 +63,7 @@ async function load() {
   if (!share.value) return
   error.value = ""
   try {
-    const res = await api.listFiles(share.value.name, path.value)
+    const res = await api.listFiles(share.value.name, path.value, version.value)
     // Folder dulu, lalu nama.
     entries.value = res.entries.sort((a, b) => Number(b.type === "dir") - Number(a.type === "dir") || a.name.localeCompare(b.name, locale.value))
     truncated.value = !!res.truncated
@@ -71,6 +74,10 @@ async function load() {
 }
 
 function open(s: FileShare, p: string) {
+  if (share.value?.name !== s.name) {
+    version.value = ""
+    versions.value = null
+  }
   share.value = s
   path.value = p
   entries.value = null
@@ -85,6 +92,43 @@ const crumbs = computed(() => {
 })
 const join = (name: string) => (path.value ? `${path.value}/${name}` : name)
 const canWrite = computed(() => share.value?.access === "write")
+// Mengubah isi hanya di versi sekarang; di versi lama hanya memulihkan.
+const canEdit = computed(() => canWrite.value && !version.value)
+
+// --- Versi sebelumnya ---
+const versions = ref<{ name: string; kind: string; created: string }[] | null>(null)
+const version = ref("")
+const showVersions = ref(false)
+async function toggleVersions() {
+  showVersions.value = !showVersions.value
+  if (showVersions.value && share.value) {
+    try {
+      versions.value = await api.fileVersions(share.value.name)
+    } catch (e) {
+      error.value = message(e)
+    }
+  }
+}
+function pickVersion(name: string) {
+  version.value = name
+  showVersions.value = false
+  entries.value = null
+  editing.value = ""
+  notice.value = ""
+  load()
+}
+const versionTime = computed(() => {
+  const v = versions.value?.find((x) => x.name === version.value)
+  return v ? when(v.created) : ""
+})
+const restoreForm = reactive({ overwrite: false })
+const restore = (e: FileEntry) =>
+  run(async () => {
+    const res = await api.restoreFile(share.value!.name, join(e.name), version.value, e.type === "file" && restoreForm.overwrite)
+    restoreForm.overwrite = false
+    restored.value = res.skipped ? t("files.restoredSkipped", { name: res.name, n: res.skipped }) : t("files.restored", { name: res.name })
+  }, "")
+const restored = ref("")
 const size = (b: number) => formatBytes(b, locale.value, 1000)
 const when = (iso: string) => new Date(iso).toLocaleString(locale.value, { dateStyle: "medium", timeStyle: "short" })
 
@@ -92,9 +136,10 @@ async function run(fn: () => Promise<unknown>, done: string) {
   busy.value = true
   error.value = ""
   notice.value = ""
+  restored.value = ""
   try {
     await fn()
-    notice.value = done
+    notice.value = done || restored.value
     editing.value = ""
     await load()
   } catch (e) {
@@ -187,7 +232,8 @@ function onDrop(e: DragEvent) {
         </nav>
         <div class="flex gap-1">
           <Button size="sm" variant="ghost" :aria-label="t('storage.refresh')" @click="load"><RefreshCw /></Button>
-          <template v-if="canWrite">
+          <Button size="sm" variant="outline" :aria-expanded="showVersions" @click="toggleVersions"><History />{{ t("files.versions") }}</Button>
+          <template v-if="canEdit">
             <Button size="sm" variant="outline" @click="start('mkdir')"><FolderPlus />{{ t("files.newFolder") }}</Button>
             <Button size="sm" @click="input?.click()"><Upload />{{ t("files.upload") }}</Button>
             <input ref="input" type="file" multiple class="hidden" @change="upload(($event.target as HTMLInputElement).files ?? []); ($event.target as HTMLInputElement).value = ''" />
@@ -197,10 +243,29 @@ function onDrop(e: DragEvent) {
 
       <div
         :class="cn('min-h-0 flex-1 space-y-3 overflow-y-auto p-4', dragging && 'bg-primary/5 ring-2 ring-primary ring-inset')"
-        @dragover.prevent="dragging = canWrite"
+        @dragover.prevent="dragging = canEdit"
         @dragleave="dragging = false"
         @drop.prevent="onDrop"
       >
+        <div v-if="showVersions" class="space-y-2 rounded-lg border p-3">
+          <p class="text-xs text-muted-foreground">{{ t("files.versionsHelp") }}</p>
+          <ul v-if="versions?.length" class="max-h-56 space-y-0.5 overflow-y-auto">
+            <li v-if="version">
+              <button type="button" class="w-full rounded px-2 py-1 text-left text-sm hover:bg-accent" @click="pickVersion('')">{{ t("files.currentVersion") }}</button>
+            </li>
+            <li v-for="v in versions" :key="v.name">
+              <button type="button" :class="cn('w-full rounded px-2 py-1 text-left text-sm hover:bg-accent', v.name === version && 'bg-accent')" @click="pickVersion(v.name)">
+                {{ when(v.created) }} <span class="text-xs text-muted-foreground">· {{ t(`snapshots.kind.${v.kind}`) }}</span>
+              </button>
+            </li>
+          </ul>
+          <p v-else-if="versions" class="text-sm text-muted-foreground">{{ t("files.noVersions") }}</p>
+        </div>
+        <div v-if="version" class="flex flex-wrap items-center gap-2 rounded-lg border border-primary/40 bg-primary/5 p-2.5 text-sm">
+          <History class="size-4 shrink-0" />
+          <span class="flex-1">{{ t("files.viewingVersion", { when: versionTime }) }}</span>
+          <Button size="sm" variant="ghost" @click="pickVersion('')">{{ t("files.backToCurrent") }}</Button>
+        </div>
         <p v-if="!canWrite" class="rounded-lg bg-muted p-2.5 text-xs">{{ t("files.readOnly") }}</p>
         <p v-if="notice" class="rounded-lg border border-emerald-500/40 bg-emerald-500/5 p-2.5 text-sm">{{ notice }}</p>
         <p v-if="error" class="rounded-lg border border-destructive/40 bg-destructive/5 p-2.5 text-sm" role="alert">{{ error }}</p>
@@ -237,7 +302,7 @@ function onDrop(e: DragEvent) {
                   <button v-if="e.type === 'dir'" type="button" class="flex w-full items-center gap-2 text-left hover:underline" @click="open(share, join(e.name))">
                     <Folder class="size-4 shrink-0 text-muted-foreground" /><span class="truncate">{{ e.name }}</span>
                   </button>
-                  <a v-else-if="e.type === 'file'" :href="fileDownloadURL(share.name, join(e.name))" download class="flex items-center gap-2 hover:underline">
+                  <a v-else-if="e.type === 'file'" :href="fileDownloadURL(share.name, join(e.name), version)" download class="flex items-center gap-2 hover:underline">
                     <File class="size-4 shrink-0 text-muted-foreground" /><span class="truncate">{{ e.name }}</span>
                   </a>
                   <span v-else class="flex items-center gap-2 text-muted-foreground" :title="t('files.special')">
@@ -248,10 +313,19 @@ function onDrop(e: DragEvent) {
                 <td class="hidden py-1.5 pl-4 text-muted-foreground md:table-cell">{{ when(e.mtime) }}</td>
                 <td class="py-1.5 pl-2">
                   <div class="flex justify-end gap-0.5 opacity-60 group-hover:opacity-100">
-                    <a v-if="e.type === 'file'" :href="fileDownloadURL(share.name, join(e.name))" download :aria-label="t('files.download')" class="rounded p-1 hover:bg-accent">
+                    <a v-if="e.type === 'file'" :href="fileDownloadURL(share.name, join(e.name), version)" download :aria-label="t('files.download')" class="rounded p-1 hover:bg-accent">
                       <Download class="size-4" />
                     </a>
-                    <template v-if="canWrite">
+                    <button
+                      v-if="version && canWrite && (e.type === 'file' || e.type === 'dir')"
+                      type="button"
+                      :aria-label="t('files.restore')"
+                      class="rounded p-1 hover:bg-accent"
+                      @click="start(`restore:${e.name}`)"
+                    >
+                      <RotateCcw class="size-4" />
+                    </button>
+                    <template v-if="canEdit">
                       <button type="button" :aria-label="t('files.rename')" class="rounded p-1 hover:bg-accent" @click="start(`rename:${e.name}`, e.name)"><Pencil class="size-4" /></button>
                       <button type="button" :aria-label="t('files.delete')" class="rounded p-1 text-destructive hover:bg-accent" @click="start(`delete:${e.name}`)"><Trash2 class="size-4" /></button>
                     </template>
@@ -267,6 +341,20 @@ function onDrop(e: DragEvent) {
                   </form>
                 </td>
               </tr>
+              <tr v-if="editing === `restore:${e.name}`">
+                <td colspan="4" class="pb-2">
+                  <div class="space-y-2 rounded-lg border p-2.5 text-sm">
+                    <p>{{ t(e.type === "dir" ? "files.restoreFolder" : "files.restoreFile", { name: e.name }) }}</p>
+                    <label v-if="e.type === 'file'" class="flex items-center gap-2 text-xs">
+                      <input v-model="restoreForm.overwrite" type="checkbox" class="size-4 accent-primary" />{{ t("files.restoreOverwrite") }}
+                    </label>
+                    <div class="flex gap-2">
+                      <Button size="sm" :disabled="busy" @click="restore(e)"><LoaderCircle v-if="busy" class="animate-spin" /><RotateCcw v-else />{{ t("files.restore") }}</Button>
+                      <Button size="sm" variant="ghost" @click="editing = ''">{{ t("common.cancel") }}</Button>
+                    </div>
+                  </div>
+                </td>
+              </tr>
               <tr v-if="editing === `delete:${e.name}`">
                 <td colspan="4" class="pb-2">
                   <div class="flex flex-wrap items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-2.5 text-sm">
@@ -279,7 +367,7 @@ function onDrop(e: DragEvent) {
             </template>
           </tbody>
         </table>
-        <p v-else-if="entries && !error" class="py-8 text-center text-sm text-muted-foreground">{{ canWrite ? t("files.emptyDrop") : t("files.empty") }}</p>
+        <p v-else-if="entries && !error" class="py-8 text-center text-sm text-muted-foreground">{{ canEdit ? t("files.emptyDrop") : t("files.empty") }}</p>
         <Skeleton v-if="!entries" class="h-40 rounded-xl" />
       </div>
     </template>

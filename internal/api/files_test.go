@@ -90,4 +90,38 @@ func TestFileStation(t *testing.T) {
 	if rec := h.do(http.MethodGet, "/api/v1/files/shares", nil); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("tanpa login: %d", rec.Code)
 	}
+
+	// Versi sebelumnya (snapshot): pengguna yang boleh membuka folder melihat
+	// daftarnya, menjelajah baca saja, dan memulihkan bila boleh menulis.
+	agent.mu.Lock()
+	agent.results[proto.OpSnapshotsList] = proto.SnapshotsListResult{Snapshots: []proto.SnapshotInfo{{Name: "sapo-daily_GMT-2026.10.28-02.00.00", Kind: "daily", UsedBytes: 99}}}
+	agent.results[proto.OpFilesRestore] = proto.FilesRestoreResult{Name: "a (dipulihkan 2026-10-28 09.00).jpg", Files: 1}
+	agent.mu.Unlock()
+	h.loginAs("budi", userPassword)
+	if rec := h.do(http.MethodGet, "/api/v1/files/snapshots?share=keluarga", nil); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "sapo-daily") || strings.Contains(rec.Body.String(), "used_bytes") {
+		t.Fatalf("versi: %d %s", rec.Code, rec.Body)
+	}
+	if p, _ := agent.param(proto.OpSnapshotsList).(proto.SnapshotTarget); p != (proto.SnapshotTarget{Pool: "tank", Share: "keluarga"}) {
+		t.Fatalf("snapshots.list = %+v", p)
+	}
+	if rec := h.do(http.MethodGet, "/api/v1/files/snapshots?share=kantor", nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("versi folder tanpa izin: %d", rec.Code)
+	}
+	h.do(http.MethodGet, "/api/v1/files/list?share=keluarga&path=foto&snapshot=sapo-daily_GMT-2026.10.28-02.00.00", nil)
+	if p, _ := agent.param(proto.OpFilesList).(proto.FilesTarget); p.Snapshot != "sapo-daily_GMT-2026.10.28-02.00.00" || p.User != "budi" {
+		t.Fatalf("files.list snapshot = %+v", p)
+	}
+	rec = h.do(http.MethodPost, "/api/v1/files/restore", map[string]any{"share": "keluarga", "path": "foto/a.jpg", "snapshot": "sapo-daily_GMT-2026.10.28-02.00.00"})
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "dipulihkan") {
+		t.Fatalf("pulihkan: %d %s", rec.Code, rec.Body)
+	}
+	if p, _ := agent.param(proto.OpFilesRestore).(proto.FilesRestoreParams); p.Path != "foto/a.jpg" || p.Snapshot == "" || p.User != "budi" || p.Overwrite {
+		t.Fatalf("files.restore = %+v", p)
+	}
+	// cici hanya baca: tidak bisa memulihkan.
+	h.loginAs("cici", userPassword)
+	agent.forget(proto.OpFilesRestore)
+	if rec := h.do(http.MethodPost, "/api/v1/files/restore", map[string]any{"share": "keluarga", "path": "foto/a.jpg", "snapshot": "sapo-daily_GMT-2026.10.28-02.00.00"}); rec.Code != http.StatusForbidden || agent.called(proto.OpFilesRestore) {
+		t.Fatalf("pulihkan oleh pengguna baca saja: %d", rec.Code)
+	}
 }

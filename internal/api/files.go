@@ -136,6 +136,8 @@ func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Versi sebelumnya (ADR 0014): dibaca dari snapshot, baca saja.
+	t.Snapshot = q.Get("snapshot")
 	var out proto.FilesListResult
 	if err := s.agent.Call(r.Context(), proto.OpFilesList, t, &out); err != nil {
 		s.fileError(w, proto.OpFilesList, err)
@@ -187,6 +189,7 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	t.Snapshot = q.Get("snapshot")
 	var info proto.FilesOpenResult
 	f, err := s.agent.CallFile(r.Context(), proto.OpFilesOpenRead, t, &info)
 	if err != nil {
@@ -295,4 +298,74 @@ func (s *Server) handleFileChange(op, action string) http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	}
+}
+
+// handleFileSnapshots: versi sebelumnya (snapshot) folder yang boleh dibuka
+// pengguna sesi ini.
+func (s *Server) handleFileSnapshots(w http.ResponseWriter, r *http.Request) {
+	t, ok := s.fileTarget(w, r, r.URL.Query().Get("share"), "", false)
+	if !ok {
+		return
+	}
+	st := proto.SnapshotTarget{Pool: t.Pool, Share: t.Share}
+	if t.Home {
+		st = proto.SnapshotTarget{Pool: t.Pool, User: t.User}
+	}
+	var out proto.SnapshotsListResult
+	if err := s.agent.Call(r.Context(), proto.OpSnapshotsList, st, &out); err != nil {
+		s.fileError(w, proto.OpSnapshotsList, err)
+		return
+	}
+	type version struct {
+		Name    string    `json:"name"`
+		Kind    string    `json:"kind"`
+		Created time.Time `json:"created"`
+	}
+	list := []version{}
+	for _, sn := range out.Snapshots {
+		list = append(list, version{Name: sn.Name, Kind: sn.Kind, Created: sn.Created})
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+// handleFileRestore memulihkan file atau folder dari snapshot ke tempat yang
+// sama (nama baru bila sudah ada, kecuali overwrite untuk file). Butuh izin
+// tulis; dijalankan sebagai pengguna.
+func (s *Server) handleFileRestore(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Share     string `json:"share"`
+		Path      string `json:"path"`
+		Snapshot  string `json:"snapshot"`
+		Overwrite bool   `json:"overwrite"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	t, ok := s.fileTarget(w, r, req.Share, req.Path, true)
+	if !ok {
+		return
+	}
+	t.Snapshot = req.Snapshot
+	timeout := time.Duration(s.cfg.Agent.Files.DeleteTimeoutSeconds+15) * time.Second
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(timeout + 15*time.Second))
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), timeout)
+	defer cancel()
+	var out proto.FilesRestoreResult
+	err := s.agent.Call(ctx, proto.OpFilesRestore, proto.FilesRestoreParams{FilesTarget: t, Overwrite: req.Overwrite}, &out)
+	detail := map[string]string{"share": auditText(req.Share), "path": auditText(t.Path), "snapshot": auditText(req.Snapshot),
+		"overwrite": strconv.FormatBool(req.Overwrite), "name": auditText(out.Name), "files": strconv.Itoa(out.Files)}
+	if err != nil {
+		detail["error"] = errorCode(err)
+	}
+	s.record(r, t.User, "files.restore", err == nil, detail)
+	if err != nil {
+		var pe *proto.Error
+		if errors.As(err, &pe) && pe.Code == "restore_too_large" {
+			writeError(w, http.StatusRequestEntityTooLarge, pe.Code, pe.Message)
+			return
+		}
+		s.fileError(w, proto.OpFilesRestore, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }

@@ -334,7 +334,8 @@
     "home_delete_failed": "Folder pribadi gagal dihapus: {message}",
     "webdav_off": "WebDAV dimatikan administrator.",
     "app_password_limit": "Password aplikasi sudah terlalu banyak. Cabut yang tidak dipakai lagi.",
-    "snapshot_prune_confirm": "Jadwal baru akan membuang snapshot yang ada. Masukkan password."
+    "snapshot_prune_confirm": "Jadwal baru akan membuang snapshot yang ada. Masukkan password.",
+    "restore_too_large": "Terlalu besar untuk dipulihkan sekaligus. Pulihkan folder di dalamnya satu per satu, atau pakai Previous Versions di Windows."
   },
   "pool": {
     "title": "Pool penyimpanan",
@@ -641,7 +642,19 @@
       "network_error": "Koneksi ke NAS terputus."
     },
     "home": "Drive saya",
-    "homeHelp": "Folder pribadi Anda"
+    "homeHelp": "Folder pribadi Anda",
+    "versions": "Versi sebelumnya",
+    "versionsHelp": "Snapshot folder ini. Pilih waktu untuk melihat isi folder saat itu.",
+    "noVersions": "Belum ada versi sebelumnya untuk folder ini.",
+    "currentVersion": "Versi sekarang",
+    "viewingVersion": "Melihat versi {when} (baca saja). Pilih Pulihkan untuk menyalin file atau folder kembali.",
+    "backToCurrent": "Kembali ke versi sekarang",
+    "restore": "Pulihkan",
+    "restoreFile": "Pulihkan {name} ke folder sekarang? Bila nama itu sudah ada, hasilnya diberi nama baru.",
+    "restoreFolder": "Pulihkan folder {name} beserta isinya? Bila nama itu sudah ada, hasilnya diberi nama baru; folder sekarang tidak diubah.",
+    "restoreOverwrite": "Timpa file sekarang dengan versi ini",
+    "restored": "Dipulihkan sebagai {name}.",
+    "restoredSkipped": "Dipulihkan sebagai {name}; {n} symlink atau berkas khusus dilewati."
   },
   "controlPanel": {
     "settings": "Pengaturan",

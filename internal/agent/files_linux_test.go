@@ -189,3 +189,70 @@ func mustJSON(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)
 }
+
+func TestFSHelperRestore(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("berjalan sebagai root")
+	}
+	base := t.TempDir()
+	live, snap := filepath.Join(base, "live"), filepath.Join(base, "snap")
+	for _, d := range []string{filepath.Join(live, "dok"), filepath.Join(snap, "dok/arsip")} {
+		_ = os.MkdirAll(d, 0o755)
+	}
+	_ = os.WriteFile(filepath.Join(snap, "dok/laporan.txt"), []byte("versi lama"), 0o644)
+	_ = os.WriteFile(filepath.Join(snap, "dok/arsip/a.txt"), []byte("a"), 0o644)
+	_ = os.Symlink("/etc/passwd", filepath.Join(snap, "dok/arsip/tautan"))
+	do := func(path string, overwrite bool, maxFiles int) (proto.FilesRestoreResult, error) {
+		res, err := fsDo(fsRequest{Op: "restore", Root: live, Src: snap, Path: path, Overwrite: overwrite, Label: "dipulihkan 2026-10-28 02.00", MaxFiles: maxFiles, MaxBytes: 1 << 20})
+		if err != nil {
+			return proto.FilesRestoreResult{}, err
+		}
+		return res.(proto.FilesRestoreResult), nil
+	}
+	read := func(p string) string { b, _ := os.ReadFile(filepath.Join(live, p)); return string(b) }
+
+	// Belum ada: nama asli.
+	if r, err := do("dok/laporan.txt", false, 100); err != nil || r.Name != "laporan.txt" || read("dok/laporan.txt") != "versi lama" {
+		t.Fatalf("pulihkan: %+v %v", r, err)
+	}
+	// Sudah ada: nama baru, file sekarang tidak berubah.
+	_ = os.WriteFile(filepath.Join(live, "dok/laporan.txt"), []byte("versi baru"), 0o644)
+	r, err := do("dok/laporan.txt", false, 100)
+	if err != nil || r.Name != "laporan (dipulihkan 2026-10-28 02.00).txt" || read("dok/laporan.txt") != "versi baru" || read("dok/"+r.Name) != "versi lama" {
+		t.Fatalf("pulihkan dengan nama baru: %+v %v", r, err)
+	}
+	if r, _ := do("dok/laporan.txt", false, 100); r.Name != "laporan (dipulihkan 2026-10-28 02.00 2).txt" {
+		t.Fatalf("nama kedua = %q", r.Name)
+	}
+	// Ditimpa bila dipilih.
+	if r, err := do("dok/laporan.txt", true, 100); err != nil || r.Name != "laporan.txt" || read("dok/laporan.txt") != "versi lama" {
+		t.Fatalf("timpa: %+v %v", r, err)
+	}
+	// Folder: disalin utuh, symlink dilewati.
+	r, err = do("dok/arsip", false, 100)
+	if err != nil || r.Name != "arsip" || read("dok/arsip/a.txt") != "a" || r.Skipped != 1 {
+		t.Fatalf("pulihkan folder: %+v %v", r, err)
+	}
+	if _, err := os.Lstat(filepath.Join(live, "dok/arsip/tautan")); err == nil {
+		t.Fatal("symlink tidak boleh dipulihkan")
+	}
+	// Folder yang sudah ada tidak pernah ditimpa, walau Overwrite.
+	if r, err := do("dok/arsip", true, 100); err != nil || r.Name != "arsip (dipulihkan 2026-10-28 02.00)" {
+		t.Fatalf("folder yang ada: %+v %v", r, err)
+	}
+	// Melebihi batas: gagal, tanpa sisa salinan setengah jadi.
+	_ = os.RemoveAll(filepath.Join(live, "dok"))
+	_ = os.MkdirAll(filepath.Join(live, "dok"), 0o755)
+	if _, err := do("dok/arsip", false, 1); fsErrorCode(err) != "restore_too_large" {
+		t.Fatalf("batas: %v", err)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(live, "dok")); len(entries) != 0 {
+		t.Fatalf("sisa salinan: %v", entries)
+	}
+	// Path lewat symlink atau keluar dari akar: ditolak.
+	for _, p := range []string{"dok/arsip/tautan", "../live/dok"} {
+		if _, err := do(p, false, 100); err == nil {
+			t.Errorf("%s harus ditolak", p)
+		}
+	}
+}
