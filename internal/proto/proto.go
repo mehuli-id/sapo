@@ -133,11 +133,13 @@ const (
 
 	// Operasi File Station (ADR 0010). Semua dijalankan sebagai akun Linux
 	// pengguna (proses pembantu), jadi izinnya ditegakkan kernel (ACL).
-	OpFilesList   = "files.list"
-	OpFilesStat   = "files.stat"
-	OpFilesMkdir  = "files.mkdir"
-	OpFilesRename = "files.rename"
-	OpFilesDelete = "files.delete"
+	OpFilesList = "files.list"
+	OpFilesStat = "files.stat"
+	// OpFilesRestore menyalin file/folder dari snapshot (ADR 0014).
+	OpFilesRestore = "files.restore"
+	OpFilesMkdir   = "files.mkdir"
+	OpFilesRename  = "files.rename"
+	OpFilesDelete  = "files.delete"
 	// OpFilesOpenRead dan OpFilesOpenWrite mengembalikan file descriptor
 	// (SCM_RIGHTS) bersama jawaban; OpFilesCommit memberi nama akhir file
 	// unggahan, OpFilesAbort membuangnya.
@@ -726,6 +728,26 @@ type FilesTarget struct {
 	Path  string `json:"path"`
 	// Home: folder pribadi User di Pool (Share kosong).
 	Home bool `json:"home,omitempty"`
+	// Snapshot: dibaca dari snapshot ini (baca saja; list, stat, open_read),
+	// atau sumber files.restore.
+	Snapshot string `json:"snapshot,omitempty"`
+}
+
+// FilesRestoreParams: Path di snapshot FilesTarget.Snapshot disalin kembali
+// ke tempat yang sama di folder sekarang. Bila nama itu sudah ada, hasilnya
+// diberi nama baru, kecuali Overwrite dan keduanya file biasa.
+type FilesRestoreParams struct {
+	FilesTarget
+	Overwrite bool `json:"overwrite,omitempty"`
+}
+
+// FilesRestoreResult: nama hasil pemulihan (di direktori yang sama).
+type FilesRestoreResult struct {
+	Name  string `json:"name"`
+	Files int    `json:"files"`
+	Bytes int64  `json:"bytes"`
+	// Skipped: symlink dan berkas khusus yang tidak dipulihkan.
+	Skipped int `json:"skipped,omitempty"`
 }
 
 // FilesRenameParams: To adalah path baru di folder yang sama.

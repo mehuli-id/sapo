@@ -148,6 +148,11 @@ agent:
     max_entries: 5000
     timeout_seconds: 30
     delete_timeout_seconds: 270
+    # Memulihkan file/folder dari snapshot di File Station: batas per
+    # pemulihan (folder yang lebih besar dipulihkan lewat Previous Versions
+    # di Windows atau sebagian-sebagian).
+    restore_max_files: 20000
+    restore_max_gb: 20
 
   # Snapshot terjadwal (ADR 0014): snapshot otomatis berhenti diambil di pool
   # yang terisi max_pool_capacity_percent atau lebih (snapshot lama tetap

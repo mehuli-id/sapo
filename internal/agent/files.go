@@ -39,6 +39,9 @@ type FilesTools struct {
 	// Rentang ID akun dan grup Sapo (agent.accounts): hanya grup di rentang
 	// ini yang ikut menjadi grup proses pembantu.
 	IDMin, IDMax int
+	// Batas satu pemulihan dari snapshot.
+	RestoreMaxFiles int
+	RestoreMaxBytes int64
 }
 
 // Files melayani operasi File Station.
@@ -83,6 +86,12 @@ type fsRequest struct {
 	Temp      string `json:"temp,omitempty"`
 	Overwrite bool   `json:"overwrite,omitempty"`
 	Max       int    `json:"max,omitempty"`
+	// restore: Src akar snapshot (sumber), Label akhiran nama bila nama
+	// tujuan sudah ada, batas jumlah file dan byte.
+	Src      string `json:"src,omitempty"`
+	Label    string `json:"label,omitempty"`
+	MaxFiles int    `json:"max_files,omitempty"`
+	MaxBytes int64  `json:"max_bytes,omitempty"`
 }
 
 // fsReply adalah jawaban proses pembantu (stdout).
@@ -187,11 +196,11 @@ func (f *Files) call(ctx context.Context, t proto.FilesTarget, req fsRequest, ti
 	default:
 		return nil, nil, &OpError{Code: proto.ErrBusy, Message: "terlalu banyak operasi file berjalan; coba lagi sebentar"}
 	}
-	if req.Op == "delete" {
+	if req.Op == "delete" || req.Op == "restore" {
 		f.deletingMu.Lock()
 		if f.deleting[t.User] {
 			f.deletingMu.Unlock()
-			return nil, nil, &OpError{Code: proto.ErrBusy, Message: "penghapusan sebelumnya masih berjalan"}
+			return nil, nil, &OpError{Code: proto.ErrBusy, Message: "penghapusan atau pemulihan sebelumnya masih berjalan"}
 		}
 		f.deleting[t.User] = true
 		f.deletingMu.Unlock()
@@ -202,6 +211,23 @@ func (f *Files) call(ctx context.Context, t proto.FilesTarget, req fsRequest, ti
 		}()
 	}
 	req.Root, req.Path = root, path
+	if t.Snapshot != "" {
+		// Snapshot hanya dibaca: list, stat, dan open_read dijalankan di
+		// akar snapshot; restore membaca dari sana dan menulis ke folder
+		// sekarang. Operasi lain ditolak.
+		if !snapNamePattern.MatchString(t.Snapshot) {
+			return nil, nil, &OpError{Code: proto.ErrInvalidParams, Message: "snapshot tidak valid"}
+		}
+		snapRoot := filepath.Join(root, ".zfs", "snapshot", t.Snapshot)
+		switch req.Op {
+		case "list", "stat", "open_read":
+			req.Root = snapRoot
+		case "restore":
+			req.Src = snapRoot
+		default:
+			return nil, nil, &OpError{Code: errFilePermission, Message: "snapshot hanya bisa dibaca"}
+		}
+	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	reply, file, err := f.run(ctx, cred, req, wantFile)
@@ -306,6 +332,32 @@ func (f *Files) StatOp() Handler {
 			return nil, err
 		}
 		var out proto.FileEntry
+		if err := json.Unmarshal(res, &out); err != nil {
+			return nil, err
+		}
+		return out, nil
+	}
+}
+
+// RestoreOp mengembalikan handler files.restore.
+func (f *Files) RestoreOp() Handler {
+	return func(ctx context.Context, raw json.RawMessage) (any, error) {
+		var p proto.FilesRestoreParams
+		if err := f.target(raw, &p); err != nil {
+			return nil, err
+		}
+		m := snapNamePattern.FindStringSubmatch(p.Snapshot)
+		if m == nil || p.Path == "" {
+			return nil, &OpError{Code: proto.ErrInvalidParams, Message: "snapshot atau path tidak valid"}
+		}
+		when, _ := time.ParseInLocation(snapTimeFormat, m[2], time.UTC)
+		label := "dipulihkan " + when.In(localZone()).Format("2006-01-02 15.04")
+		req := fsRequest{Op: "restore", Overwrite: p.Overwrite, Label: label, MaxFiles: f.t.RestoreMaxFiles, MaxBytes: f.t.RestoreMaxBytes}
+		res, _, err := f.call(ctx, p.FilesTarget, req, f.t.DeleteTimeout, false)
+		if err != nil {
+			return nil, err
+		}
+		var out proto.FilesRestoreResult
 		if err := json.Unmarshal(res, &out); err != nil {
 			return nil, err
 		}

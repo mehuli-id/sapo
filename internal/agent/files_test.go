@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mehuli-id/sapo/internal/proto"
@@ -145,5 +146,43 @@ func TestFilesHome(t *testing.T) {
 		if err := call(p); !errors.As(err, &oe) {
 			t.Errorf("%s harus ditolak: %v", name, err)
 		}
+	}
+}
+
+func TestFilesSnapshot(t *testing.T) {
+	f, reqs, _ := testFiles(t)
+	call := func(h Handler, p any) error {
+		raw, _ := json.Marshal(p)
+		_, err := h(context.Background(), raw)
+		return err
+	}
+	snap := "sapo-daily_GMT-2026.10.28-02.00.00"
+	target := proto.FilesTarget{User: "budi", Pool: "tank", Share: "keluarga", Path: "foto", Snapshot: snap}
+	if err := call(f.ListOp(), target); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(f.t.MountBase, "tank/keluarga/.zfs/snapshot", snap)
+	if r := (*reqs)[len(*reqs)-1]; r.Root != want {
+		t.Fatalf("akar snapshot = %s", r.Root)
+	}
+	var oe *OpError
+	// Snapshot hanya dibaca; nama snapshot diperiksa ketat.
+	if err := call(f.MkdirOp(), target); !errors.As(err, &oe) || oe.Code != errFilePermission {
+		t.Fatalf("tulis ke snapshot: %v", err)
+	}
+	for _, bad := range []string{"../../etc", "buatan-admin", "sapo-daily_GMT-2026.10.28-02.00.00/../x"} {
+		target.Snapshot = bad
+		if err := call(f.ListOp(), target); !errors.As(err, &oe) {
+			t.Errorf("snapshot %q harus ditolak", bad)
+		}
+	}
+	// Pulihkan: sumber dari snapshot, tujuan folder sekarang.
+	*reqs = nil
+	_ = call(f.RestoreOp(), proto.FilesRestoreParams{FilesTarget: proto.FilesTarget{User: "budi", Pool: "tank", Share: "keluarga", Path: "foto/a.jpg", Snapshot: snap}})
+	if len(*reqs) != 1 || (*reqs)[0].Op != "restore" || (*reqs)[0].Src != want || (*reqs)[0].Root != filepath.Join(f.t.MountBase, "tank/keluarga") || !strings.HasPrefix((*reqs)[0].Label, "dipulihkan 2026-10-28") {
+		t.Fatalf("restore = %+v", *reqs)
+	}
+	if err := call(f.RestoreOp(), proto.FilesRestoreParams{FilesTarget: proto.FilesTarget{User: "budi", Pool: "tank", Share: "keluarga", Path: "foto"}}); !errors.As(err, &oe) {
+		t.Fatalf("restore tanpa snapshot: %v", err)
 	}
 }

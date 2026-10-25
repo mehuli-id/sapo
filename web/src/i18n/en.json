@@ -334,7 +334,8 @@
     "home_delete_failed": "The personal folder couldn’t be deleted: {message}",
     "webdav_off": "WebDAV is turned off by an administrator.",
     "app_password_limit": "Too many app passwords. Revoke the ones you no longer use.",
-    "snapshot_prune_confirm": "The new schedule will discard existing snapshots. Enter your password."
+    "snapshot_prune_confirm": "The new schedule will discard existing snapshots. Enter your password.",
+    "restore_too_large": "Too large to restore at once. Restore the folders inside one by one, or use Previous Versions in Windows."
   },
   "pool": {
     "title": "Storage pools",
@@ -641,7 +642,19 @@
       "network_error": "Lost the connection to the NAS."
     },
     "home": "My drive",
-    "homeHelp": "Your personal folder"
+    "homeHelp": "Your personal folder",
+    "versions": "Previous versions",
+    "versionsHelp": "Snapshots of this folder. Pick a time to see the folder as it was then.",
+    "noVersions": "This folder has no previous versions yet.",
+    "currentVersion": "Current version",
+    "viewingVersion": "Viewing the version from {when} (read-only). Choose Restore to copy files or folders back.",
+    "backToCurrent": "Back to the current version",
+    "restore": "Restore",
+    "restoreFile": "Restore {name} to the current folder? If the name already exists, the result gets a new name.",
+    "restoreFolder": "Restore the folder {name} and its contents? If the name already exists, the result gets a new name; the current folder isn’t changed.",
+    "restoreOverwrite": "Replace the current file with this version",
+    "restored": "Restored as {name}.",
+    "restoredSkipped": "Restored as {name}; {n} symlinks or special files were skipped."
   },
   "controlPanel": {
     "settings": "Settings",

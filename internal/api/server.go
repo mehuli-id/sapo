@@ -251,6 +251,8 @@ func New(o Options) (*Server, error) {
 	// File Station: semua pengguna, hanya folder yang boleh mereka buka.
 	s.mux.Handle("GET /api/v1/files/shares", s.requireAuth(http.HandlerFunc(s.handleFileShares)))
 	s.mux.Handle("GET /api/v1/files/list", s.requireAuth(http.HandlerFunc(s.handleFileList)))
+	s.mux.Handle("GET /api/v1/files/snapshots", s.requireAuth(http.HandlerFunc(s.handleFileSnapshots)))
+	s.mux.Handle("POST /api/v1/files/restore", s.requireAuth(http.HandlerFunc(s.handleFileRestore)))
 	s.mux.Handle("GET /api/v1/files/download", s.requireAuth(http.HandlerFunc(s.handleFileDownload)))
 	s.mux.Handle("POST /api/v1/files/upload", s.requireAuth(http.HandlerFunc(s.handleFileUpload)))
 	s.mux.Handle("POST /api/v1/files/mkdir", s.requireAuth(s.handleFileChange(proto.OpFilesMkdir, "files.mkdir")))

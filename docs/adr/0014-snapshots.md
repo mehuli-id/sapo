@@ -39,7 +39,21 @@ Data dulu: file yang terhapus atau tertimpa (salah klik, ransomware di komputer 
 ## Konsekuensi
 
 - Snapshot berada di pool yang sama: bukan pengganti backup ke disk lain (menyusul bersama penyimpanan eksternal).
-- Memulihkan file dari panel (melihat versi lama di File Station, menyalin kembali) dikerjakan di tahap berikutnya; untuk sekarang lewat "Previous Versions" di Windows.
+- Memulihkan file dari panel: lihat bagian "Pemulihan di File Station" di bawah.
 - Snapshot yang terus ditahan di pool yang hampir penuh memakan ruang; admin melihat pemakaiannya per folder dan bisa mengurangi jumlah simpan. Karena kuota Sapo Drive memakai `refquota`, pengguna yang terus menulis dan menghapus data besar bisa memakai pool lebih dari kuotanya lewat snapshot; batas kapasitas pool di atas menghentikan snapshot baru sebelum pool penuh.
 - Snapshot menyimpan file dengan izin saat snapshot diambil. Pengguna yang masih punya akses ke folder bisa membuka versi lama lewat Previous Versions (SMB) atau `.zfs/snapshot` (NFS), termasuk file yang kemudian dibatasi atau dihapus, sampai snapshot itu habis masa simpannya atau dihapus admin.
 - Jadwal di dataset yang tidak lagi dikenal panel (Sapo Drive dimatikan, folder pribadi pengguna yang dihapus) tetap berjalan sampai datanya dihapus. Datanya aman, karena yang dibuang hanya snapshot otomatis.
+
+## Pemulihan di File Station (2026-10-25)
+
+- **"Versi sebelumnya"** di File Station (juga di Drive saya): daftar snapshot folder untuk setiap pengguna yang boleh membuka folder itu (`files/snapshots`; nama dan waktu saja). Pengguna memilih satu waktu lalu menjelajah dan mengunduh isinya, baca saja.
+- **`FilesTarget.Snapshot`**: `sapod` memeriksa nama (pola snapshot Sapo, ketat) dan menjadikan `<folder>/.zfs/snapshot/<nama>` akar proses pembantu.
+  - Akar ini hanya untuk `list`, `stat`, dan `open_read`; operasi tulis ke snapshot ditolak.
+  - Proses pembantu tetap berjalan sebagai akun pengguna, dan path tetap lewat `openat2` di bawah akar itu (tanpa `..`, symlink, atau sistem berkas lain).
+  - `CleanFilePath` tetap menolak `.zfs`, jadi path dari pengguna tidak pernah bisa memilih snapshot lain.
+- **`files.restore`** (butuh izin tulis, log audit `files.restore`): menyalin file atau folder dari snapshot ke tempat yang sama di folder sekarang, sebagai pengguna.
+  - Bila nama itu sudah ada, hasilnya diberi nama baru `<nama> (dipulihkan <waktu snapshot>)<ekstensi>`. File sekarang hanya ditimpa (atomik) bila dipilih dan keduanya file biasa; folder tidak pernah ditimpa.
+  - Folder disalin ke direktori sementara lalu baru diberi nama akhir. Bila gagal atau melebihi batas (`agent.files.restore_max_files`, `restore_max_gb`), salinan setengah jadi dihapus.
+  - Symlink, berkas khusus, dan sistem berkas lain di dalamnya dilewati (jumlahnya dilaporkan).
+  - File hasil pemulihan mengikuti izin bawaan folder tujuan (ACL), bukan izin lama di snapshot; waktu ubahnya dipertahankan.
+- Pemulihan berjalan dalam satu permintaan dengan batas waktu `agent.files.delete_timeout_seconds` (paling lama sekitar 4,5 menit). Folder yang lebih besar dipulihkan sebagian-sebagian, atau lewat Previous Versions di Windows.
