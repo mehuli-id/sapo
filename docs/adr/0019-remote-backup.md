@@ -30,7 +30,7 @@ Backup ke pool lain (ADR 0017) masih berada di lokasi yang sama: kebakaran, penc
   - Shared folder yang dipakai tugas tidak bisa dihapus.
   - Pool penerima yang menyimpan salinan partner tidak bisa dihapus sebelum partner dihapus.
   - Menghapus partner beserta salinan butuh ketik ulang nama, password, dan log audit (`destructive`).
-- **Pemulihan di penerima.** Salinan dipulihkan sebagai shared folder baru di NAS penerima, tanpa izin pengguna; admin memberi izin setelahnya. Ini untuk saat NAS asal rusak. Mengirim balik ke NAS asal menyusul.
+- **Pemulihan di penerima.** Salinan dipulihkan sebagai shared folder baru di NAS penerima, tanpa izin pengguna; admin memberi izin setelahnya. Pemilik dan ACL dari salinan dibuang (UID di NAS pengirim bisa milik orang lain di penerima; lihat ADR 0020). Ini untuk saat NAS asal rusak. Mengirim balik ke NAS asal menyusul.
 - **Jadwal** harian di sapo-api pengirim (waktu NAS), satu pengiriman pada satu waktu, percobaan gagal diulang paling cepat sejam kemudian. Kegagalan masuk notifikasi email `backup_failed` (ADR 0018); hasil terakhir tampil di aplikasi Backup.
 
 ## Akibat

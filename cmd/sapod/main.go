@@ -205,7 +205,7 @@ func main() {
 	reg.Register(proto.OpBackupsRestore, backups.RestoreOp())
 	reg.Register(proto.OpBackupsClaim, backups.ClaimOp())
 	cc := cfg.Agent.Cloud
-	cloud := agent.NewCloud(agent.CloudTools{Restic: cc.Restic, SystemdRun: cfg.Agent.Updates.SystemdRun, Systemctl: cfg.Agent.Shares.Systemctl,
+	cloud := agent.NewCloud(agent.CloudTools{Restic: cc.Restic, SystemdRun: cfg.Agent.Updates.SystemdRun, Systemctl: cfg.Agent.Shares.Systemctl, Timedatectl: cfg.Agent.Time.Timedatectl,
 		StateFile: cc.StateFile, SecretsDir: cc.SecretsDir, CacheDir: cc.CacheDir, MaxRun: time.Duration(cc.MaxRunHours) * time.Hour}, backups)
 	go cloud.Run(context.Background())
 	reg.Register(proto.OpCloudList, cloud.ListOp())

@@ -1033,7 +1033,7 @@
     "deleteRepoHelp": "NAS ini melupakan penyimpanan dan kuncinya. Data di cloud TIDAK dihapus dan bisa disambungkan lagi dengan password enkripsinya.",
     "repoDeleted": "Penyimpanan dilupakan. Data di cloud tetap ada.",
     "noSnapshots": "Belum ada salinan Sapo di penyimpanan ini.",
-    "restoreHelp": "Salinan dipulihkan sebagai shared folder baru di pool yang dipilih. Bila folder asalnya ada di NAS ini, izinnya diambil dari folder asal; bila tidak, beri izin di Shared Folder setelahnya. Salinan dari NAS lama juga tampil di sini.",
+    "restoreHelp": "Salinan dipulihkan sebagai shared folder baru di pool yang dipilih, tanpa izin pengguna: pemilik file dan izin lama dari salinan dibuang (pengguna di NAS lama bisa berbeda). Beri izin di Shared Folder setelahnya. Salinan dari NAS lama juga tampil di sini.",
     "pool": "Ke pool",
     "schedule": "Setiap hari pukul {hour}.00, salinan {days} hari terakhir disimpan",
     "sizes": "{added} baru diunggah dari {total}",

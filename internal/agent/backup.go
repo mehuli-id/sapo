@@ -50,6 +50,8 @@ type Backups struct {
 	running map[string]bool
 	now     func() time.Time
 	loc     func() *time.Location
+	// resetFn: resetOwnership (diganti di test).
+	resetFn func(root string) error
 	// pipe menjalankan "zfs send … | zfs receive …"; zfsFn, propsFn, dan
 	// poolsFn menjalankan zfs/zpool (semuanya diganti di test).
 	pipe    func(ctx context.Context, send, recv []string) (uint64, error)
@@ -65,6 +67,7 @@ func NewBackups(t BackupTools, shares *Shares) *Backups {
 	}
 	b := &Backups{t: t, shares: shares, running: map[string]bool{}, now: time.Now, loc: localZone}
 	b.pipe, b.zfsFn, b.propsFn, b.poolsFn = b.zfsPipe, b.runZfs, shares.zfsProps, shares.p.poolNames
+	b.resetFn = resetOwnership
 	// Pool yang dipakai tugas backup (sumber atau tujuan) tidak dihapus
 	// diam-diam.
 	shares.p.beforeDestroy = append(shares.p.beforeDestroy, b.refusePool)
@@ -743,6 +746,17 @@ func (b *Backups) RestoreOp() Handler {
 // mencatatnya untuk sapo-api (backups.list/claim). jobID: tugas asal (untuk
 // izin folder asal di sapo-api), "remote:…" untuk salinan dari NAS lain.
 func (b *Backups) startRestore(ctx context.Context, jobID, srcDS, copyName, pool, name string) error {
+	return b.zfsRestore(ctx, jobID, srcDS, copyName, pool, name, false)
+}
+
+// startRestoreReset seperti startRestore untuk salinan dari NAS lain: UID
+// dan ACL di salinan bisa milik orang lain di NAS ini, jadi pemilik dan ACL
+// di-reset setelahnya (resetOwnership).
+func (b *Backups) startRestoreReset(ctx context.Context, jobID, srcDS, copyName, pool, name string) error {
+	return b.zfsRestore(ctx, jobID, srcDS, copyName, pool, name, true)
+}
+
+func (b *Backups) zfsRestore(ctx context.Context, jobID, srcDS, copyName, pool, name string, reset bool) error {
 	target := pool + "/" + name
 	return b.runRestore(ctx, jobID, copyName, pool, name, func(ctx context.Context) error {
 		_, err := b.pipe(ctx, []string{"send", "-L", "-c", "--", srcDS + "@" + copyName},
@@ -751,6 +765,15 @@ func (b *Backups) startRestore(ctx context.Context, jobID, srcDS, copyName, pool
 			// Snapshot salinan yang ikut terbawa tidak diperlukan folder baru.
 			_, _ = b.zfs(ctx, []string{"destroy"}, target+"@"+copyName)
 			_, err = b.zfs(ctx, []string{"mount"}, target)
+		}
+		if err == nil && reset {
+			if props, perr := b.propsFn(ctx, target, "mountpoint", "mounted"); perr != nil || props["mounted"] != "yes" {
+				err = errors.New("folder pulihan tidak terpasang")
+			} else if err = b.resetFn(props["mountpoint"]); err != nil {
+				// Folder baru buatan pemulihan ini: dibuang agar tidak ada
+				// folder dengan pemilik asing.
+				_, _ = b.zfs(context.WithoutCancel(ctx), []string{"destroy", "-r"}, target)
+			}
 		}
 		return err
 	})

@@ -636,7 +636,7 @@ func (r *RemoteBackups) RestoreOp() Handler {
 		} else if !exists {
 			return nil, &OpError{Code: proto.ErrNotFound, Message: "salinan tidak ditemukan"}
 		}
-		if err := r.b.startRestore(ctx, remoteMarker(p.RBackupTarget), remoteDS(p.RBackupTarget), p.Copy, p.Pool, p.Name); err != nil {
+		if err := r.b.startRestoreReset(ctx, remoteMarker(p.RBackupTarget), remoteDS(p.RBackupTarget), p.Copy, p.Pool, p.Name); err != nil {
 			return nil, err
 		}
 		return map[string]bool{"ok": true}, nil
