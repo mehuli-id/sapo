@@ -257,6 +257,13 @@ func (s *Server) notifyCollect(ctx context.Context, st NotifySettings, active ma
 			}
 		}
 	}
+	// Pembaruan: hasil pemeriksaan terakhir (terjadwal atau manual).
+	if f := s.updates.get(); f.Last != nil {
+		ok["updates_available"] = true
+		if n := len(f.Last.Packages); n > 0 {
+			add("updates_available", "system", "system", strconv.Itoa(n))
+		}
+	}
 	return cur, ok, cleared
 }
 
@@ -295,7 +302,8 @@ func (s *Server) notifyCheck(ctx context.Context) {
 				continue
 			}
 			if _, still := cur[k]; !still && ok[a.Event] && (a.Event != "disk_smart" || cleared[k]) {
-				if !a.Notified {
+				// Pembaruan yang sudah dipasang tidak perlu email "pulih".
+				if !a.Notified || a.Event == "updates_available" {
 					delete(f.Alerts, k)
 					continue
 				}

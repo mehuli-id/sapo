@@ -646,6 +646,8 @@ export const api = {
       last?: { started_at: string; finished_at?: string; ok: boolean; exit_code: number; interrupted?: boolean }
       log: string[]
     }>("/api/v1/updates"),
+  updateSchedule: () => get<UpdateSchedule>("/api/v1/updates/schedule"),
+  setUpdateSchedule: (off: boolean, hour: number) => post<{ ok: boolean }>("/api/v1/updates/schedule", { off, hour }),
   checkUpdates: () => post<{ checked_at: string; packages: { name: string; from?: string; to: string }[] }>("/api/v1/updates/check"),
   installUpdates: (admin_password: string) => post<{ ok: boolean }>("/api/v1/updates/install", { admin_password }),
   timeStatus: () => get<{ timezone: string; now: string; ntp: boolean; synchronized: boolean }>("/api/v1/settings/time"),
@@ -744,6 +746,15 @@ export const api = {
 
 // Data yang dibutuhkan isian wizard tertentu (misalnya daftar disk untuk
 // disk-select), disiapkan aplikasi yang membuka wizard.
+// Pemeriksaan pembaruan harian; last: hasil berhasil terakhir.
+export interface UpdateSchedule {
+  off: boolean
+  hour: number
+  last?: { checked_at: string; packages: { name: string; from?: string; to: string }[] }
+  last_attempt?: string
+  last_error?: string
+}
+
 // Notifikasi email (ADR 0018). Password SMTP tidak pernah dikirim balik.
 export interface NotifySettings {
   enabled: boolean

@@ -752,6 +752,17 @@ res="$(curl -ksS -b "$JAR" -X POST -H 'X-Sapo-Request: 1' -w ' %{http_code}' --m
 pkgs="$(json 'print(" ".join(p["name"] for p in v["packages"]))' <<<"$res")"
 count="$(json 'print(len(v["packages"]))' <<<"$res")"
 echo "pembaruan: $count paket bisa diperbarui"
+# Hasilnya dicatat untuk Control Panel dan notifikasi; jadwal harian bisa
+# diubah dan dimatikan.
+res="$(api GET /api/v1/updates/schedule)"
+json "assert not v['off'] and v['hour']==4 and len(v['last']['packages'])==$count, v" <<<"$res" || fail "hasil pemeriksaan tercatat: $res"
+res="$(api POST /api/v1/updates/schedule '{"off":true,"hour":3}')"
+[[ "$res" == *' 200' ]] || fail "matikan pemeriksaan otomatis: $res"
+res="$(api GET /api/v1/updates/schedule)"
+json "assert v['off'] and v['hour']==3, v" <<<"$res" || fail "jadwal pemeriksaan: $res"
+res="$(api POST /api/v1/updates/schedule '{"off":false,"hour":4}')"
+[[ "$res" == *' 200' ]] || fail "nyalakan pemeriksaan otomatis: $res"
+echo "pembaruan: hasil pemeriksaan tercatat, jadwal harian diubah, dimatikan, dan dinyalakan lagi"
 if (( count <= 15 )) && ! grep -qE '(^| )(linux-|zfs|sapo( |$))' <<<"$pkgs"; then
   res="$(api POST /api/v1/updates/install "{\"admin_password\":\"$PASS\"}")"
   [[ "$res" == *' 200' ]] || fail "pasang pembaruan: $res"

@@ -348,6 +348,12 @@ api:
   # smart_minutes, disk yang tidur tidak dibangunkan). Satu email berisi semua
   # masalah baru; email "pulih" dikirim saat masalah hilang. Bahasa email
   # mengikuti bahasa yang dipilih saat setup awal.
+  # Pemeriksaan pembaruan harian (apt-get update + simulasi lewat sapod) pada
+  # jam ini (waktu NAS); admin bisa mengubah jam atau mematikannya di Control
+  # Panel. Pembaruan tidak pernah dipasang otomatis.
+  update_check:
+    default_hour: 4
+
   notify:
     check_minutes: 5
     smart_minutes: 60
@@ -367,6 +373,7 @@ api:
           pool_full: "Pool {name} sudah terisi {detail}%. Hapus data yang tidak perlu atau tambah kapasitas."
           disk_smart: "Disk {name} melaporkan masalah kesehatan (SMART: {detail}). Pastikan backup berjalan dan siapkan disk pengganti."
           backup_failed: "Backup {name} gagal: {detail}"
+          updates_available: "Ada {detail} pembaruan sistem. Pasang dari Control Panel → Pembaruan sistem."
       en:
         subject_alert: "[{host}] {n} issues need attention"
         subject_resolved: "[{host}] Issues resolved"
@@ -380,6 +387,7 @@ api:
           pool_full: "Pool {name} is {detail}% full. Delete data you don't need or add capacity."
           disk_smart: "Disk {name} reports a health problem (SMART: {detail}). Make sure backups run and prepare a replacement disk."
           backup_failed: "Backup {name} failed: {detail}"
+          updates_available: "{detail} system updates are available. Install them from Control Panel → System updates."
 
 auth:
   password_min_length: 10

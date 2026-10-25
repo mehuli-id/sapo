@@ -26,6 +26,6 @@ NAS harus mendapat perbaikan keamanan Debian dan versi Sapo baru tanpa terminal 
 ## Konsekuensi
 
 - Pembaruan kernel atau ZFS butuh restart NAS agar berlaku; panel belum memberi tahu (menyusul).
-- Pembaruan otomatis terjadwal belum ada.
+- Pembaruan otomatis terjadwal belum ada. **Tambahan (2026-10-25):** `sapo-api` meminta `updates.check` sekali sehari pada jam yang diatur admin (`api.update_check.default_hour`, waktu NAS dari `time.status`; diulang sejam kemudian bila gagal, langsung saat NAS menyala bila jamnya terlewat). Hasil terakhir (otomatis atau manual) disimpan di `<data_dir>/update-check.json`, tampil di Control Panel, dan menjadi kejadian notifikasi `updates_available` (ADR 0018; tanpa email "pulih"). Pemasangan tetap hanya lewat panel dengan password.
 - Log audit mencatat permintaan pemasangan; hasilnya ada di status dan log pemasangan, belum di log audit.
 - Uji asap ISO selalu memeriksa pembaruan, tetapi hanya memasangnya bila daftarnya kecil dan tidak menyentuh kernel, ZFS, atau Sapo.

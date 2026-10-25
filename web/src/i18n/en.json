@@ -713,7 +713,13 @@
     "webdav": "WebDAV",
     "webdavHelp": "Opens Sapo Drive and shared folders at https://…/dav/ with an app password.",
     "webdavOn": "WebDAV turned on.",
-    "webdavOff": "WebDAV turned off."
+    "webdavOff": "WebDAV turned off.",
+    "lastChecked": "Last checked: {when}",
+    "checkFailed": "The last check failed",
+    "autoCheck": "Check for updates automatically every day",
+    "autoCheckHour": "Hour (0–23)",
+    "autoCheckHelp": "Only checks, never installs. If email notifications are on, you get an email when updates are available.",
+    "scheduleSaved": "Check schedule saved."
   },
   "appCenter": {
     "intro": "Additional apps from the Sapo catalog. Each app runs separately with its own account, without special privileges, and keeps its data on the pool you choose. Apps can only open the shared folders you give them.",
@@ -966,7 +972,8 @@
       "pool_health": "Pool not healthy (disk failed or missing)",
       "pool_full": "Pool nearly full",
       "disk_smart": "Disk reports a problem (SMART)",
-      "backup_failed": "Backup failed"
+      "backup_failed": "Backup failed",
+      "updates_available": "System updates available"
     }
   }
 }

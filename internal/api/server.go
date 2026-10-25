@@ -64,7 +64,9 @@ type HTTPSInfo struct {
 // Server adalah handler HTTP sapo-api.
 type Server struct {
 	// notify: notifikasi email (ADR 0018).
-	notify   *notifier
+	notify *notifier
+	// updates: pemeriksaan pembaruan terjadwal dan hasil terakhirnya.
+	updates  *updateChecks
 	cfg      config.Config
 	agent    AgentCaller
 	store    *auth.Store
@@ -164,6 +166,10 @@ func New(o Options) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	updates, err := openUpdateChecks(cfg.API.DataDir)
+	if err != nil {
+		return nil, err
+	}
 	argon := auth.Argon2Params{MemoryKiB: cfg.Auth.Argon2.MemoryKiB, Iterations: cfg.Auth.Argon2.Iterations, Parallelism: cfg.Auth.Argon2.Parallelism}
 	dummy, err := auth.HashPassword("sapo-dummy-password", argon)
 	if err != nil {
@@ -189,6 +195,7 @@ func New(o Options) (*Server, error) {
 		shares:   shares,
 		settings: settings,
 		notify:   notify,
+		updates:  updates,
 		davLocks: newDAVLockTable(),
 
 		resyncDelay: 30 * time.Second,
@@ -309,6 +316,8 @@ func New(o Options) (*Server, error) {
 	s.mux.Handle("POST /api/v1/apps/{id}/remove", s.requireAdmin(http.HandlerFunc(s.handleAppRemove)))
 	s.mux.Handle("POST /api/v1/apps/{id}/folders", s.requireAdmin(http.HandlerFunc(s.handleAppFolders)))
 	s.mux.Handle("GET /api/v1/updates", s.requireAdmin(s.proxyRead(proto.OpUpdatesStatus)))
+	s.mux.Handle("GET /api/v1/updates/schedule", s.requireAdmin(http.HandlerFunc(s.handleUpdateCheckInfo)))
+	s.mux.Handle("POST /api/v1/updates/schedule", s.requireAdmin(http.HandlerFunc(s.handleUpdateCheckSet)))
 	s.mux.Handle("POST /api/v1/updates/check", s.requireAdmin(http.HandlerFunc(s.handleUpdatesCheck)))
 	s.mux.Handle("POST /api/v1/updates/install", s.requireAdmin(http.HandlerFunc(s.handleUpdatesInstall)))
 	s.mux.Handle("GET /api/v1/network", s.requireAdmin(s.proxyRead(proto.OpNetworkStatus)))
