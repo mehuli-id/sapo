@@ -112,7 +112,8 @@ func main() {
 		Workgroup: shc.Workgroup, ServerString: shc.ServerString, MinProtocol: shc.MinProtocol,
 		MountBase: pc.MountBase, PasswdFile: ac.PasswdFile, GroupFile: ac.GroupFile,
 		Exportfs: shc.Exportfs, Systemctl: shc.Systemctl, ExportsFile: shc.ExportsFile, NFSService: shc.NFSService, SMBService: shc.SMBService,
-		IDMin: ac.IDMin, IDMax: ac.IDMax,
+		DenyNetworks: []string{cfg.Agent.Apps.Subnet},
+		IDMin:        ac.IDMin, IDMax: ac.IDMax,
 	})
 	shares.SetAccounts(accounts)
 	self, err := os.Executable()
@@ -133,6 +134,9 @@ func main() {
 		IDMin: apc.IDMin, IDMax: apc.IDMax, ReservedPorts: apc.ReservedPorts, MountBase: pc.MountBase,
 		Timeout: time.Minute, Log: log,
 	}, shares)
+	// File Quadlet disamakan dengan katalog (paket Sapo bisa membawa digest
+	// baru), di latar belakang.
+	go apps.Reconcile(context.Background())
 	reg.Register(proto.OpAppsCatalog, apps.CatalogOp())
 	reg.Register(proto.OpAppsList, apps.ListOp())
 	reg.Register(proto.OpAppsInstall, apps.InstallOp())

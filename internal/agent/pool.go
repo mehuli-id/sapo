@@ -50,9 +50,9 @@ type Pools struct {
 	// openExcl memeriksa bahwa perangkat blok tidak sedang dipakai (diganti
 	// di test; nil = tidak diperiksa).
 	openExcl func(dev string) error
-	// beforeDestroy dijalankan sebelum pool dihapus (mencabut ekspor NFS
-	// folder di pool itu; diisi NewShares).
-	beforeDestroy func(ctx context.Context, pool string) error
+	// beforeDestroy dijalankan berurutan sebelum pool dihapus (misalnya
+	// menolak bila ada data aplikasi, mencabut ekspor NFS).
+	beforeDestroy []func(ctx context.Context, pool string) error
 }
 
 // NewPools menyiapkan operasi pool di atas st.
@@ -916,8 +916,12 @@ func (p *Pools) PoolDestroyOp() Handler {
 		}
 		runCtx, cancelRun := context.WithTimeout(context.WithoutCancel(ctx), p.t.CreateTimeout)
 		defer cancelRun()
-		if p.beforeDestroy != nil {
-			if err := p.beforeDestroy(runCtx, req.Name); err != nil {
+		for _, hook := range p.beforeDestroy {
+			if err := hook(runCtx, req.Name); err != nil {
+				var oe *OpError
+				if errors.As(err, &oe) {
+					return nil, oe
+				}
 				return nil, &OpError{Code: "pool_destroy_failed", Message: clipTo(err.Error(), maxErrorText)}
 			}
 		}

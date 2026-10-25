@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -42,13 +43,44 @@ type Apps struct {
 	t      AppsTools
 	shares *Shares
 	mu     sync.Mutex
-	// chown diganti di test.
-	chown func(path string, uid, gid int) error
+	// chown dan portFree diganti di test.
+	chown    func(path string, uid, gid int) error
+	portFree func(port int) bool
 }
 
 // NewApps menyiapkan App Center.
 func NewApps(t AppsTools, shares *Shares) *Apps {
-	return &Apps{t: t, shares: shares, chown: os.Lchown}
+	a := &Apps{t: t, shares: shares, chown: os.Lchown, portFree: portFree}
+	// Pool yang masih berisi data aplikasi tidak dihapus (dicek paling awal,
+	// sebelum ekspor NFS dicabut).
+	shares.p.beforeDestroy = append([]func(context.Context, string) error{a.refusePool}, shares.p.beforeDestroy...)
+	return a
+}
+
+// refusePool menolak menghapus pool yang masih menyimpan data aplikasi.
+func (a *Apps) refusePool(_ context.Context, pool string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	st, err := a.load()
+	if err != nil {
+		return err
+	}
+	for id, s := range st.Apps {
+		if s.HasData && s.Pool == pool {
+			return &OpError{Code: proto.ErrConflict, Message: "pool " + pool + " masih berisi data aplikasi " + id + "; hapus aplikasi itu beserta datanya dulu di App Center"}
+		}
+	}
+	return nil
+}
+
+// portFree: port TCP belum dipakai program lain di NAS.
+func portFree(port int) bool {
+	ln, err := net.Listen("tcp", ":"+strconv.Itoa(port))
+	if err != nil {
+		return false
+	}
+	ln.Close()
+	return true
 }
 
 // appDef adalah satu entri katalog (apps/<id>.yaml).
@@ -270,6 +302,9 @@ func (a *Apps) InstallOp() Handler {
 				return nil, &OpError{Code: proto.ErrConflict, Message: "port " + strconv.Itoa(p.Port) + " sudah dipakai " + id}
 			}
 		}
+		if !a.portFree(p.Port) {
+			return nil, &OpError{Code: proto.ErrConflict, Message: "port " + strconv.Itoa(p.Port) + " sudah dipakai program lain di NAS"}
+		}
 		s := st.Apps[p.ID]
 		switch {
 		case s != nil && s.Installed:
@@ -295,7 +330,13 @@ func (a *Apps) InstallOp() Handler {
 		if err != nil {
 			return nil, err
 		}
-		s.Port, s.Installed, s.Enabled, s.HasData, s.InstalledAt = p.Port, true, true, true, time.Now().UTC()
+		// Data dicatat segera, agar tetap terlihat (dan bisa dihapus) walau
+		// langkah berikutnya gagal.
+		s.HasData = true
+		if err := a.save(st); err != nil {
+			return nil, err
+		}
+		s.Port, s.Installed, s.Enabled, s.InstalledAt = p.Port, true, true, time.Now().UTC()
 		if err := a.writeQuadlet(def, s, path); err != nil {
 			return nil, err
 		}
@@ -382,10 +423,17 @@ func (a *Apps) ensureData(ctx context.Context, pool, id string, uid int) (string
 		return "", &OpError{Code: proto.ErrConflict, Message: "pool " + pool + " tidak terpasang di tempat Sapo"}
 	}
 	parent := pool + "/sapo-apps"
-	if _, err := sh.zfsProps(ctx, parent, "mountpoint"); errors.Is(err, errNoDataset) {
+	pprops, err := sh.zfsProps(ctx, parent, "sapo:app", sharePropName)
+	if errors.Is(err, errNoDataset) {
 		if err := a.zfs(ctx, []string{"create", "-o", "sapo:app=-", "-o", "devices=off", "-o", "setuid=off"}, parent); err != nil {
 			return "", err
 		}
+	} else if err != nil {
+		return "", err
+	} else if pprops["sapo:app"] != "-" || (pprops[sharePropName] != "-" && pprops[sharePropName] != "") {
+		// Dataset bernama sama yang bukan buatan App Center (misalnya
+		// dibuat dari terminal): tidak dipakai.
+		return "", &OpError{Code: proto.ErrConflict, Message: "dataset " + parent + " sudah ada dan bukan milik App Center"}
 	}
 	ds := parent + "/" + id
 	want := filepath.Join(a.t.MountBase, pool, "sapo-apps", id)
@@ -430,7 +478,9 @@ func (a *Apps) zfs(ctx context.Context, flags []string, ds string) error {
 func renderQuadlet(d appDef, s *appState, dataPath string) []byte {
 	var b bytes.Buffer
 	b.WriteString("# Dibuat oleh sapod (Sapo, App Center). Jangan diubah manual.\n")
-	fmt.Fprintf(&b, "[Unit]\nDescription=Aplikasi Sapo: %s\nAfter=network-online.target local-fs.target zfs-mount.service\nWants=network-online.target\nRequiresMountsFor=%s\n\n", d.ID, dataPath)
+	fmt.Fprintf(&b, "[Unit]\nDescription=Aplikasi Sapo: %s\nAfter=network-online.target local-fs.target zfs-mount.service\nWants=network-online.target\nRequiresMountsFor=%s\n", d.ID, dataPath)
+	// Aplikasi yang terus gagal (misalnya datanya hilang) berhenti dicoba.
+	b.WriteString("StartLimitIntervalSec=600\nStartLimitBurst=5\n\n")
 	b.WriteString("[Container]\n")
 	fmt.Fprintf(&b, "ContainerName=%s\nImage=%s\n", appAccount(d.ID), d.Image)
 	fmt.Fprintf(&b, "User=%d\nGroup=%d\n", s.UID, s.UID)
@@ -445,7 +495,9 @@ func renderQuadlet(d appDef, s *appState, dataPath string) []byte {
 		fmt.Fprintf(&b, "Environment=%s=%s\n", k, d.Env[k])
 	}
 	b.WriteString("DropCapability=all\nNoNewPrivileges=true\n")
-	fmt.Fprintf(&b, "PodmanArgs=--memory=%dm --pids-limit=1024\n\n", d.MemoryMB)
+	// Port di bawah 1024 tidak bisa dibuka di dalam container (misalnya untuk
+	// menyamar sebagai klien NFS istimewa).
+	fmt.Fprintf(&b, "PodmanArgs=--memory=%dm --pids-limit=1024 --sysctl=net.ipv4.ip_unprivileged_port_start=1024\n\n", d.MemoryMB)
 	b.WriteString("[Service]\nRestart=on-failure\nRestartSec=10s\n# Unduhan image pertama bisa lama.\nTimeoutStartSec=900\n")
 	if s.Enabled {
 		b.WriteString("\n[Install]\nWantedBy=multi-user.target\n")
@@ -476,6 +528,10 @@ func (a *Apps) setEnabled(enable bool) Handler {
 		if err != nil {
 			return nil, err
 		}
+		if !a.shares.p.write.TryLock() {
+			return nil, &OpError{Code: proto.ErrBusy, Message: "operasi pool lain sedang berjalan"}
+		}
+		defer a.shares.p.write.Unlock()
 		a.mu.Lock()
 		defer a.mu.Unlock()
 		st, err := a.load()
@@ -483,12 +539,36 @@ func (a *Apps) setEnabled(enable bool) Handler {
 			return nil, err
 		}
 		s, ok := st.Apps[p.ID]
-		def, inCat := cat[p.ID]
-		if !ok || !s.Installed || !inCat {
+		if !ok || !s.Installed {
 			return nil, &OpError{Code: proto.ErrNotFound, Message: "aplikasi tidak terpasang"}
 		}
+		def, inCat := cat[p.ID]
+		if !inCat {
+			// Sudah tidak ada di katalog: hanya bisa dihentikan (dan dilepas,
+			// data disimpan).
+			if enable {
+				return nil, &OpError{Code: proto.ErrNotFound, Message: "aplikasi sudah tidak ada di katalog"}
+			}
+			if err := a.systemctl(ctx, []string{"stop"}, appUnit(p.ID)); err != nil {
+				return nil, err
+			}
+			_ = os.Remove(a.quadletPath(p.ID))
+			s.Installed, s.Enabled = false, false
+			if err := a.save(st); err != nil {
+				return nil, err
+			}
+			_ = a.systemctl(ctx, []string{"daemon-reload"})
+			return map[string]bool{"ok": true}, nil
+		}
+		path := filepath.Join(a.t.MountBase, s.Pool, "sapo-apps", p.ID)
+		if enable {
+			// Data diperiksa lagi (terpasang di tempatnya, pemilik akun).
+			if path, err = a.ensureData(ctx, s.Pool, p.ID, s.UID); err != nil {
+				return nil, err
+			}
+		}
 		s.Enabled = enable
-		if err := a.writeQuadlet(def, s, filepath.Join(a.t.MountBase, s.Pool, "sapo-apps", p.ID)); err != nil {
+		if err := a.writeQuadlet(def, s, path); err != nil {
 			return nil, err
 		}
 		if err := a.save(st); err != nil {
@@ -505,6 +585,44 @@ func (a *Apps) setEnabled(enable bool) Handler {
 			return nil, err
 		}
 		return map[string]bool{"ok": true}, nil
+	}
+}
+
+// Reconcile menulis ulang file Quadlet aplikasi terpasang dari katalog saat
+// sapod menyala (misalnya digest image baru setelah paket Sapo diperbarui),
+// lalu me-restart aplikasi yang berubah.
+func (a *Apps) Reconcile(ctx context.Context) {
+	cat, err := a.catalog()
+	if err != nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	st, err := a.load()
+	if err != nil {
+		return
+	}
+	var changed []string
+	for id, s := range st.Apps {
+		def, ok := cat[id]
+		if !s.Installed || !ok {
+			continue
+		}
+		want := renderQuadlet(def, s, filepath.Join(a.t.MountBase, s.Pool, "sapo-apps", id))
+		if cur, err := os.ReadFile(a.quadletPath(id)); err == nil && bytes.Equal(cur, want) {
+			continue
+		}
+		if err := a.writeQuadlet(def, s, filepath.Join(a.t.MountBase, s.Pool, "sapo-apps", id)); err == nil {
+			changed = append(changed, id)
+		}
+	}
+	if len(changed) == 0 {
+		return
+	}
+	_ = a.systemctl(ctx, []string{"daemon-reload"})
+	for _, id := range changed {
+		_ = a.systemctl(ctx, []string{"try-restart"}, appUnit(id))
+		a.logInfo("aplikasi diperbarui dari katalog", "app", id)
 	}
 }
 
@@ -538,7 +656,11 @@ func (a *Apps) RemoveOp() Handler {
 			return nil, &OpError{Code: proto.ErrNotFound, Message: "aplikasi tidak ditemukan"}
 		}
 		if s.Installed {
-			_ = a.systemctl(ctx, []string{"stop"}, appUnit(p.ID))
+			// Bila tidak bisa dihentikan, tidak ada yang diubah (container
+			// tidak boleh tertinggal berjalan tanpa unit).
+			if err := a.systemctl(ctx, []string{"stop"}, appUnit(p.ID)); err != nil {
+				return nil, err
+			}
 			if err := os.Remove(a.quadletPath(p.ID)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 				return nil, err
 			}
@@ -562,10 +684,25 @@ func (a *Apps) RemoveOp() Handler {
 					return nil, &OpError{Code: proto.ErrPoolBusy, Message: err.Error()}
 				}
 			}
+			s.HasData = false
+			if err := a.save(st); err != nil {
+				return nil, err
+			}
 			// Akun dihapus bersama datanya (ID tidak pernah dipakai ulang).
+			// Bila gagal, catatannya disimpan agar dicoba lagi.
 			name := appAccount(p.ID)
-			_, _ = runTool(ctx, a.t.Timeout, a.t.Userdel, nil, name)
-			_, _ = runTool(ctx, a.t.Timeout, a.t.Groupdel, nil, name)
+			users, _ := readPasswd(a.shares.t.PasswdFile)
+			if _, exists := users[name]; exists {
+				if res, err := runTool(ctx, a.t.Timeout, a.t.Userdel, nil, name); err != nil || res.ExitCode != 0 {
+					return nil, fmt.Errorf("akun %s gagal dihapus: %v %s", name, err, firstLine(res.Stderr))
+				}
+			}
+			groups, _ := readGroup(a.shares.t.GroupFile)
+			if _, exists := groups[name]; exists {
+				if res, err := runTool(ctx, a.t.Timeout, a.t.Groupdel, nil, name); err != nil || res.ExitCode != 0 {
+					return nil, fmt.Errorf("grup %s gagal dihapus: %v %s", name, err, firstLine(res.Stderr))
+				}
+			}
 			delete(st.Apps, p.ID)
 			if err := a.save(st); err != nil {
 				return nil, err

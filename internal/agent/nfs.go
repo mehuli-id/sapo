@@ -52,6 +52,26 @@ func validNFSClient(c string) bool {
 	return inNFSNetworks(p)
 }
 
+// checkNFSDeny: klien NFS tidak boleh bertumpuk dengan jaringan yang
+// ditolak (jaringan container App Center).
+func (s *Shares) checkNFSDeny(sp proto.ShareSpec) error {
+	if sp.NFS == nil {
+		return nil
+	}
+	for _, c := range sp.NFS.Clients {
+		p, err := netip.ParsePrefix(c)
+		if err != nil {
+			continue
+		}
+		for _, d := range s.t.DenyNetworks {
+			if dp, err := netip.ParsePrefix(d); err == nil && dp.Overlaps(p) {
+				return fmt.Errorf("klien NFS %s bertumpuk dengan jaringan aplikasi %s", c, d)
+			}
+		}
+	}
+	return nil
+}
+
 func inNFSNetworks(p netip.Prefix) bool {
 	for _, n := range nfsNetworks {
 		if n.Bits() <= p.Bits() && n.Contains(p.Addr()) {
