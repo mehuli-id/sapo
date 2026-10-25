@@ -782,7 +782,8 @@ json 'assert v["live"] and not v["running"], v' <<<"$res" || fail "installer har
 sysref="$(json "
 d=[x for x in v if x['serial']=='SAPOUJI4'][0]
 import json as j; print(j.dumps(dict(name=d['name'],serial=d['serial'],wwn=d['wwn'],size_bytes=d['size_bytes'],usage=d['usage'],erase=d['usage']!='free')))" <<<"$disks_json")"
-sysdisk="$(json 'print(v["name"])' <<<"$sysref")"
+# (json membuang kata terakhir, biasanya kode HTTP: diberi kode tiruan.)
+sysdisk="$(json 'print(v["name"])' <<<"$sysref 0")"
 res="$(api POST /api/v1/system/install "{\"disk\":$sysref,\"confirm_name\":\"$sysdisk\",\"password\":\"$PASS\"}")"
 [[ "$res" == *' 200' ]] || fail "mulai pasang ke disk: $res"
 start=$SECONDS
