@@ -204,6 +204,15 @@ func main() {
 	reg.Register(proto.OpBackupsRun, backups.RunOp())
 	reg.Register(proto.OpBackupsRestore, backups.RestoreOp())
 	reg.Register(proto.OpBackupsClaim, backups.ClaimOp())
+	remote := agent.NewRemoteBackups(backups)
+	reg.Register(proto.OpRBackupRecvOpen, remote.RecvOpenOp())
+	reg.Register(proto.OpRBackupRecvFinish, remote.RecvFinishOp())
+	reg.Register(proto.OpRBackupList, remote.ListOp())
+	reg.Register(proto.OpRBackupDestroy, remote.DestroyOp())
+	reg.Register(proto.OpRBackupRestore, remote.RestoreOp())
+	reg.Register(proto.OpRBackupSendOpen, remote.SendOpenOp())
+	reg.Register(proto.OpRBackupSendFinish, remote.SendFinishOp())
+	reg.Register(proto.OpRBackupSendClean, remote.SendCleanupOp())
 	snc := cfg.Agent.Snapshots
 	snapshots := agent.NewSnapshots(shares, agent.SnapshotTools{
 		Zpool: pc.Zpool, MaxPoolCapacity: snc.MaxPoolCapacityPercent, CallTimeout: time.Duration(snc.CallTimeoutSeconds) * time.Second,

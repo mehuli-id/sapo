@@ -121,6 +121,18 @@ const (
 	OpBackupsRestore = "backups.restore"
 	OpBackupsClaim   = "backups.claim"
 
+	// Backup ke NAS lain (ADR 0019). Penerima: aliran zfs receive lewat file
+	// descriptor dari sapo-api (data dari NAS pengirim lewat HTTPS); pengirim:
+	// aliran zfs send ke sapo-api. sapod sendiri tidak pernah ke jaringan.
+	OpRBackupRecvOpen   = "rbackup.recv_open"
+	OpRBackupRecvFinish = "rbackup.recv_finish"
+	OpRBackupList       = "rbackup.list"
+	OpRBackupDestroy    = "rbackup.destroy"
+	OpRBackupRestore    = "rbackup.restore"
+	OpRBackupSendOpen   = "rbackup.send_open"
+	OpRBackupSendFinish = "rbackup.send_finish"
+	OpRBackupSendClean  = "rbackup.send_cleanup"
+
 	// Installer ke disk (ADR 0016).
 	OpInstallStatus = "install.status"
 	OpInstallStart  = "install.start"
@@ -1120,4 +1132,77 @@ type BackupRestoreParams struct {
 	ID   string `json:"id"`
 	Copy string `json:"copy"`
 	Name string `json:"name"`
+}
+
+// RBackupTarget: salinan tugas Job dari partner Partner di pool penerima
+// Pool (<pool>/sapo-backup-remote/<partner>/<job>). Job kosong di
+// rbackup.destroy = semua salinan partner itu.
+type RBackupTarget struct {
+	Pool    string `json:"pool"`
+	Partner string `json:"partner"`
+	Job     string `json:"job"`
+}
+
+// RBackupRecvParams membuka aliran zfs receive: Base kosong = salinan
+// pertama (penuh), selain itu harus snapshot terbaru di penerima.
+type RBackupRecvParams struct {
+	RBackupTarget
+	Base string `json:"base"`
+	Snap string `json:"snap"`
+}
+
+// RBackupSession: aliran yang sedang terbuka (file descriptor-nya dikirim
+// bersama jawaban).
+type RBackupSession struct {
+	Session string `json:"session"`
+	Snap    string `json:"snap,omitempty"`
+	Base    string `json:"base,omitempty"`
+}
+
+// RBackupRecvFinish menutup aliran penerima. OK: data dari pengirim sampai
+// utuh (bila tidak, zfs receive dihentikan). Keep: jumlah salinan disimpan.
+type RBackupRecvFinish struct {
+	Session string `json:"session"`
+	OK      bool   `json:"ok"`
+	Keep    int    `json:"keep"`
+}
+
+// RBackupList: salinan di penerima. Untuk Job kosong: Jobs berisi semua
+// tugas partner itu.
+type RBackupList struct {
+	Copies    []BackupCopy     `json:"copies"`
+	UsedBytes uint64           `json:"used_bytes"`
+	Jobs      []RBackupJobInfo `json:"jobs,omitempty"`
+}
+
+// RBackupJobInfo: satu tugas partner di penerima.
+type RBackupJobInfo struct {
+	Job       string       `json:"job"`
+	Copies    []BackupCopy `json:"copies"`
+	UsedBytes uint64       `json:"used_bytes"`
+}
+
+// RBackupRestoreParams memulihkan salinan Copy menjadi shared folder baru
+// Name di pool penerima.
+type RBackupRestoreParams struct {
+	RBackupTarget
+	Copy string `json:"copy"`
+	Name string `json:"name"`
+}
+
+// RBackupSendParams membuka aliran zfs send untuk tugas Job dari shared
+// folder Pool/Share. Remote: nama salinan yang sudah ada di penerima.
+type RBackupSendParams struct {
+	Pool   string   `json:"pool"`
+	Share  string   `json:"share"`
+	Job    string   `json:"job"`
+	Remote []string `json:"remote"`
+}
+
+// RBackupSendFinish menutup aliran pengirim. RemoteHas: penerima sudah
+// menyimpan Snap (snapshot itu menjadi dasar berikutnya, tidak dibuang).
+type RBackupSendFinish struct {
+	Session   string `json:"session"`
+	OK        bool   `json:"ok"`
+	RemoteHas bool   `json:"remote_has"`
 }

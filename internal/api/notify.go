@@ -257,6 +257,14 @@ func (s *Server) notifyCollect(ctx context.Context, st NotifySettings, active ma
 			}
 		}
 	}
+	// Backup ke NAS lain (ADR 0019): dicatat sapo-api sendiri, selalu terbaca.
+	rf := s.remote.get()
+	for _, j := range rf.Jobs {
+		if !j.LastOK && j.LastError != "" {
+			t, _ := rf.target(j.Target)
+			add("backup_failed", "remote:"+j.ID, j.Share+" → "+t.Name, j.LastError)
+		}
+	}
 	// Pembaruan: hasil pemeriksaan terakhir (terjadwal atau manual).
 	if f := s.updates.get(); f.Last != nil {
 		ok["updates_available"] = true

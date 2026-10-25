@@ -518,6 +518,7 @@ export interface WizardField {
     | "toggle"
     | "pool-select"
     | "share-select"
+    | "target-select"
     | "permissions"
   label: Localized
   help?: Localized
@@ -665,6 +666,19 @@ export const api = {
   setNotify: (req: NotifySettings & { password?: string; admin_password: string }) => post<{ ok: boolean }>("/api/v1/notify", req),
   testNotify: () => post<{ ok: boolean }>("/api/v1/notify/test"),
   backups: () => get<BackupsList>("/api/v1/backups"),
+  remoteBackups: () => get<RemoteBackups>("/api/v1/remote-backups"),
+  addTarget: (req: { name: string; address: string; code: string; admin_password: string }) => post<BackupTargetInfo>("/api/v1/remote-backups/targets", req),
+  deleteTarget: (id: string) => post<{ ok: boolean }>(`/api/v1/remote-backups/targets/${encodeURIComponent(id)}/delete`),
+  setRemoteJob: (req: { id?: string; share: string; target: string; hour: number; enabled: boolean; admin_password: string }) =>
+    post<{ id: string }>("/api/v1/remote-backups/jobs", req),
+  runRemoteJob: (id: string) => post<{ ok: boolean }>(`/api/v1/remote-backups/jobs/${encodeURIComponent(id)}/run`),
+  deleteRemoteJob: (id: string, admin_password: string) => post<{ ok: boolean }>(`/api/v1/remote-backups/jobs/${encodeURIComponent(id)}/delete`, { admin_password }),
+  partners: () => get<BackupPartner[]>("/api/v1/backup-partners"),
+  createPartner: (req: { name: string; pool: string; keep: number; admin_password: string }) => post<{ id: string; code: string }>("/api/v1/backup-partners", req),
+  deletePartner: (id: string, req: { delete_data: boolean; confirm_name: string; admin_password: string }) =>
+    post<{ ok: boolean }>(`/api/v1/backup-partners/${encodeURIComponent(id)}/delete`, req),
+  restorePartnerCopy: (id: string, job: string, req: { copy: string; name: string; admin_password: string }) =>
+    post<{ ok: boolean }>(`/api/v1/backup-partners/${encodeURIComponent(id)}/jobs/${encodeURIComponent(job)}/restore`, req),
   setBackup: (req: { id?: string; share: string; dest_pool: string; hour: number; keep: number; enabled: boolean; admin_password: string }) =>
     post<BackupJob>("/api/v1/backups", req),
   runBackup: (id: string) => post<{ ok: boolean }>(`/api/v1/backups/${encodeURIComponent(id)}/run`),
@@ -779,6 +793,45 @@ export interface NotifyInfo {
   alerts: { event: string; name: string; detail: string; since: string }[]
 }
 
+// Backup ke NAS lain (ADR 0019).
+export interface BackupTargetInfo {
+  id: string
+  name: string
+  address: string
+  fingerprint: string
+  remote_host?: string
+  created: string
+}
+export interface RemoteJob {
+  id: string
+  share: string
+  pool: string
+  target: string
+  target_name: string
+  hour: number
+  enabled: boolean
+  running: boolean
+  last_run?: string
+  last_attempt?: string
+  last_ok: boolean
+  last_error?: string
+  last_bytes?: number
+  last_copies?: number
+}
+export interface RemoteBackups {
+  targets: BackupTargetInfo[]
+  jobs: RemoteJob[]
+}
+export interface BackupPartner {
+  id: string
+  name: string
+  pool: string
+  keep: number
+  created: string
+  last_seen?: string
+  jobs: { job: string; copies: { name: string; created: string }[]; used_bytes: number }[]
+}
+
 // Tugas backup (ADR 0017).
 export interface BackupJob {
   id: string
@@ -827,6 +880,8 @@ export interface WizardContext {
   users?: UserAccount[]
   // Shared folder untuk isian share-select.
   shares?: SharedFolder[]
+  // NAS tujuan backup untuk isian target-select.
+  targets?: BackupTargetInfo[]
 }
 
 // Daftar nama dari isian disk-select (dipisah koma).
@@ -918,6 +973,10 @@ export const wizardActions: Record<string, (values: Record<string, string>, ctx:
       events_off: [],
       admin_password: v.admin_password ?? "",
     }),
+  "rbackup.partner_create": (v) => api.createPartner({ name: v.name ?? "", pool: v.pool ?? "", keep: Number(v.keep), admin_password: v.admin_password ?? "" }),
+  "rbackup.target_add": (v) => api.addTarget({ name: v.name ?? "", address: v.address ?? "", code: (v.code ?? "").trim(), admin_password: v.admin_password ?? "" }),
+  "rbackup.job_create": (v) =>
+    api.setRemoteJob({ share: v.share ?? "", target: v.target ?? "", hour: Number(v.hour), enabled: true, admin_password: v.admin_password ?? "" }),
   "backups.create": (v) =>
     api.setBackup({
       share: v.share ?? "",

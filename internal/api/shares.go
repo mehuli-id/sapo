@@ -754,6 +754,12 @@ func (s *Server) handleShareDelete(w http.ResponseWriter, r *http.Request) {
 		writeErrorDetail(w, http.StatusBadRequest, "confirm_mismatch", "nama yang diketik ulang tidak sama", map[string]any{"field": "confirm_name"})
 		return
 	}
+	// Folder yang di-backup ke NAS lain dilepas dari tugasnya dulu (sapod tidak
+	// mengenal tugas jarak jauh, ADR 0019).
+	if id := s.remote.usingShare(name); id != "" {
+		writeErrorDetail(w, http.StatusConflict, "conflict", "shared folder masih di-backup ke NAS lain oleh tugas "+id, map[string]any{"job": id})
+		return
+	}
 	// Folder yang diberikan ke aplikasi terpasang dilepas dulu di App
 	// Center. Sisa akses aplikasi yang sudah dihapus tidak menahan (sapod
 	// tetap menolak bila folder masih dipasang di container).

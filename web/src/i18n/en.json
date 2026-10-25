@@ -354,7 +354,12 @@
     "smtp_invalid": "The SMTP server settings are not valid.",
     "smtp_password_required": "Enter the SMTP password: the server, port, security, or username changed.",
     "notify_failed": "The email could not be sent. Check the server settings below.",
-    "notify_not_configured": "Email notifications are not set up yet."
+    "notify_not_configured": "Email notifications are not set up yet.",
+    "pairing_code_invalid": "The pairing code is not valid. Copy it again from the destination NAS.",
+    "pairing_failed": "The destination NAS could not be paired.",
+    "target_exists": "This destination NAS is already paired.",
+    "target_used": "The destination NAS is still used by a backup task.",
+    "rbackup_failed": "Sending the backup failed."
   },
   "pool": {
     "title": "Storage pools",
@@ -975,5 +980,35 @@
       "backup_failed": "Backup failed",
       "updates_available": "System updates available"
     }
+  },
+  "rbackup": {
+    "sendTitle": "To another NAS",
+    "sendHelp": "Copy shared folders every day to another Sapo NAS over HTTPS, for example at home or another office. First pair the destination NAS using a code from it.",
+    "addTarget": "Add destination NAS",
+    "addJob": "Task to another NAS",
+    "paired": "Destination NAS paired. Now create a backup task to it.",
+    "fingerprint": "Fingerprint",
+    "deleteTarget": "Remove destination NAS",
+    "targetDeleted": "Destination NAS removed.",
+    "noTargets": "No destination NAS yet. Add one first in Backup → To another NAS.",
+    "schedule": "Every day at {hour}:00",
+    "remoteCopies": "{n} copies on the destination NAS",
+    "deleteJobHelp": "The task and its backup snapshots in this folder are deleted. Copies on {target} remain and can only be deleted from that NAS.",
+    "recvTitle": "Receive from another NAS",
+    "recvHelp": "This NAS can store backups from another Sapo NAS. Copies aren't shared on the network and can only be deleted from here.",
+    "addPartner": "Add sending NAS",
+    "codeTitle": "Pairing code (shown only once)",
+    "codeHelp": "Enter this code on the sending NAS: Backup → To another NAS → Add destination NAS. Anyone holding this code can send backups to this NAS.",
+    "copy": "Copy code",
+    "copied": "Copied",
+    "partnerInfo": "Stored on pool {pool}, {keep} copies per folder",
+    "lastSeen": "last connected {when}",
+    "noCopiesYet": "No copies received yet.",
+    "restoreHelp": "The copy is restored as a new shared folder on pool {pool} on this NAS, without user permissions. Grant permissions in Shared Folders afterwards.",
+    "restoreStarted": "Restore to folder {name} started. The folder appears in Shared Folders when done.",
+    "deletePartner": "Remove sending NAS",
+    "deletePartnerHelp": "The pairing code is revoked: that NAS can no longer send backups. Copies already received are kept unless you choose to delete them.",
+    "deletePartnerData": "Also delete all its copies on pool {pool}",
+    "partnerDeleted": "Sending NAS removed."
   }
 }

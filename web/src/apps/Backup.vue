@@ -14,6 +14,8 @@ import type { BackupStatus, BackupsList, PoolsResult, SharedFolder, Wizard } fro
 import { api, ApiError, wizardActions } from "@/lib/api"
 import { formatBytes } from "@/lib/format"
 import { useSession } from "@/composables/useSession"
+import RemoteBackupReceive from "@/components/RemoteBackupReceive.vue"
+import RemoteBackupSend from "@/components/RemoteBackupSend.vue"
 import WizardRunner from "@/wizard/WizardRunner.vue"
 
 const { t, locale } = useI18n()
@@ -228,6 +230,10 @@ const keepOK = computed(() => /^\d{1,3}$/.test(form.keep) && Number(form.keep) >
         </form>
       </li>
     </ul>
+
+    <!-- Ke NAS lain dan dari NAS lain (ADR 0019) -->
+    <RemoteBackupSend :shares="shares" />
+    <RemoteBackupReceive :pools="pools" @restored="load" />
 
     <section v-if="restores.length" class="space-y-2">
       <h3 class="text-sm font-semibold">{{ t("backup.restores") }}</h3>
