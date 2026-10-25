@@ -47,6 +47,8 @@ type User struct {
 	// Groups: nama grup yang diikuti user.
 	Groups      []string   `json:"groups,omitempty"`
 	LastLoginAt *time.Time `json:"last_login_at,omitempty"`
+	// AppPasswords: password aplikasi untuk WebDAV (apppassword.go).
+	AppPasswords []AppPassword `json:"app_passwords,omitempty"`
 }
 
 // Group adalah kumpulan user, dipakai untuk izin folder dan aplikasi.
@@ -301,6 +303,8 @@ func (s *Store) SetPassword(username, hash string, mustChange bool) error {
 	return s.updateUser(username, func(u *User) error {
 		u.PasswordHash = hash
 		u.MustChangePassword = mustChange
+		// Password diganti atau di-reset: password aplikasi ikut dicabut.
+		u.AppPasswords = nil
 		return nil
 	})
 }
@@ -316,6 +320,7 @@ func (s *Store) RecoveryReset(username, hash string) error {
 		}
 		u.PasswordHash, u.MustChangePassword, u.Disabled = hash, true, false
 		u.TOTPSecret, u.TOTPLastStep, u.RecoveryCodes = "", 0, nil
+		u.AppPasswords = nil
 		return nil
 	})
 }

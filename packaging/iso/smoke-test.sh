@@ -472,6 +472,48 @@ res="$(api GET /api/v1/drive/admin)"
 json 'assert v["orphans"]==[], v' <<<"$res" || fail "folder sisa masih ada: $res"
 echo "Sapo Drive: folder pribadi lewat SMB dan File Station, cici tidak bisa membuka folder budi, kuota 1 GB, folder pengguna yang dihapus disimpan lalu dihapus admin"
 
+# WebDAV (Sapo Drive tahap 2): budi memakai password aplikasi (bukan password
+# akun) untuk mengelola Drive saya lewat https://…/dav/; folder baca saja
+# tidak bisa ditulis, dan password yang dicabut tidak berlaku lagi.
+res="$(api POST /api/v1/shares "{\"name\":\"baca\",\"pool\":\"uji\",\"permissions\":{\"user:budi\":\"read\"},\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "buat folder baca: $res"
+login_as budi
+res="$(api POST /api/v1/account/app-passwords "{\"name\":\"Uji asap\",\"password\":\"$UPASS\"}")"
+[[ "$res" == *' 200' ]] || fail "buat password aplikasi: $res"
+APW="$(json 'print(v["password"])' <<<"$res")"
+APW_ID="$(json 'print(v["id"])' <<<"$res")"
+dav() { # dav METHOD PATH [curl args…] → kode HTTP
+  local m="$1" p="$2"; shift 2
+  curl -ksS -o "$WORK/dav.out" -w '%{http_code}' --max-time 30 -u "budi:$APW" -X "$m" "$@" "$HTTPS/dav$p"
+}
+code="$(curl -ksS -o /dev/null -w '%{http_code}' --max-time 30 -u "budi:$UPASS" -X PROPFIND -H 'Depth: 0' "$HTTPS/dav/")"
+[[ "$code" == 401 ]] || fail "WebDAV dengan password akun harus ditolak: $code"
+code="$(dav PROPFIND / -H 'Depth: 1')"
+[[ "$code" == 207 ]] && grep -q 'home' "$WORK/dav.out" && grep -q '/dav/baca/' "$WORK/dav.out" || fail "WebDAV, daftar akar: $code $(head -c 800 "$WORK/dav.out")"
+echo "lewat webdav" > "$WORK/dav.txt"
+code="$(dav PUT /@home/dav.txt --data-binary "@$WORK/dav.txt")"
+[[ "$code" == 201 || "$code" == 204 ]] || fail "WebDAV, unggah: $code $(cat "$WORK/dav.out")"
+code="$(dav GET /@home/dav.txt)"
+[[ "$code" == 200 ]] && cmp -s "$WORK/dav.txt" "$WORK/dav.out" || fail "WebDAV, unduh: $code"
+code="$(dav MKCOL /@home/arsip)"
+[[ "$code" == 201 ]] || fail "WebDAV, buat folder: $code $(cat "$WORK/dav.out")"
+code="$(dav MOVE /@home/dav.txt -H "Destination: $HTTPS/dav/@home/arsip/dav.txt")"
+[[ "$code" == 201 || "$code" == 204 ]] || fail "WebDAV, pindah: $code $(cat "$WORK/dav.out")"
+res="$(api GET '/api/v1/files/list?share=@home&path=arsip')"
+json 'assert "dav.txt" in [e["name"] for e in v["entries"]], v' <<<"$res" || fail "file dari WebDAV harus tampil di File Station: $res"
+code="$(dav PUT /baca/coba.txt --data-binary "@$WORK/dav.txt")"
+[[ "$code" == 403 ]] || fail "WebDAV, folder baca saja harus menolak tulis: $code"
+code="$(dav DELETE /@home/arsip)"
+[[ "$code" == 204 ]] || fail "WebDAV, hapus folder: $code $(cat "$WORK/dav.out")"
+res="$(api POST "/api/v1/account/app-passwords/$APW_ID/delete" '{}')"
+[[ "$res" == *' 200' ]] || fail "cabut password aplikasi: $res"
+code="$(dav PROPFIND / -H 'Depth: 0')"
+[[ "$code" == 401 ]] || fail "password aplikasi yang dicabut harus ditolak: $code"
+JAR="$admin_jar"
+res="$(api POST /api/v1/shares/baca/delete "{\"confirm_name\":\"baca\",\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "hapus folder baca: $res"
+echo "WebDAV: password aplikasi, daftar, unggah, unduh, folder baru, pindah, hapus; password akun, folder baca saja, dan password yang dicabut ditolak"
+
 # Ganti disk SAPOUJI2 dengan SAPOUJI3 (berisi ext4, penghapusan dikonfirmasi).
 disks_json="$(api GET /api/v1/storage/disks)"
 old_disk="$(json "print([x['name'] for x in v if x['serial']=='SAPOUJI2'][0])" <<<"$disks_json")"

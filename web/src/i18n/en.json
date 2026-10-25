@@ -331,7 +331,9 @@
     "home_exists": "A former user with the same name still has a personal folder. Delete it in Sapo Drive (Leftover folders) first, or use another name.",
     "drive_pool_in_use": "Personal folders still exist on another pool. Personal folders aren’t moved automatically.",
     "home_user_exists": "This user still exists; their personal folder can’t be deleted.",
-    "home_delete_failed": "The personal folder couldn’t be deleted: {message}"
+    "home_delete_failed": "The personal folder couldn’t be deleted: {message}",
+    "webdav_off": "WebDAV is turned off by an administrator.",
+    "app_password_limit": "Too many app passwords. Revoke the ones you no longer use."
   },
   "pool": {
     "title": "Storage pools",
@@ -674,7 +676,11 @@
     "installed": "Updates last installed {when}.",
     "installFailed": "The last update installation failed (code {code}). See the log.",
     "updateLog": "Installation log",
-    "installInterrupted": "The last update installation stopped before finishing. Install again: the interrupted installation is resumed first."
+    "installInterrupted": "The last update installation stopped before finishing. Install again: the interrupted installation is resumed first.",
+    "webdav": "WebDAV",
+    "webdavHelp": "Opens Sapo Drive and shared folders at https://…/dav/ with an app password.",
+    "webdavOn": "WebDAV turned on.",
+    "webdavOff": "WebDAV turned off."
   },
   "appCenter": {
     "intro": "Additional apps from the Sapo catalog. Each app runs separately with its own account, without special privileges, and keeps its data on the pool you choose. Apps can only open the shared folders you give them.",
@@ -751,6 +757,49 @@
     "onPool": "on pool {pool}",
     "deleteHome": "Delete folder",
     "deleteHomeHelp": "{user}’s personal folder and everything in it will be deleted permanently and can’t be recovered.",
-    "homeDeleted": "{user}’s personal folder was deleted."
+    "homeDeleted": "{user}’s personal folder was deleted.",
+    "webdavTitle": "From other devices (WebDAV)",
+    "webdavHelp": "All folders you may open (My drive and shared folders) are at this address:",
+    "webdavLogin": "Sign in with username {user} and an app password (not your account password).",
+    "webdavCreatePassword": "Create app password",
+    "webdavOff": "WebDAV is turned off by an administrator.",
+    "webdavCert": "The NAS creates its own HTTPS certificate. To connect securely, download the certificate and mark it as trusted on that device. Don't turn off certificate checks: your app password could be stolen.",
+    "downloadCert": "Download NAS certificate",
+    "guide": {
+      "windows": {
+        "title": "Windows",
+        "steps": "1. Install the NAS certificate: open sapo-nas.crt → Install Certificate → Local Machine → Trusted Root Certification Authorities.\n2. File Explorer → right-click This PC → Map network drive.\n3. Folder: {url}\n4. Tick \"Connect using different credentials\", then sign in as {user} with the app password."
+      },
+      "macos": {
+        "title": "macOS",
+        "steps": "1. Open sapo-nas.crt (Keychain Access) and set the certificate to Always Trust.\n2. Finder → Go → Connect to Server (⌘K), enter {url}.\n3. Sign in as {user} with the app password."
+      },
+      "ios": {
+        "title": "iPhone and iPad",
+        "steps": "Use a file manager app that supports WebDAV. Add a WebDAV server with address {url}, username {user}, and the app password. Install the NAS certificate via Settings → General → VPN & Device Management, then enable it in Settings → General → About → Certificate Trust Settings."
+      },
+      "android": {
+        "title": "Android",
+        "steps": "Use a file manager app that supports WebDAV. Add a WebDAV server with address {url}, username {user}, and the app password. Install the NAS certificate via Settings → Security → Encryption & credentials → Install a certificate."
+      },
+      "rclone": {
+        "title": "rclone (two-way sync)",
+        "steps": "rclone config create sapo webdav url={url} vendor=other user={user} pass=$(rclone obscure 'APP-PASSWORD')\n\nFirst sync:\nrclone bisync ~/SapoDrive sapo:{'@'}home --resync --ca-cert sapo-nas.crt\n\nAfterwards (for example on a schedule):\nrclone bisync ~/SapoDrive sapo:{'@'}home --ca-cert sapo-nas.crt"
+      }
+    }
+  },
+  "appPasswords": {
+    "title": "App passwords (WebDAV)",
+    "help": "For opening Sapo Drive and shared folders over WebDAV from a computer or phone, because WebDAV apps can't ask for a 2FA code. Create one per device; it only works for WebDAV, not for signing in to the panel. All app passwords are revoked when your account password changes.",
+    "add": "Create app password",
+    "create": "Create",
+    "device": "Device name",
+    "devicePlaceholder": "e.g. Work laptop",
+    "created": "App password for {name}:",
+    "onlyOnce": "Copy it now: it won't be shown again. If you lose it, revoke it and create a new one.",
+    "none": "No app passwords yet.",
+    "lastUsed": "Last used: {when}",
+    "never": "never",
+    "revoke": "Revoke"
   }
 }

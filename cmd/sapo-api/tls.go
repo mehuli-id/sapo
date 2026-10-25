@@ -96,6 +96,8 @@ func (m *certManager) get(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 
 func (m *certManager) fingerprint() string { return m.cur.Load().Fingerprint }
 
+func (m *certManager) certificate() []byte { return m.cur.Load().Leaf.Raw }
+
 // announceConsole meminta sapod memperbarui alamat panel (dan sidik jari) di
 // layar login konsol NAS (operasi console.panel_address). sapo-api hanya
 // mengirim skema, port, dan sidik jari; isi layar dibuat sapod dari templat

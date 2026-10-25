@@ -25,13 +25,14 @@ function message(e: unknown) {
 }
 
 // --- Layanan ---
-const services = ref<{ smb: boolean; nfs: boolean } | null>(null)
-const svcBusy = ref<"" | "smb" | "nfs">("")
+type Service = "smb" | "nfs" | "webdav"
+const services = ref<Record<Service, boolean> | null>(null)
+const svcBusy = ref<"" | Service>("")
 const svcMsg = ref("")
 const svcError = ref("")
 // Mematikan layanan memutus semua klien: harus dikonfirmasi dulu.
-const confirmOff = ref<"" | "smb" | "nfs">("")
-async function toggle(name: "smb" | "nfs") {
+const confirmOff = ref<"" | Service>("")
+async function toggle(name: Service) {
   if (!services.value) return
   if (services.value[name] && confirmOff.value !== name) {
     confirmOff.value = name
@@ -42,7 +43,7 @@ async function toggle(name: "smb" | "nfs") {
   svcMsg.value = svcError.value = ""
   try {
     const res = await api.setServices({ [name]: !services.value[name] })
-    services.value = { smb: res.smb, nfs: res.nfs }
+    services.value = { smb: res.smb, nfs: res.nfs, webdav: res.webdav }
     if (res.warning) svcError.value = t("errors.system_sync_failed")
     else svcMsg.value = t(`controlPanel.${name}${res[name] ? "On" : "Off"}`)
   } catch (e) {
@@ -183,7 +184,7 @@ onMounted(async () => {
     <section class="space-y-3 rounded-xl border p-4">
       <h2 class="flex items-center gap-2 text-sm font-medium"><Share2 class="size-4 text-muted-foreground" />{{ t("controlPanel.services") }}</h2>
       <p class="text-xs text-muted-foreground">{{ t("controlPanel.servicesHelp") }}</p>
-      <div v-for="name in ['smb', 'nfs'] as const" :key="name" class="flex items-center justify-between gap-3 border-t pt-3">
+      <div v-for="name in ['smb', 'nfs', 'webdav'] as const" :key="name" class="flex items-center justify-between gap-3 border-t pt-3">
         <div>
           <p class="text-sm font-medium">{{ t(`controlPanel.${name}`) }}</p>
           <p class="text-xs text-muted-foreground">{{ t(`controlPanel.${name}Help`) }}</p>

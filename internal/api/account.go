@@ -1,8 +1,10 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/mehuli-id/sapo/internal/auth"
@@ -172,4 +174,79 @@ func (s *Server) handleTOTPConfirm(w http.ResponseWriter, r *http.Request) {
 func (s *Server) endOtherSessions(r *http.Request, username string) int {
 	_, tok, _ := s.currentSession(r)
 	return s.sessions.DeleteUserExcept(username, tok)
+}
+
+// --- Password aplikasi (WebDAV, Sapo Drive) ----------------------------------
+
+type appPasswordView struct {
+	ID         string     `json:"id"`
+	Name       string     `json:"name"`
+	CreatedAt  time.Time  `json:"created_at"`
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+}
+
+// handleAppPasswords: password aplikasi milik pengguna sesi ini (tanpa
+// hash).
+func (s *Server) handleAppPasswords(w http.ResponseWriter, r *http.Request) {
+	sess, _, _ := s.currentSession(r)
+	u, _ := s.store.Get(sess.Username)
+	out := []appPasswordView{}
+	for _, ap := range u.AppPasswords {
+		out = append(out, appPasswordView{ID: ap.ID, Name: ap.Name, CreatedAt: ap.CreatedAt, LastUsedAt: ap.LastUsedAt})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleAppPasswordCreate membuat password aplikasi baru (password akun
+// diminta lagi). Password-nya hanya dikembalikan sekali ini.
+func (s *Server) handleAppPasswordCreate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name     string `json:"name"`
+		Password string `json:"password"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	if !auth.ValidAppPasswordName(req.Name) {
+		writeErrorDetail(w, http.StatusBadRequest, "bad_request", "nama perangkat tidak valid", map[string]any{"field": "name"})
+		return
+	}
+	user, ok := s.reauth(w, r, req.Password)
+	if !ok {
+		return
+	}
+	secret, ap, err := auth.NewAppPassword(req.Name, s.now())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "gagal membuat password aplikasi")
+		return
+	}
+	err = s.store.AddAppPassword(user.Username, ap)
+	s.record(r, user.Username, "account.app_password_create", err == nil, map[string]string{"id": ap.ID, "name": auditText(ap.Name)})
+	switch {
+	case errors.Is(err, auth.ErrAppPasswordLimit):
+		writeError(w, http.StatusConflict, "app_password_limit", "password aplikasi sudah terlalu banyak; cabut yang tidak dipakai")
+		return
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "internal", "gagal menyimpan password aplikasi")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"id": ap.ID, "name": ap.Name, "password": secret})
+}
+
+// handleAppPasswordDelete mencabut satu password aplikasi milik sendiri.
+func (s *Server) handleAppPasswordDelete(w http.ResponseWriter, r *http.Request) {
+	sess, _, _ := s.currentSession(r)
+	id := r.PathValue("id")
+	name, err := s.store.RevokeAppPassword(sess.Username, id)
+	if errors.Is(err, auth.ErrAppPasswordNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "password aplikasi tidak ditemukan")
+		return
+	}
+	s.record(r, sess.Username, "account.app_password_revoke", err == nil, map[string]string{"id": auditText(id), "name": auditText(name)})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "gagal mencabut password aplikasi")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

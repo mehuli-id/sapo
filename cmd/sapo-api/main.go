@@ -89,7 +89,7 @@ func main() {
 			os.Exit(1)
 		}
 		go certs.renewLoop(ctx)
-		httpsInfo = &api.HTTPSInfo{Port: certs.port, Fingerprint: certs.fingerprint}
+		httpsInfo = &api.HTTPSInfo{Port: certs.port, Fingerprint: certs.fingerprint, Certificate: certs.certificate}
 	}
 
 	handler, err := api.New(api.Options{

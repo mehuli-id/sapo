@@ -1,10 +1,12 @@
 <script setup lang="ts">
-// Keamanan akun: status 2FA, kode cadangan, dan pindah aplikasi autentikator
-// (misalnya HP baru). Setiap perubahan meminta password lagi.
+// Keamanan akun: status 2FA, kode cadangan, pindah aplikasi autentikator
+// (misalnya HP baru), dan password aplikasi untuk WebDAV. Setiap perubahan
+// meminta password lagi.
 import { computed, nextTick, ref } from "vue"
 import { useI18n } from "vue-i18n"
 import QRCode from "qrcode"
 import { KeyRound, LoaderCircle, ShieldCheck, Smartphone, TriangleAlert } from "@lucide/vue"
+import AppPasswords from "@/components/AppPasswords.vue"
 import RecoveryCodes from "@/components/RecoveryCodes.vue"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -223,6 +225,8 @@ const grouped = (s: string) => s.replace(/(.{4})/g, "$1 ").trim()
       </template>
       <Button v-else size="sm" variant="outline" @click="start('totp-password')">{{ twofa ? t("account.totpStart") : t("account.totpEnable") }}</Button>
     </section>
+
+    <AppPasswords />
 
     <Alert v-if="error" variant="destructive">
       <AlertDescription>{{ error }}</AlertDescription>

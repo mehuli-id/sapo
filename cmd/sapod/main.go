@@ -154,6 +154,7 @@ func main() {
 	reg.Register(proto.OpUpdatesInstall, updates.InstallOp())
 	reg.Register(proto.OpUpdatesStatus, updates.StatusOp())
 	reg.Register(proto.OpFilesList, files.ListOp())
+	reg.Register(proto.OpFilesStat, files.StatOp())
 	reg.Register(proto.OpFilesMkdir, files.MkdirOp())
 	reg.Register(proto.OpFilesRename, files.RenameOp())
 	reg.Register(proto.OpFilesDelete, files.DeleteOp())

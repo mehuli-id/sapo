@@ -45,7 +45,7 @@ File Station (ADR 0010): operasi file dijalankan `sapod fs-helper` sebagai akun 
 Control Panel: pintasan aplikasi pengaturan, SMB/NFS menyala/mati (settings.json di sapo-api, `SMBOff`/`NFSOff` di shares.apply), zona waktu dan NTP (`time.*` lewat timedatectl).
 Pembaruan sistem (ADR 0011): periksa (`apt-get update` + simulasi) dan pasang (`apt-get upgrade --with-new-pkgs`, tanpa menghapus paket) lewat `systemd-run` di unit `sapo-updates` tersendiri (`sapod apt-run`), agar tidak terputus saat paket Sapo sendiri me-restart `sapod`.
 App Center (ADR 0012): katalog kurasi `apps/*.yaml` (image dikunci digest), Podman + Quadlet, setiap aplikasi akun sendiri (`sapo-app-<id>`, UID 30000–30999) tanpa capability, data di dataset `<pool>/sapo-apps/<id>`; tahap 2: admin memberi aplikasi shared folder (baca/tulis) lewat entri ACL akun aplikasi dan `Volume=` hanya untuk folder itu, disinkronkan bersama `shares.apply`.
-Sapo Drive tahap 1 (ADR 0013): folder pribadi per pengguna, dataset `<pool>/sapo-home/<nama>` (0700, kuota ZFS) lewat `homes.apply` saat sinkronisasi, dibuka lewat SMB `[homes]` dan File Station ("Drive saya"); folder pengguna yang dihapus disimpan sampai admin menghapusnya.
-Berikutnya (urutan disepakati): Sapo Drive tahap 2 (WebDAV); lalu:
+Sapo Drive tahap 1 (ADR 0013): folder pribadi per pengguna, dataset `<pool>/sapo-home/<nama>` (0700, kuota ZFS) lewat `homes.apply` saat sinkronisasi, dibuka lewat SMB `[homes]` dan File Station ("Drive saya"); folder pengguna yang dihapus disimpan sampai admin menghapusnya. Tahap 2: WebDAV di `https://<nas>/dav/` (sapo-api, operasi tetap lewat `sapod fs-helper` sebagai pengguna), login dengan password aplikasi per perangkat (Keamanan Akun), sertifikat bisa diunduh untuk dipercaya perangkat lain.
+Berikutnya (urutan disepakati):
 1. Snapshot ZFS terjadwal untuk shared folder (dengan pemulihan file).
 2. Installer ke disk (ISO sekarang hanya berjalan dari RAM).

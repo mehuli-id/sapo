@@ -276,7 +276,7 @@ func TestControlPanelServices(t *testing.T) {
 	agent.results[proto.OpTimeSet] = map[string]bool{"ok": true}
 	h := newHarness(t, agent)
 	h.runSetup()
-	if rec := h.do(http.MethodGet, "/api/v1/settings/services", nil); rec.Body.String() != `{"nfs":true,"smb":true}`+"\n" {
+	if rec := h.do(http.MethodGet, "/api/v1/settings/services", nil); rec.Body.String() != `{"nfs":true,"smb":true,"webdav":true}`+"\n" {
 		t.Fatalf("bawaan: %s", rec.Body)
 	}
 	if rec := h.do(http.MethodPost, "/api/v1/settings/services", map[string]bool{"smb": false}); rec.Code != http.StatusOK {
@@ -284,6 +284,13 @@ func TestControlPanelServices(t *testing.T) {
 	}
 	if p, _ := agent.param(proto.OpSharesApply).(proto.SharesApplyParams); !p.SMBOff || p.NFSOff {
 		t.Fatalf("shares.apply = %+v", p)
+	}
+	// WebDAV dimatikan: /dav/ menolak sebelum memeriksa login.
+	if rec := h.do(http.MethodPost, "/api/v1/settings/services", map[string]bool{"webdav": false}); rec.Code != http.StatusOK {
+		t.Fatalf("matikan WebDAV: %d %s", rec.Code, rec.Body)
+	}
+	if rec := h.do("PROPFIND", "/dav/", nil); errCode(rec) != "webdav_off" {
+		t.Fatalf("WebDAV mati: %d %s", rec.Code, rec.Body)
 	}
 	// Tersimpan di file (bertahan setelah sapo-api dinyalakan ulang).
 	st, _ := openSettingsStore(h.s.cfg.API.DataDir)
