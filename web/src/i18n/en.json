@@ -644,7 +644,7 @@
     "home": "My drive",
     "homeHelp": "Your personal folder",
     "versions": "Previous versions",
-    "versionsHelp": "Snapshots of this folder. Pick a time to see the folder as it was then.",
+    "versionsHelp": "Snapshots of this folder. Pick a time to see the folder as it was then. Old versions use the permissions from when the snapshot was taken.",
     "noVersions": "This folder has no previous versions yet.",
     "currentVersion": "Current version",
     "viewingVersion": "Viewing the version from {when} (read-only). Choose Restore to copy files or folders back.",
@@ -652,7 +652,7 @@
     "restore": "Restore",
     "restoreFile": "Restore {name} to the current folder? If the name already exists, the result gets a new name.",
     "restoreFolder": "Restore the folder {name} and its contents? If the name already exists, the result gets a new name; the current folder isn’t changed.",
-    "restoreOverwrite": "Replace the current file with this version",
+    "restoreOverwrite": "Replace the current file with this version (the current file is kept with a “before restore” name)",
     "restored": "Restored as {name}.",
     "restoredSkipped": "Restored as {name}; {n} symlinks or special files were skipped."
   },

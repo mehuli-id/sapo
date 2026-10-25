@@ -155,6 +155,7 @@ const form = reactive({ name: "" })
 function start(mode: string, name = "") {
   editing.value = mode
   form.name = name
+  restoreForm.overwrite = false
   error.value = ""
 }
 const validName = computed(() => {

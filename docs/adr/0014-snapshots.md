@@ -52,8 +52,11 @@ Data dulu: file yang terhapus atau tertimpa (salah klik, ransomware di komputer 
   - Proses pembantu tetap berjalan sebagai akun pengguna, dan path tetap lewat `openat2` di bawah akar itu (tanpa `..`, symlink, atau sistem berkas lain).
   - `CleanFilePath` tetap menolak `.zfs`, jadi path dari pengguna tidak pernah bisa memilih snapshot lain.
 - **`files.restore`** (butuh izin tulis, log audit `files.restore`): menyalin file atau folder dari snapshot ke tempat yang sama di folder sekarang, sebagai pengguna.
-  - Bila nama itu sudah ada, hasilnya diberi nama baru `<nama> (dipulihkan <waktu snapshot>)<ekstensi>`. File sekarang hanya ditimpa (atomik) bila dipilih dan keduanya file biasa; folder tidak pernah ditimpa.
-  - Folder disalin ke direktori sementara lalu baru diberi nama akhir. Bila gagal atau melebihi batas (`agent.files.restore_max_files`, `restore_max_gb`), salinan setengah jadi dihapus.
+  - Bila nama itu sudah ada, hasilnya diberi nama baru `<nama> (dipulihkan <waktu snapshot>)<ekstensi>` (akhiran dari `agent.files.restore_label`).
+  - File sekarang hanya diganti bila dipilih dan keduanya file biasa, dan tidak hilang: file itu diberi nama `<nama> (sebelum dipulihkan <waktu>)` dulu (`replaced_label`). Folder tidak pernah ditimpa.
+  - Ukurannya dihitung dulu (snapshot tidak berubah). Yang melebihi batas (`agent.files.restore_max_files`, `restore_max_gb`) atau ruang kosong folder tujuan (termasuk kuota Sapo Drive) ditolak sebelum menyalin. Penyalinan berhenti rapi sebelum tenggat.
+  - Salinan dibuat dengan nama sementara (`.sapo-upload-*`, tidak terlihat lewat SMB: `veto files`), lalu baru diberi nama akhir. Entri sementara dikenali lewat dev/ino, dan bila gagal dibersihkan lewat file descriptor yang dipegang, jadi pengguna lain yang menukar namanya tidak bisa membuat pemulihan menghapus folder lain.
+  - Paling banyak 2 penghapusan atau pemulihan berjalan bersamaan (dari semua pengguna), dan satu per pengguna.
   - Symlink, berkas khusus, dan sistem berkas lain di dalamnya dilewati (jumlahnya dilaporkan).
   - File hasil pemulihan mengikuti izin bawaan folder tujuan (ACL), bukan izin lama di snapshot; waktu ubahnya dipertahankan.
 - Pemulihan berjalan dalam satu permintaan dengan batas waktu `agent.files.delete_timeout_seconds` (paling lama sekitar 4,5 menit). Folder yang lebih besar dipulihkan sebagian-sebagian, atau lewat Previous Versions di Windows.

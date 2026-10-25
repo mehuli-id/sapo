@@ -153,6 +153,11 @@ agent:
     # di Windows atau sebagian-sebagian).
     restore_max_files: 20000
     restore_max_gb: 20
+    # Bila nama sudah ada, hasil pemulihan diberi akhiran restore_label; file
+    # yang ditimpa (atas pilihan pengguna) disimpan dengan akhiran
+    # replaced_label. {time} = waktu snapshot / waktu pemulihan.
+    restore_label: "dipulihkan {time}"
+    replaced_label: "sebelum dipulihkan {time}"
 
   # Snapshot terjadwal (ADR 0014): snapshot otomatis berhenti diambil di pool
   # yang terisi max_pool_capacity_percent atau lebih (snapshot lama tetap

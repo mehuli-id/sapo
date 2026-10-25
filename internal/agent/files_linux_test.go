@@ -203,7 +203,8 @@ func TestFSHelperRestore(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(snap, "dok/arsip/a.txt"), []byte("a"), 0o644)
 	_ = os.Symlink("/etc/passwd", filepath.Join(snap, "dok/arsip/tautan"))
 	do := func(path string, overwrite bool, maxFiles int) (proto.FilesRestoreResult, error) {
-		res, err := fsDo(fsRequest{Op: "restore", Root: live, Src: snap, Path: path, Overwrite: overwrite, Label: "dipulihkan 2026-10-28 02.00", MaxFiles: maxFiles, MaxBytes: 1 << 20})
+		res, err := fsDo(fsRequest{Op: "restore", Root: live, Src: snap, Path: path, Overwrite: overwrite, Label: "dipulihkan 2026-10-28 02.00",
+			Replaced: "sebelum dipulihkan 2026-10-28 09.00", MaxFiles: maxFiles, MaxBytes: 1 << 20})
 		if err != nil {
 			return proto.FilesRestoreResult{}, err
 		}
@@ -224,9 +225,14 @@ func TestFSHelperRestore(t *testing.T) {
 	if r, _ := do("dok/laporan.txt", false, 100); r.Name != "laporan (dipulihkan 2026-10-28 02.00 2).txt" {
 		t.Fatalf("nama kedua = %q", r.Name)
 	}
-	// Ditimpa bila dipilih.
-	if r, err := do("dok/laporan.txt", true, 100); err != nil || r.Name != "laporan.txt" || read("dok/laporan.txt") != "versi lama" {
+	// Ditimpa bila dipilih, tetapi file sekarang disimpan sebagai cadangan.
+	if r, err := do("dok/laporan.txt", true, 100); err != nil || r.Name != "laporan.txt" || read("dok/laporan.txt") != "versi lama" ||
+		read("dok/laporan (sebelum dipulihkan 2026-10-28 09.00).txt") != "versi baru" {
 		t.Fatalf("timpa: %+v %v", r, err)
+	}
+	// Ruang kosong tidak cukup: ditolak sebelum menyalin.
+	if _, err := fsDo(fsRequest{Op: "restore", Root: live, Src: snap, Path: "dok/laporan.txt", Label: "x {time}", MaxFiles: 100, MaxBytes: 1 << 20, Avail: 1}); fsErrorCode(err) != "restore_no_space" {
+		t.Fatalf("ruang kosong: %v", err)
 	}
 	// Folder: disalin utuh, symlink dilewati.
 	r, err = do("dok/arsip", false, 100)
