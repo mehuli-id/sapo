@@ -52,7 +52,12 @@ get)
     mounted) v=yes ;;
     *) v=$(prop "$p") ;;
     esac
-    printf '%s\t%s\n' "$p" "$v"
+    if [ "$5" = property,value,source ]; then
+      src=default; [ -f "`+props+`/$key.$(echo "$p" | tr : _)" ] && src=local
+      printf '%s\t%s\t%s\n' "$p" "$v" "$src"
+    else
+      printf '%s\t%s\n' "$p" "$v"
+    fi
   done ;;
 list) [ -d "`+root+`/$ds" ] && echo "$ds" ;;
 create)

@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/mehuli-id/sapo/internal/proto"
 )
@@ -39,12 +40,23 @@ const parentMarker = "@induk"
 type Homes struct {
 	shares  *Shares
 	managed func(name string) (uid, gid int, ok bool)
+	// owner membaca UID pemilik path tanpa mengikuti symlink (diganti di
+	// test).
+	owner func(path string) (int, error)
 }
 
 // NewHomes menyiapkan Sapo Drive di atas shared folder (zfs, mount_base)
 // dan catatan akun sapod.
 func NewHomes(shares *Shares, managed func(string) (int, int, bool)) *Homes {
-	return &Homes{shares: shares, managed: managed}
+	return &Homes{shares: shares, managed: managed, owner: lstatOwner}
+}
+
+func lstatOwner(path string) (int, error) {
+	var st syscall.Stat_t
+	if err := syscall.Lstat(path, &st); err != nil {
+		return 0, err
+	}
+	return int(st.Uid), nil
 }
 
 func homePath(base, pool, user string) string { return filepath.Join(base, pool, homesDataset, user) }
@@ -135,13 +147,15 @@ func (h *Homes) ensureHome(ctx context.Context, pool string, u proto.HomeUser) e
 	sh := h.shares
 	ds := pool + "/" + homesDataset + "/" + u.Name
 	want := homePath(sh.t.MountBase, pool, u.Name)
-	props, err := sh.zfsProps(ctx, ds, "mountpoint", "mounted", "quota", homePropName)
+	props, err := sh.zfsProps(ctx, ds, "mountpoint", "mounted", "refquota", homePropName)
+	created := false
 	if errors.Is(err, errNoDataset) {
 		if err := h.zfs(ctx, []string{"create", "-o", homePropName + "=" + u.Name, "-o", "devices=off", "-o", "setuid=off"}, ds); err != nil {
 			return err
 		}
 		sh.p.logInfo("folder pribadi dibuat", "dataset", ds)
-		props, err = sh.zfsProps(ctx, ds, "mountpoint", "mounted", "quota", homePropName)
+		created = true
+		props, err = sh.zfsProps(ctx, ds, "mountpoint", "mounted", "refquota", homePropName)
 	}
 	if err != nil {
 		return err
@@ -152,7 +166,21 @@ func (h *Homes) ensureHome(ctx context.Context, pool string, u proto.HomeUser) e
 	if fi, err := os.Lstat(want); err != nil || !fi.IsDir() || !sh.isMount(want) {
 		return fmt.Errorf("%s belum terpasang di %s", ds, want)
 	}
-	// Lchown tidak mengikuti symlink; path sudah dipastikan direktori.
+	// Folder yang sudah ada hanya dipakai bila memang milik akun ini: folder
+	// sisa pengguna lama bernama sama (misalnya di pool yang baru diimpor
+	// lagi) tidak pernah diserahkan ke akun baru. UID tidak pernah dipakai
+	// ulang (ADR 0006).
+	if !created {
+		cur, err := h.owner(want)
+		if err != nil {
+			return err
+		}
+		if cur != uid {
+			return fmt.Errorf("pemilik folder tidak cocok (UID %d, akun %d); folder ini mungkin milik pengguna lama bernama sama", cur, uid)
+		}
+	}
+	// Lchown tidak mengikuti symlink; path sudah dipastikan direktori, dan
+	// induknya milik root (0711), jadi tidak bisa ditukar pengguna.
 	if err := sh.chown(want, uid, gid); err != nil {
 		return err
 	}
@@ -163,12 +191,13 @@ func (h *Homes) ensureHome(ctx context.Context, pool string, u proto.HomeUser) e
 	if u.QuotaBytes > 0 {
 		quota = strconv.FormatUint(u.QuotaBytes, 10)
 	}
-	cur := props["quota"]
+	// refquota: snapshot (terjadwal, menyusul) tidak memakan kuota pengguna.
+	cur := props["refquota"]
 	if cur == "0" || cur == "-" {
 		cur = "none"
 	}
 	if cur != quota {
-		if err := h.zfs(ctx, []string{"set", "quota=" + quota}, ds); err != nil {
+		if err := h.zfs(ctx, []string{"set", "refquota=" + quota}, ds); err != nil {
 			return err
 		}
 	}
@@ -193,7 +222,7 @@ func (h *Homes) StatusOp() Handler {
 		sh := h.shares
 		ctx, cancel := context.WithTimeout(ctx, sh.p.st.t.Timeout)
 		defer cancel()
-		res, err := sh.p.st.run(ctx, sh.t.Zfs, []string{"list", "-H", "-p", "-t", "filesystem", "-o", "name,used,avail,quota," + homePropName})
+		res, err := sh.p.st.run(ctx, sh.t.Zfs, []string{"list", "-H", "-p", "-t", "filesystem", "-o", "name,used,avail,refquota," + homePropName})
 		if errors.Is(err, errToolMissing) {
 			return []proto.HomeStatus{}, nil
 		}
@@ -239,6 +268,15 @@ func (h *Homes) DeleteOp() Handler {
 		}
 		if !poolNamePattern.MatchString(p.Pool) || !accountNamePattern.MatchString(p.User) {
 			return nil, invalidApp("pool atau pengguna tidak valid")
+		}
+		// Akun Linux bernama itu masih ada (atau tidak bisa dipastikan):
+		// ditolak.
+		users, err := readPasswd(h.shares.t.PasswdFile)
+		if err != nil {
+			return nil, err
+		}
+		if _, exists := users[p.User]; exists {
+			return nil, &OpError{Code: proto.ErrConflict, Message: "pengguna " + p.User + " masih ada; folder pribadinya tidak bisa dihapus"}
 		}
 		if _, _, ok := h.managed(p.User); ok {
 			return nil, &OpError{Code: proto.ErrConflict, Message: "pengguna " + p.User + " masih ada; folder pribadinya tidak bisa dihapus"}
