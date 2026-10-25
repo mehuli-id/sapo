@@ -211,7 +211,7 @@ func (s *Server) syncSystem(ctx context.Context) (res proto.SharesApplyResult, e
 		var pe *proto.Error
 		if errors.As(err, &pe) {
 			v := s.settings.get()
-			closed := proto.SharesApplyParams{Shares: []proto.ShareSpec{}, SMBOff: v.SMBOff, NFSOff: v.NFSOff}
+			closed := proto.SharesApplyParams{Shares: []proto.ShareSpec{}, SMBOff: v.SMBOff, NFSOff: v.NFSOff, ExternalOff: true}
 			for _, sh := range s.shares.list() {
 				// Izin dicabut, tetapi jadwal snapshot tetap berjalan.
 				closed.Shares = append(closed.Shares, proto.ShareSpec{Name: sh.Name, Pool: sh.Pool, Description: sh.Description, Read: []string{}, Write: []string{}, Snapshots: sh.Snapshots})
@@ -616,7 +616,12 @@ func (s *Server) handleShareCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Nama yang dipakai folder eksternal (USB) tidak bisa dipakai lagi.
-	if ext, err := s.externalNames(r); err == nil && ext[req.Name] {
+	ext, err := s.externalNames(r)
+	if err != nil {
+		s.agentError(w, proto.OpExternalList, err)
+		return
+	}
+	if ext[req.Name] {
 		writeErrorDetail(w, http.StatusConflict, "share_taken", "nama shared folder sudah dipakai", map[string]any{"field": "name"})
 		return
 	}
@@ -626,7 +631,7 @@ func (s *Server) handleShareCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sh := Share{Name: req.Name, Pool: req.Pool, Description: req.Description, Permissions: cloneMap(req.Permissions), NFS: nfs, CreatedAt: s.now().UTC()}
-	err := s.shares.mutate(func(cur []Share) ([]Share, error) {
+	err = s.shares.mutate(func(cur []Share) ([]Share, error) {
 		if slices.ContainsFunc(cur, func(x Share) bool { return x.Name == sh.Name }) {
 			return nil, errShareExists
 		}

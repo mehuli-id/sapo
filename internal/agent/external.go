@@ -47,16 +47,37 @@ type External struct {
 	t      ExternalTools
 	st     *Storage
 	shares *Shares
-	mu     sync.Mutex
-	// cache: daftar volume terakhir (diperbarui setiap pemeriksaan).
-	cache []proto.ExternalVolume
-	// mount, isMount diganti di test.
+	// mu: operasi (pindai, pasang, lepas) satu per satu.
+	mu sync.Mutex
+	// cacheMu melindungi cache (daftar terakhir) dan tidak pernah ditahan
+	// selama program eksternal atau syscall berjalan, jadi File Station tidak
+	// ikut menunggu drive yang lambat.
+	cacheMu sync.RWMutex
+	cache   []proto.ExternalVolume
+	// missing: berapa pemeriksaan berturut-turut drive tidak terlihat;
+	// retry: kapan pemasangan yang gagal dicoba lagi (per nama).
+	missing map[string]int
+	retry   map[string]retryState
+	// isMount dan rootOK diganti di test.
 	isMount func(path string) bool
+	rootOK  func(path string, gid int) error
+	log     func(msg string, args ...any)
 }
+
+type retryState struct {
+	next  time.Time
+	delay time.Duration
+}
+
+// externalMissingScans: drive dianggap dicabut setelah sekian pemeriksaan
+// berturut-turut tidak melihatnya (lsblk bisa sesaat tidak memuatnya saat
+// USB direset).
+const externalMissingScans = 3
 
 // NewExternal menyiapkan penyimpanan eksternal.
 func NewExternal(t ExternalTools, st *Storage, shares *Shares) *External {
-	e := &External{t: t, st: st, shares: shares, isMount: isMountPoint}
+	e := &External{t: t, st: st, shares: shares, isMount: isMountPoint, rootOK: checkExternalRoot,
+		missing: map[string]int{}, retry: map[string]retryState{}, log: shares.p.logInfo}
 	shares.external = e
 	return e
 }
@@ -64,14 +85,30 @@ func NewExternal(t ExternalTools, st *Storage, shares *Shares) *External {
 // Format yang bisa dipasang dan tipe mount-nya.
 var externalFS = map[string]string{"exfat": "exfat", "vfat": "vfat", "ntfs": "ntfs3"}
 
+// Partisi sistem yang tidak pernah ditawarkan (EFI, Microsoft Reserved,
+// Windows Recovery; MBR 0xef = EFI).
+var systemPartTypes = map[string]bool{
+	"c12a7328-f81f-11d2-ba4b-00a0c93ec93b": true,
+	"e3c9e316-0b5c-4db8-817d-f92df00215ae": true,
+	"de94bba4-06d1-4d40-a16a-bfd50179d6ac": true,
+	"0xef":                                 true,
+}
+
 var uuidPattern = regexp.MustCompile(`^[A-Za-z0-9-]{4,64}$`)
 
+// externalConf: konfigurasi folder dan sidik jari drive saat dipasang
+// (UUID FAT/exFAT hanya 32 bit dan ikut tersalin saat drive dikloning, jadi
+// ukuran dan nomor seri disk juga dicocokkan). GID: grup saat dipasang;
+// grup yang dihapus lalu dibuat ulang (GID baru) tidak mewarisi akses.
 type externalConf struct {
-	UUID     string `json:"uuid"`
-	FSType   string `json:"fstype"`
-	ReadOnly bool   `json:"read_only"`
-	Group    string `json:"group"`
-	SMB      bool   `json:"smb"`
+	UUID      string `json:"uuid"`
+	FSType    string `json:"fstype"`
+	SizeBytes uint64 `json:"size_bytes"`
+	Serial    string `json:"serial"`
+	ReadOnly  bool   `json:"read_only"`
+	Group     string `json:"group"`
+	GID       int    `json:"gid"`
+	SMB       bool   `json:"smb"`
 }
 
 type externalState struct {
@@ -109,12 +146,13 @@ func (e *External) mountPath(name string) string { return filepath.Join(e.t.Moun
 // lsblkExternal: kolom lsblk untuk drive USB (termasuk UUID sistem berkas).
 var lsblkExternalFlags = []string{
 	"--json", "--bytes", "--tree",
-	"--output", "NAME,PATH,TYPE,SIZE,MODEL,VENDOR,SERIAL,WWN,TRAN,ROTA,RM,FSTYPE,PTTYPE,LABEL,UUID,MOUNTPOINTS",
+	"--output", "NAME,PATH,TYPE,SIZE,MODEL,VENDOR,SERIAL,WWN,TRAN,ROTA,RM,FSTYPE,PTTYPE,PARTTYPE,LABEL,UUID,MOUNTPOINTS",
 }
 
 type extDevice struct {
 	lsblkDevice
 	UUID     *string     `json:"uuid"`
+	PartType *string     `json:"parttype"`
 	Children []extDevice `json:"children"`
 }
 
@@ -165,6 +203,8 @@ func (e *External) scan(ctx context.Context) ([]extVolumeRaw, error) {
 			switch {
 			case fstype == "zfs_member" || strings.HasSuffix(fstype, "_raid_member") || fstype == "LVM2_member" || fstype == "crypto_LUKS" || fstype == "swap":
 				r.vol.Reason = "member" // anggota pool, RAID, LVM, terenkripsi, atau swap
+			case systemPartTypes[strings.ToLower(str(v.PartType))]:
+				r.vol.Reason = "system_partition"
 			case !ok:
 				r.vol.Reason = "unsupported_fs"
 			case !uuidPattern.MatchString(r.vol.UUID):
@@ -185,10 +225,28 @@ func (e *External) scan(ctx context.Context) ([]extVolumeRaw, error) {
 			}
 		}
 	}
+	// UUID yang dipakai lebih dari satu volume (drive hasil kloning) tidak
+	// bisa membedakan drive: tidak pernah dipasang.
+	count := map[string]int{}
+	for _, r := range vols {
+		if r.vol.UUID != "" {
+			count[r.vol.UUID]++
+		}
+	}
+	for i := range vols {
+		if count[vols[i].vol.UUID] > 1 {
+			vols[i].vol.Supported, vols[i].vol.Reason = false, "duplicate_uuid"
+		}
+	}
 	return vols, nil
 }
 
-// List membaca volume sekarang, memasang folder yang diatur dan tercolok,
+// matches: drive sekarang sama dengan yang dipasang dulu (sidik jari).
+func (c externalConf) matches(v proto.ExternalVolume) bool {
+	return v.Supported && v.FSType == c.FSType && v.SizeBytes == c.SizeBytes && v.Serial == c.Serial
+}
+
+// refresh membaca volume sekarang, memasang folder yang diatur dan tercolok,
 // melepas folder yang drive-nya hilang, lalu memperbarui cache.
 func (e *External) refresh(ctx context.Context) ([]proto.ExternalVolume, bool, error) {
 	e.mu.Lock()
@@ -215,41 +273,67 @@ func (e *External) refresh(ctx context.Context) ([]proto.ExternalVolume, bool, e
 		names = append(names, n)
 	}
 	sort.Strings(names)
+	now := time.Now()
 	for _, name := range names {
 		c := st.Volumes[name]
 		mp := e.mountPath(name)
 		r, present := byUUID[c.UUID]
 		mounted := e.isMount(mp)
-		v := proto.ExternalVolume{UUID: c.UUID, FSType: c.FSType, Name: name, ReadOnly: c.ReadOnly, Group: c.Group, SMB: c.SMB}
+		v := proto.ExternalVolume{UUID: c.UUID, FSType: c.FSType, Name: name, ReadOnly: c.ReadOnly, Group: c.Group, SMB: c.SMB, SizeBytes: c.SizeBytes}
+		if present {
+			seen[c.UUID] = true
+			e.missing[name] = 0
+		}
 		switch {
 		case !present:
-			if mounted {
+			e.missing[name]++
+			v.State = "disconnected"
+			if mounted && e.missing[name] < externalMissingScans {
+				// Mungkin hanya sesaat (USB direset): tunggu pemeriksaan berikutnya.
+				v.State = "mounted"
+			} else if mounted {
 				// Drive dicabut tanpa dilepas: titik pasang yang mati dilepas.
-				e.umount(ctx, mp, true)
+				if err := e.umount(ctx, mp, true); err == nil {
+					changed = true
+					e.log("drive eksternal dicabut tanpa dilepas; titik pasang dilepas", "folder", name)
+				} else {
+					v.State, v.Error = "error", clipTo(err.Error(), maxErrorText)
+				}
+			}
+		case !c.matches(r.vol):
+			// UUID sama tetapi format, ukuran, atau nomor seri lain (drive
+			// lain, misalnya hasil kloning): tidak dipasang otomatis.
+			v = mergeVol(r.vol, v)
+			v.State, v.Error = "error", "drive berbeda dari yang dulu dipasang (UUID sama); lepas lalu pasang lagi bila memang drive ini"
+			if mounted {
+				_ = e.umount(ctx, mp, false)
 				changed = true
 			}
-			v.State = "disconnected"
 		case !mounted:
 			v = mergeVol(r.vol, v)
+			if rs := e.retry[name]; now.Before(rs.next) {
+				v.State, v.Error = "error", "pemasangan gagal; dicoba lagi nanti"
+				break
+			}
 			if err := e.mountVol(ctx, name, c, r.path); err != nil {
+				rs := e.retry[name]
+				rs.delay = min(max(rs.delay*2, 10*time.Second), 10*time.Minute)
+				rs.next = now.Add(rs.delay)
+				e.retry[name] = rs
 				v.State, v.Error = "error", clipTo(err.Error(), maxErrorText)
+				e.log("drive eksternal gagal dipasang", "folder", name, "err", err)
 			} else {
+				delete(e.retry, name)
 				v.State = "mounted"
 				changed = true
+				e.log("drive eksternal dipasang", "folder", name)
 			}
 		default:
 			v = mergeVol(r.vol, v)
 			v.State = "mounted"
 		}
-		if present {
-			seen[c.UUID] = true
-		}
 		if v.State == "mounted" {
-			var sfs syscall.Statfs_t
-			if syscall.Statfs(mp, &sfs) == nil {
-				v.UsedBytes = (sfs.Blocks - sfs.Bfree) * uint64(sfs.Bsize)
-				v.AvailableBytes = sfs.Bavail * uint64(sfs.Bsize)
-			}
+			v.UsedBytes, v.AvailableBytes = statfsTimeout(mp, 2*time.Second)
 		}
 		out = append(out, v)
 	}
@@ -258,14 +342,36 @@ func (e *External) refresh(ctx context.Context) ([]proto.ExternalVolume, bool, e
 			out = append(out, r.vol)
 		}
 	}
+	e.cacheMu.Lock()
 	e.cache = out
+	e.cacheMu.Unlock()
 	return out, changed, nil
+}
+
+// statfsTimeout: ruang terpakai dan kosong; drive yang tidak menjawab dalam
+// batas waktu dilewati (0, 0).
+func statfsTimeout(path string, d time.Duration) (used, avail uint64) {
+	type res struct{ used, avail uint64 }
+	ch := make(chan res, 1)
+	go func() {
+		var sfs syscall.Statfs_t
+		if syscall.Statfs(path, &sfs) == nil {
+			ch <- res{(sfs.Blocks - sfs.Bfree) * uint64(sfs.Bsize), sfs.Bavail * uint64(sfs.Bsize)}
+		}
+		close(ch)
+	}()
+	select {
+	case r := <-ch:
+		return r.used, r.avail
+	case <-time.After(d):
+		return 0, 0
+	}
 }
 
 // mergeVol: info drive (r) dengan konfigurasi folder (c).
 func mergeVol(r, c proto.ExternalVolume) proto.ExternalVolume {
 	r.Name, r.ReadOnly, r.Group, r.SMB = c.Name, c.ReadOnly, c.Group, c.SMB
-	r.Supported, r.Reason = true, ""
+	r.Reason = ""
 	return r
 }
 
@@ -282,6 +388,20 @@ func (e *External) gid(name string) (int, error) {
 	return g.GID, nil
 }
 
+// checkExternalRoot: setelah dipasang, akar drive harus milik root dan grup
+// itu tanpa akses untuk lainnya (metadata khusus di drive, misalnya atribut
+// WSL di NTFS, tidak boleh membuka drive untuk semua akun).
+func checkExternalRoot(path string, gid int) error {
+	var st syscall.Stat_t
+	if err := syscall.Lstat(path, &st); err != nil {
+		return err
+	}
+	if st.Uid != 0 || int(st.Gid) != gid || st.Mode&0o007 != 0 {
+		return errors.New("izin akar drive tidak sesuai opsi pasang; drive dilepas")
+	}
+	return nil
+}
+
 // mountVol memasang volume dengan opsi tetap (tidak pernah dari panel).
 func (e *External) mountVol(ctx context.Context, name string, c externalConf, dev string) error {
 	fstype, ok := externalFS[c.FSType]
@@ -291,6 +411,9 @@ func (e *External) mountVol(ctx context.Context, name string, c externalConf, de
 	gid, err := e.gid(c.Group)
 	if err != nil {
 		return err
+	}
+	if c.GID != 0 && gid != c.GID {
+		return &OpError{Code: proto.ErrConflict, Message: "grup " + c.Group + " sudah berbeda dari saat drive dipasang; lepas lalu pasang lagi"}
 	}
 	// Grup: rwx (atau r-x bila baca saja); lainnya tanpa akses.
 	fmask, dmask := "0117", "0007"
@@ -322,6 +445,10 @@ func (e *External) mountVol(ctx context.Context, name string, c externalConf, de
 	if res.ExitCode != 0 {
 		return fmt.Errorf("mount: %s", firstLine(res.Stderr))
 	}
+	if err := e.rootOK(mp, gid); err != nil {
+		_ = e.umount(ctx, mp, false)
+		return err
+	}
 	return nil
 }
 
@@ -351,9 +478,18 @@ func (e *External) umount(ctx context.Context, mp string, lazy bool) error {
 
 // Run memeriksa drive secara berkala (colok/cabut) sampai ctx selesai.
 func (e *External) Run(ctx context.Context) {
+	failing := false
 	for {
-		if _, changed, err := e.refresh(ctx); err == nil && changed {
-			e.shares.refreshSMB(ctx)
+		_, changed, err := e.refresh(ctx)
+		switch {
+		case err != nil && !failing:
+			e.shares.p.logWarn("penyimpanan eksternal: drive tidak bisa diperiksa", "err", err)
+			failing = true
+		case err == nil:
+			failing = false
+			if changed {
+				e.shares.refreshSMB(ctx)
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -366,8 +502,8 @@ func (e *External) Run(ctx context.Context) {
 // mounted: folder eksternal yang sedang terpasang (untuk smb.conf dan File
 // Station), dari cache.
 func (e *External) mounted() []proto.ExternalVolume {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.cacheMu.RLock()
+	defer e.cacheMu.RUnlock()
 	var out []proto.ExternalVolume
 	for _, v := range e.cache {
 		if v.State == "mounted" && v.Name != "" {
@@ -468,7 +604,9 @@ func (e *External) MountOp() Handler {
 			e.mu.Unlock()
 			return nil, &OpError{Code: "external_unsupported", Message: "drive ini tidak bisa dipasang (" + vol.vol.Reason + ")"}
 		}
-		c := externalConf{UUID: p.UUID, FSType: vol.vol.FSType, ReadOnly: p.ReadOnly, Group: p.Group, SMB: p.SMB}
+		gid, _ := e.gid(p.Group)
+		c := externalConf{UUID: p.UUID, FSType: vol.vol.FSType, SizeBytes: vol.vol.SizeBytes, Serial: vol.vol.Serial,
+			ReadOnly: p.ReadOnly, Group: p.Group, GID: gid, SMB: p.SMB}
 		if err := e.mountVol(ctx, p.Name, c, vol.path); err != nil {
 			_ = os.Remove(e.mountPath(p.Name))
 			e.mu.Unlock()

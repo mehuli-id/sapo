@@ -598,3 +598,22 @@ func TestCheckDisksDuplicateIdentity(t *testing.T) {
 		t.Fatalf("nomor seri kembar: %v", err)
 	}
 }
+
+// Disk USB tanpa nomor seri dan WWN, atau beberapa disk tanpa identitas
+// berukuran sama, tidak bisa dipastikan.
+func TestCheckDisksNoIdentity(t *testing.T) {
+	p, _ := newTestPools(t, zpoolFake{names: "tank\n"})
+	var oe *OpError
+	usb := []proto.Disk{{Name: "sdb", SizeBytes: 100, Usage: proto.DiskFree, Transport: "usb"}}
+	if _, err := p.checkDisks([]proto.DiskRef{{Name: "sdb", SizeBytes: 100, Usage: proto.DiskFree}}, usb, true); !errors.As(err, &oe) || oe.Code != proto.ErrDiskIdentity {
+		t.Fatalf("disk USB tanpa identitas: %v", err)
+	}
+	two := []proto.Disk{{Name: "vdb", SizeBytes: 100, Usage: proto.DiskFree}, {Name: "vdc", SizeBytes: 100, Usage: proto.DiskFree}}
+	if _, err := p.checkDisks([]proto.DiskRef{{Name: "vdb", SizeBytes: 100, Usage: proto.DiskFree}}, two, false); !errors.As(err, &oe) || oe.Code != proto.ErrDiskIdentity {
+		t.Fatalf("dua disk tanpa identitas berukuran sama: %v", err)
+	}
+	one := []proto.Disk{{Name: "vdb", SizeBytes: 100, Usage: proto.DiskFree}, {Name: "vdc", SizeBytes: 200, Usage: proto.DiskFree}}
+	if _, err := p.checkDisks([]proto.DiskRef{{Name: "vdb", SizeBytes: 100, Usage: proto.DiskFree}}, one, false); err != nil {
+		t.Fatalf("disk virtual tanpa identitas, ukuran unik: %v", err)
+	}
+}

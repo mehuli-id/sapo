@@ -576,6 +576,8 @@ func (p *Pools) checkDisks(refs []proto.DiskRef, disks []proto.Disk, allowUSB bo
 	// membedakan disk (enclosure USB 2-bay murah sering melaporkan nomor
 	// seri chip USB-nya untuk kedua disk).
 	serials, wwns := map[string]int{}, map[string]int{}
+	// Disk tanpa nomor seri dan WWN hanya bisa dibedakan dari ukurannya.
+	noID := map[uint64]int{}
 	for _, d := range disks {
 		byName[d.Name] = d
 		if d.Serial != "" {
@@ -583,6 +585,9 @@ func (p *Pools) checkDisks(refs []proto.DiskRef, disks []proto.Disk, allowUSB bo
 		}
 		if d.WWN != "" {
 			wwns[d.WWN]++
+		}
+		if d.Serial == "" && d.WWN == "" {
+			noID[d.SizeBytes]++
 		}
 	}
 	var size uint64
@@ -600,7 +605,10 @@ func (p *Pools) checkDisks(refs []proto.DiskRef, disks []proto.Disk, allowUSB bo
 		switch {
 		case d.Transport == "usb" && !allowUSB:
 			return false, &OpError{Code: proto.ErrDiskUSB, Message: "disk " + ref.Name + " tersambung lewat USB; centang izin memakai disk USB bila memang sengaja"}
-		case serials[d.Serial] > 1 || wwns[d.WWN] > 1:
+		case serials[d.Serial] > 1 || wwns[d.WWN] > 1,
+			// Disk USB tanpa identitas, atau beberapa disk tanpa identitas
+			// berukuran sama: nama perangkat bisa tertukar saat USB direset.
+			d.Serial == "" && d.WWN == "" && (d.Transport == "usb" || noID[d.SizeBytes] > 1):
 			return false, &OpError{Code: proto.ErrDiskIdentity, Message: "disk " + ref.Name + " punya nomor seri atau WWN yang sama dengan disk lain, jadi tidak bisa dipastikan"}
 		case d.Usage == proto.DiskInUse:
 			return false, &OpError{Code: proto.ErrDiskInUse, Message: "disk " + ref.Name + " sedang dipakai (" + d.UsageReason + ")"}

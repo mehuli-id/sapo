@@ -607,7 +607,7 @@ res="$(api POST /api/v1/storage/pools "{\"name\":\"usb\",\"layout\":\"single\",\
 [[ "$res" == *'"disk_usb"'* ]] || fail "disk USB tanpa izin harus ditolak untuk pool: $res"
 res="$(api POST /api/v1/storage/pools "{\"name\":\"usb\",\"layout\":\"single\",\"disks\":$usbref,\"confirm_name\":\"usb\",\"password\":\"$PASS\",\"allow_usb\":true}")"
 [[ "$res" == *'"disk_identity"'* ]] || fail "disk dengan nomor seri kembar harus ditolak: $res"
-res="$(api POST /api/v1/storage/external/mount "{\"uuid\":\"$(uuid_of FOTO)\",\"name\":\"usb-foto\",\"group\":\"sapo-users\",\"read_only\":false,\"smb\":true,\"admin_password\":\"$PASS\"}")"
+res="$(api POST /api/v1/storage/external/mount "{\"uuid\":\"$(uuid_of FOTO)\",\"name\":\"usb-foto\",\"group\":\"*\",\"read_only\":false,\"smb\":true,\"admin_password\":\"$PASS\"}")"
 [[ "$res" == *' 200' ]] || fail "pasang FOTO: $res"
 res="$(api POST /api/v1/groups '{"name":"tamu"}')"
 [[ "$res" == *' 200' ]] || fail "buat grup tamu: $res"
@@ -637,7 +637,7 @@ done
 out="$(smbclient //127.0.0.1/usb-foto -p "$SMB_PORT" -m SMB3 -U "budi%$UPASS" -c ls 2>&1 || true)"
 [[ "$out" == *NT_STATUS_BAD_NETWORK_NAME* ]] || fail "folder eksternal yang dilepas masih dibagikan: $out"
 ext="$(api GET /api/v1/storage/external)"
-res="$(api POST /api/v1/storage/external/mount "{\"uuid\":\"$(uuid_of FOTO)\",\"name\":\"usb-foto\",\"group\":\"sapo-users\",\"read_only\":true,\"smb\":false,\"admin_password\":\"$PASS\"}")"
+res="$(api POST /api/v1/storage/external/mount "{\"uuid\":\"$(uuid_of FOTO)\",\"name\":\"usb-foto\",\"group\":\"*\",\"read_only\":true,\"smb\":false,\"admin_password\":\"$PASS\"}")"
 [[ "$res" == *' 200' ]] || fail "pasang FOTO lagi: $res"
 login_as budi
 res="$(api GET '/api/v1/files/list?share=usb-foto&path=')"

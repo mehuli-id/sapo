@@ -57,12 +57,12 @@ const byDisk = computed(() => {
 const fsLabel = (fs: string) => ({ exfat: "exFAT", vfat: "FAT32", ntfs: "NTFS" })[fs] ?? fs
 
 const open = ref("")
-const form = reactive({ name: "", group: "sapo-users", readOnly: false, smb: true, password: "" })
+const form = reactive({ name: "", group: "*", readOnly: false, smb: true, password: "" })
 function start(v: ExternalVolume) {
   open.value = v.uuid
   error.value = notice.value = ""
   const base = (v.label || v.model || "usb").toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^[^a-z]+/, "").slice(0, 24)
-  Object.assign(form, { name: base ? `usb-${base}`.slice(0, 32) : "usb", group: "sapo-users", readOnly: false, smb: true, password: "" })
+  Object.assign(form, { name: base ? `usb-${base}`.slice(0, 32) : "usb", group: "*", readOnly: false, smb: true, password: "" })
 }
 async function run(key: string, fn: () => Promise<unknown>, done: string) {
   busy.value = key
@@ -113,7 +113,7 @@ const unmount = (v: ExternalVolume) => run(v.uuid, () => api.unmountExternal(v.n
                 <template v-if="v.state === 'mounted' && v.available_bytes !== undefined"> · {{ t("external.free", { free: size(v.available_bytes) }) }}</template>
               </p>
               <p v-if="v.name" class="text-xs">
-                {{ v.group === "sapo-users" ? t("external.allUsers") : v.group }} · {{ v.read_only ? t("permissions.read") : t("permissions.write") }}<template v-if="v.smb"> · SMB</template>
+                {{ v.group === "*" ? t("external.allUsers") : v.group }} · {{ v.read_only ? t("permissions.read") : t("permissions.write") }}<template v-if="v.smb"> · SMB</template>
               </p>
               <p v-if="!v.supported && v.reason" class="text-xs text-muted-foreground">{{ t(`external.reason.${v.reason}`) }}</p>
               <p v-if="v.error" class="text-xs text-destructive">{{ v.error }}</p>
@@ -138,7 +138,7 @@ const unmount = (v: ExternalVolume) => run(v.uuid, () => api.unmountExternal(v.n
                   v-model="form.group"
                   class="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
                 >
-                  <option value="sapo-users">{{ t("external.allUsers") }}</option>
+                  <option value="*">{{ t("external.allUsers") }}</option>
                   <option v-for="g in groups" :key="g.name" :value="g.name">{{ g.name }}</option>
                 </select>
               </div>

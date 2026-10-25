@@ -876,7 +876,9 @@
       "unsupported_fs": "This format isn’t supported yet (only exFAT, FAT32, NTFS). Open Linux formats such as ext4 on a Linux computer.",
       "member": "Member of a ZFS pool, RAID, LVM, encrypted, or swap: not mounted here.",
       "no_uuid": "A file system without a UUID can’t be recognized when plugged in again.",
-      "mounted_elsewhere": "In use by the system."
+      "mounted_elsewhere": "In use by the system.",
+      "duplicate_uuid": "Another drive has the same UUID (a clone): unplug one of them first.",
+      "system_partition": "System partition (EFI, Microsoft Reserved, or Recovery): not mounted here."
     }
   }
 }

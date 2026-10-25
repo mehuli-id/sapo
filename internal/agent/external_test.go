@@ -40,6 +40,7 @@ func testExternal(t *testing.T) (*External, string, string) {
 		MountBase: base, StateFile: filepath.Join(dir, "external.json"), GroupFile: s.t.GroupFile,
 		IDMin: 20000, IDMax: 29999, Timeout: 5 * time.Second,
 	}, NewStorage(StorageTools{Timeout: 5 * time.Second}), s)
+	e.rootOK = func(string, int) error { return nil }
 	// Titik pasang "terpasang" setelah mount tiruan dipanggil.
 	e.isMount = func(p string) bool {
 		b, _ := os.ReadFile(log)
@@ -111,6 +112,12 @@ func TestExternalListAndMount(t *testing.T) {
 	}
 	// Drive dicabut tanpa dilepas: titik pasang dilepas (lazy), status terputus.
 	_ = os.WriteFile(lsblkOut, []byte(strings.Replace(lsblkUSB, `"AAAA-1111"`, `"XXXX-0000"`, 1)), 0o644)
+	// Sekali tidak terlihat (USB direset sesaat): belum dilepas.
+	_, _ = extCall(t, e.ListOp(), nil)
+	if calls, _ := os.ReadFile(log); strings.Contains(string(calls), "umount -l") {
+		t.Fatal("drive yang sesaat tidak terlihat tidak boleh langsung dilepas")
+	}
+	_, _ = extCall(t, e.ListOp(), nil)
 	res, _ = extCall(t, e.ListOp(), nil)
 	for _, v := range res.([]proto.ExternalVolume) {
 		if v.Name == "foto" && v.State != "disconnected" {
@@ -150,5 +157,57 @@ func TestExternalReadWriteNTFS(t *testing.T) {
 	calls, _ := os.ReadFile(log)
 	if !strings.Contains(string(calls), "mount -t ntfs3 -o nosuid,nodev,noexec,uid=0,gid=20000,fmask=0117,dmask=0007 -- /dev/sdc1 ") {
 		t.Fatalf("mount NTFS:\n%s", calls)
+	}
+}
+
+// Drive hasil kloning: UUID kembar tidak dipasang, dan drive lain dengan UUID
+// sama (ukuran/nomor seri berbeda) tidak dipasang otomatis.
+func TestExternalCloneGuards(t *testing.T) {
+	e, log, lsblkOut := testExternal(t)
+	if _, err := extCall(t, e.MountOp(), proto.ExternalMountParams{UUID: "AAAA-1111", Name: "foto", Group: "ortu"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := extCall(t, e.UnmountOp(), proto.ExternalParams{Name: "foto"}); err != nil {
+		t.Fatal(err)
+	}
+	// Dua volume ber-UUID sama.
+	dup := strings.Replace(lsblkUSB, `"0123456789ABCDEF"`, `"AAAA-1111"`, 1)
+	_ = os.WriteFile(lsblkOut, []byte(dup), 0o644)
+	var oe *OpError
+	if _, err := extCall(t, e.MountOp(), proto.ExternalMountParams{UUID: "AAAA-1111", Name: "foto", Group: "ortu"}); !errors.As(err, &oe) || !strings.Contains(oe.Message, "duplicate_uuid") {
+		t.Fatalf("UUID kembar: %v", err)
+	}
+	// Dipasang, lalu drive diganti drive lain ber-UUID sama (ukuran lain).
+	_ = os.WriteFile(lsblkOut, []byte(lsblkUSB), 0o644)
+	if _, err := extCall(t, e.MountOp(), proto.ExternalMountParams{UUID: "AAAA-1111", Name: "foto", Group: "ortu"}); err != nil {
+		t.Fatal(err)
+	}
+	mp := filepath.Join(e.t.MountBase, "foto")
+	before, _ := os.ReadFile(log)
+	_ = os.WriteFile(lsblkOut, []byte(strings.Replace(lsblkUSB, `"size":64000`, `"size":64001`, 1)), 0o644)
+	res, _ := extCall(t, e.ListOp(), nil)
+	calls, _ := os.ReadFile(log)
+	if !strings.Contains(string(calls[len(before):]), "umount -- "+mp) {
+		t.Fatalf("drive lain harus dilepas:\n%s", calls[len(before):])
+	}
+	for _, v := range res.([]proto.ExternalVolume) {
+		if v.Name == "foto" && v.State != "error" {
+			t.Fatalf("status drive lain = %+v", v)
+		}
+	}
+	before, _ = os.ReadFile(log)
+	_, _ = extCall(t, e.ListOp(), nil)
+	if calls, _ := os.ReadFile(log); strings.Contains(string(calls[len(before):]), "mount -t") {
+		t.Fatal("drive lain tidak boleh dipasang otomatis")
+	}
+}
+
+// Grup yang dihapus lalu dibuat ulang (GID lain) tidak mewarisi akses.
+func TestExternalGroupChanged(t *testing.T) {
+	e, _, _ := testExternal(t)
+	err := e.mountVol(context.Background(), "foto", externalConf{UUID: "AAAA-1111", FSType: "exfat", Group: "ortu", GID: 20999}, "/dev/sdb")
+	var oe *OpError
+	if !errors.As(err, &oe) || oe.Code != proto.ErrConflict {
+		t.Fatalf("grup berubah: %v", err)
 	}
 }

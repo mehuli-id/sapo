@@ -69,7 +69,7 @@ func (s *Server) sharesFor(ctx context.Context, u auth.User) (map[string]fileSha
 			if _, taken := out[v.Name]; taken || s.shareExists(v.Name) {
 				continue
 			}
-			if v.Group != allUsersGroup && !slices.Contains(u.Groups, v.Group) {
+			if v.Group != s.cfg.Agent.Accounts.PrimaryGroup && !slices.Contains(u.Groups, v.Group) {
 				continue
 			}
 			access := "write"
@@ -82,8 +82,9 @@ func (s *Server) sharesFor(ctx context.Context, u auth.User) (map[string]fileSha
 	return out, all
 }
 
-// allUsersGroup: grup utama semua akun Sapo (agent.accounts.primary_group).
-const allUsersGroup = "sapo-users"
+// allUsers: nilai grup "semua pengguna" di API folder eksternal; sapod
+// memakai grup utama semua akun Sapo (agent.accounts.primary_group).
+const allUsers = "*"
 
 func (s *Server) shareExists(name string) bool {
 	_, ok := s.shares.get(name)
