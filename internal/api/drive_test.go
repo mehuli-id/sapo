@@ -37,6 +37,16 @@ func TestDriveAPI(t *testing.T) {
 	if sp, _ := agent.param(proto.OpSharesApply).(proto.SharesApplyParams); sp.HomesPool != "tank" {
 		t.Fatalf("shares.apply tanpa folder pribadi: %+v", sp)
 	}
+	// homes.apply gagal (misalnya dataset induk bukan milik Sapo): [homes]
+	// tidak dibagikan, dan perubahan dilaporkan belum diterapkan.
+	agent.setErrs(map[string]error{proto.OpHomesApply: &proto.Error{Code: proto.ErrConflict, Message: "bukan milik Sapo Drive"}})
+	if rec := h.do(http.MethodPost, "/api/v1/drive/settings", body); !strings.Contains(rec.Body.String(), "system_sync_failed") {
+		t.Fatalf("galat homes.apply harus dilaporkan: %d %s", rec.Code, rec.Body)
+	}
+	if sp, _ := agent.param(proto.OpSharesApply).(proto.SharesApplyParams); sp.HomesPool != "" {
+		t.Fatalf("[homes] tidak boleh dibagikan saat homes.apply gagal: %+v", sp)
+	}
+	agent.setErrs(nil)
 	// Kuota khusus: tanpa batas untuk budi.
 	if rec := h.do(http.MethodPost, "/api/v1/drive/users/budi/quota", map[string]any{"quota_gb": -1, "admin_password": adminPassword}); rec.Code != http.StatusOK {
 		t.Fatalf("kuota budi: %d %s", rec.Code, rec.Body)

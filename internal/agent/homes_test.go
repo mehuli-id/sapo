@@ -15,9 +15,10 @@ import (
 func testHomes(t *testing.T) (*Homes, string, string) {
 	t.Helper()
 	s, root, log := testShares(t, "0")
-	var chowned []string
+	// Pemilik direkam lewat chown tiruan (test tidak berjalan sebagai root).
+	owners := map[string]int{}
 	s.chown = func(p string, uid, gid int) error {
-		chowned = append(chowned, p)
+		owners[p] = uid
 		return nil
 	}
 	s.isMount = func(string) bool { return true }
@@ -30,7 +31,9 @@ func testHomes(t *testing.T) (*Homes, string, string) {
 		}
 		return 0, 0, false
 	}
-	return NewHomes(s, managed), root, log
+	h := NewHomes(s, managed)
+	h.owner = func(p string) (int, error) { return owners[p], nil }
+	return h, root, log
 }
 
 func homesCall(t *testing.T, h Handler, p any) (any, error) {
@@ -55,9 +58,9 @@ func TestHomesApply(t *testing.T) {
 	inOrder(t, string(calls),
 		"zfs create -o sapo:home=@induk -o devices=off -o setuid=off -- tank/sapo-home",
 		"zfs create -o sapo:home=ani -o devices=off -o setuid=off -- tank/sapo-home/ani",
-		"zfs set quota=10737418240 -- tank/sapo-home/ani",
+		"zfs set refquota=10737418240 -- tank/sapo-home/ani",
 		"zfs create -o sapo:home=budi -o devices=off -o setuid=off -- tank/sapo-home/budi")
-	if strings.Contains(string(calls), "quota=none -- tank/sapo-home/budi") || strings.Contains(string(calls), "tank/sapo-home/hantu") {
+	if strings.Contains(string(calls), "refquota=none -- tank/sapo-home/budi") || strings.Contains(string(calls), "tank/sapo-home/hantu") {
 		t.Fatalf("panggilan salah:\n%s", calls)
 	}
 	for p, mode := range map[string]os.FileMode{"tank/sapo-home": 0o711, "tank/sapo-home/ani": 0o700} {
@@ -70,7 +73,7 @@ func TestHomesApply(t *testing.T) {
 	if _, err := homesCall(t, h.ApplyOp(), proto.HomesApplyParams{Pool: "tank", Users: []proto.HomeUser{{Name: "ani"}}}); err != nil {
 		t.Fatal(err)
 	}
-	if calls, _ := os.ReadFile(log); !strings.Contains(string(calls), "zfs set quota=none -- tank/sapo-home/ani") {
+	if calls, _ := os.ReadFile(log); !strings.Contains(string(calls), "zfs set refquota=none -- tank/sapo-home/ani") {
 		t.Fatalf("kuota dicabut:\n%s", calls)
 	}
 	// Nama tidak valid atau akun aplikasi: ditolak seluruhnya.
@@ -135,5 +138,58 @@ func TestAppsRefuseForeignParent(t *testing.T) {
 	var oe *OpError
 	if _, err := appCall(t, a.InstallOp(), proto.AppInstallParams{ID: "homer", Pool: "tank", Port: 8090}); !errors.As(err, &oe) || oe.Code != proto.ErrConflict {
 		t.Fatalf("dataset sapo-apps asing: %v", err)
+	}
+}
+
+// Folder sisa pengguna lama (pemilik UID lain) tidak diserahkan ke akun baru
+// bernama sama, misalnya setelah pool lama diimpor lagi.
+func TestHomesRefuseForeignOwner(t *testing.T) {
+	h, root, log := testHomes(t)
+	if _, err := homesCall(t, h.ApplyOp(), proto.HomesApplyParams{Pool: "tank", Users: []proto.HomeUser{{Name: "ani"}}}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "tank/sapo-home/ani")
+	h.owner = func(p string) (int, error) {
+		if p == path {
+			return 20999, nil
+		}
+		return 0, nil
+	}
+	_ = os.Truncate(log, 0)
+	res, err := homesCall(t, h.ApplyOp(), proto.HomesApplyParams{Pool: "tank", Users: []proto.HomeUser{{Name: "ani"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := res.(proto.HomesApplyResult).Failures; len(f) != 1 || !strings.Contains(f[0], "pemilik folder tidak cocok") {
+		t.Fatalf("kegagalan = %v", f)
+	}
+	if calls, _ := os.ReadFile(log); strings.Contains(string(calls), "zfs set") {
+		t.Fatalf("folder asing tidak boleh diubah:\n%s", calls)
+	}
+}
+
+func TestHomesDeleteRefusesPasswdEntry(t *testing.T) {
+	h, _, _ := testHomes(t)
+	// ani ada di /etc/passwd (testShares) walau tidak tercatat sebagai akun
+	// Sapo: ditolak.
+	h.managed = func(string) (int, int, bool) { return 0, 0, false }
+	var oe *OpError
+	if _, err := homesCall(t, h.DeleteOp(), proto.HomeDeleteParams{Pool: "tank", User: "ani"}); !errors.As(err, &oe) || oe.Code != proto.ErrConflict {
+		t.Fatalf("akun Linux masih ada: %v", err)
+	}
+}
+
+// Dataset sapo-apps dari App Center tahap 1 (penanda "-" diset langsung)
+// dipindah ke penanda baru.
+func TestAppsMigrateOldParentMarker(t *testing.T) {
+	a, root, log := testApps(t)
+	_ = os.MkdirAll(filepath.Join(root, "tank/sapo-apps"), 0o755)
+	props := filepath.Join(filepath.Dir(log), "props")
+	_ = os.WriteFile(filepath.Join(props, "tank_sapo-apps.sapo_app"), []byte("-\n"), 0o644)
+	if _, err := appCall(t, a.InstallOp(), proto.AppInstallParams{ID: "homer", Pool: "tank", Port: 8090}); err != nil {
+		t.Fatal(err)
+	}
+	if calls, _ := os.ReadFile(log); !strings.Contains(string(calls), "zfs set sapo:app=@induk -- tank/sapo-apps") {
+		t.Fatalf("penanda lama tidak dipindah:\n%s", calls)
 	}
 }

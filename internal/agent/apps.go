@@ -461,9 +461,18 @@ func (a *Apps) ensureData(ctx context.Context, pool, id string, uid int) (string
 		if err := a.zfs(ctx, []string{"create", "-o", "sapo:app=" + parentMarker, "-o", "devices=off", "-o", "setuid=off"}, parent); err != nil {
 			return "", err
 		}
+		pprops = map[string]string{"sapo:app": parentMarker}
 	} else if err != nil {
 		return "", err
-	} else if pprops["sapo:app"] != parentMarker || (pprops[sharePropName] != "-" && pprops[sharePropName] != "") {
+	} else if pprops["sapo:app"] == "-" && a.localValue(ctx, parent, "sapo:app") == "-" {
+		// App Center tahap 1 memakai penanda "-" (diset di dataset itu
+		// sendiri): dipindah ke penanda baru.
+		if err := a.zfs(ctx, []string{"set", "sapo:app=" + parentMarker}, parent); err != nil {
+			return "", err
+		}
+		pprops["sapo:app"] = parentMarker
+	}
+	if pprops["sapo:app"] != parentMarker || (pprops[sharePropName] != "-" && pprops[sharePropName] != "") {
 		// Dataset bernama sama yang bukan buatan App Center (misalnya
 		// dibuat dari terminal): tidak dipakai.
 		return "", &OpError{Code: proto.ErrConflict, Message: "dataset " + parent + " sudah ada dan bukan milik App Center"}
@@ -493,6 +502,20 @@ func (a *Apps) ensureData(ctx context.Context, pool, id string, uid int) (string
 		return "", err
 	}
 	return want, nil
+}
+
+// localValue: nilai properti yang diset langsung di dataset (bukan bawaan
+// atau warisan); kosong bila tidak.
+func (a *Apps) localValue(ctx context.Context, ds, name string) string {
+	res, err := a.shares.p.st.run(ctx, a.shares.t.Zfs, []string{"get", "-H", "-p", "-o", "property,value,source", name}, ds)
+	if err != nil || res.ExitCode != 0 {
+		return ""
+	}
+	f := strings.Split(strings.TrimSpace(string(res.Stdout)), "\t")
+	if len(f) != 3 || f[0] != name || f[2] != "local" {
+		return ""
+	}
+	return f[1]
 }
 
 func (a *Apps) zfs(ctx context.Context, flags []string, ds string) error {

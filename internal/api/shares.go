@@ -239,7 +239,10 @@ func (s *Server) syncSystem(ctx context.Context) (res proto.SharesApplyResult, e
 	v := s.settings.get()
 	// Folder pribadi (Sapo Drive) disiapkan dulu, agar sudah ada saat Samba
 	// membagikannya. Hanya untuk pengguna yang akunnya berhasil disinkronkan.
+	// [homes] di Samba hanya bila folder induknya berhasil dipastikan
+	// milik Sapo Drive (gagal-tertutup).
 	var homesErr error
+	homesPool := ""
 	if v.HomesPool != "" {
 		hp := proto.HomesApplyParams{Pool: v.HomesPool, Users: []proto.HomeUser{}}
 		for _, u := range users {
@@ -248,11 +251,15 @@ func (s *Server) syncSystem(ctx context.Context) (res proto.SharesApplyResult, e
 			}
 		}
 		var hres proto.HomesApplyResult
-		if homesErr = s.agent.Call(ctx, proto.OpHomesApply, hp, &hres); homesErr == nil && len(hres.Failures) > 0 {
-			homesErr = errors.New("sebagian folder pribadi gagal disiapkan: " + strings.Join(hres.Failures, "; "))
+		homesErr = s.agent.Call(ctx, proto.OpHomesApply, hp, &hres)
+		if homesErr == nil {
+			homesPool = v.HomesPool
+			if len(hres.Failures) > 0 {
+				homesErr = errors.New("sebagian folder pribadi gagal disiapkan: " + strings.Join(hres.Failures, "; "))
+			}
 		}
 	}
-	params := proto.SharesApplyParams{Shares: []proto.ShareSpec{}, SMBOff: v.SMBOff, NFSOff: v.NFSOff, HomesPool: v.HomesPool}
+	params := proto.SharesApplyParams{Shares: []proto.ShareSpec{}, SMBOff: v.SMBOff, NFSOff: v.NFSOff, HomesPool: homesPool}
 	for _, sh := range s.shares.list() {
 		spec := proto.ShareSpec{Name: sh.Name, Pool: sh.Pool, Description: sh.Description, Read: []string{}, Write: []string{}}
 		for p, level := range sh.Permissions {
