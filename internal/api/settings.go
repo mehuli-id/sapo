@@ -24,6 +24,8 @@ import (
 type Settings struct {
 	SMBOff bool `json:"smb_off,omitempty"`
 	NFSOff bool `json:"nfs_off,omitempty"`
+	// WebDAVOff: WebDAV (/dav/, Sapo Drive tahap 2) dimatikan.
+	WebDAVOff bool `json:"webdav_off,omitempty"`
 	// Sapo Drive (ADR 0013): pool folder pribadi (kosong = mati), kuota
 	// bawaan dalam GiB (0 = tanpa batas), dan kuota per pengguna (-1 = tanpa
 	// batas).
@@ -79,20 +81,21 @@ func (st *settingsStore) update(fn func(*Settings)) (Settings, error) {
 
 func (s *Server) handleServices(w http.ResponseWriter, _ *http.Request) {
 	v := s.settings.get()
-	writeJSON(w, http.StatusOK, map[string]bool{"smb": !v.SMBOff, "nfs": !v.NFSOff})
+	writeJSON(w, http.StatusOK, map[string]bool{"smb": !v.SMBOff, "nfs": !v.NFSOff, "webdav": !v.WebDAVOff})
 }
 
 // handleServicesUpdate menyalakan atau mematikan SMB dan NFS untuk semua
 // shared folder. Mematikan memutus semua klien layanan itu.
 func (s *Server) handleServicesUpdate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		SMB *bool `json:"smb"`
-		NFS *bool `json:"nfs"`
+		SMB    *bool `json:"smb"`
+		NFS    *bool `json:"nfs"`
+		WebDAV *bool `json:"webdav"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if req.SMB == nil && req.NFS == nil {
+	if req.SMB == nil && req.NFS == nil && req.WebDAV == nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "tidak ada yang diubah")
 		return
 	}
@@ -103,6 +106,9 @@ func (s *Server) handleServicesUpdate(w http.ResponseWriter, r *http.Request) {
 		if req.NFS != nil {
 			v.NFSOff = !*req.NFS
 		}
+		if req.WebDAV != nil {
+			v.WebDAVOff = !*req.WebDAV
+		}
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "gagal menyimpan pengaturan")
@@ -110,8 +116,8 @@ func (s *Server) handleServicesUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	warning := s.syncAfterChange(r)
 	sess, _, _ := s.currentSession(r)
-	s.record(r, sess.Username, "settings.services", warning == "", map[string]string{"smb": strconv.FormatBool(!v.SMBOff), "nfs": strconv.FormatBool(!v.NFSOff)})
-	writeJSON(w, http.StatusOK, map[string]any{"smb": !v.SMBOff, "nfs": !v.NFSOff, "warning": warning})
+	s.record(r, sess.Username, "settings.services", warning == "", map[string]string{"smb": strconv.FormatBool(!v.SMBOff), "nfs": strconv.FormatBool(!v.NFSOff), "webdav": strconv.FormatBool(!v.WebDAVOff)})
+	writeJSON(w, http.StatusOK, map[string]any{"smb": !v.SMBOff, "nfs": !v.NFSOff, "webdav": !v.WebDAVOff, "warning": warning})
 }
 
 func (s *Server) handleTimeSet(w http.ResponseWriter, r *http.Request) {

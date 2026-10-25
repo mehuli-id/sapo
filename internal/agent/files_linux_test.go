@@ -58,6 +58,19 @@ func TestFSHelperOps(t *testing.T) {
 		t.Fatal(".. harus ditolak")
 	}
 
+	// stat: file, direktori, dan akar; symlink tidak diikuti.
+	if res, err := do(fsRequest{Op: "stat", Path: "foto/a.jpg"}); err != nil || res.(proto.FileEntry).Type != "file" || res.(proto.FileEntry).Size != 6 || res.(proto.FileEntry).Name != "a.jpg" {
+		t.Fatalf("stat file: %+v %v", res, err)
+	}
+	if res, err := do(fsRequest{Op: "stat", Path: ""}); err != nil || res.(proto.FileEntry).Type != "dir" {
+		t.Fatalf("stat akar: %+v %v", res, err)
+	}
+	if _, err := do(fsRequest{Op: "stat", Path: "keluar/rahasia"}); err == nil {
+		t.Fatal("stat lewat symlink harus ditolak")
+	}
+	if _, err := do(fsRequest{Op: "stat", Path: "hantu"}); code(err) != proto.ErrNotFound {
+		t.Fatalf("stat yang tidak ada: %v", err)
+	}
 	if _, err := do(fsRequest{Op: "mkdir", Path: "dokumen"}); err != nil {
 		t.Fatal(err)
 	}

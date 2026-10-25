@@ -293,6 +293,26 @@ func (f *Files) ListOp() Handler {
 	}
 }
 
+// StatOp mengembalikan handler files.stat: jenis, ukuran, dan waktu ubah
+// satu path (untuk WebDAV).
+func (f *Files) StatOp() Handler {
+	return func(ctx context.Context, raw json.RawMessage) (any, error) {
+		var t proto.FilesTarget
+		if err := f.target(raw, &t); err != nil {
+			return nil, err
+		}
+		res, _, err := f.call(ctx, t, fsRequest{Op: "stat"}, f.t.Timeout, false)
+		if err != nil {
+			return nil, err
+		}
+		var out proto.FileEntry
+		if err := json.Unmarshal(res, &out); err != nil {
+			return nil, err
+		}
+		return out, nil
+	}
+}
+
 // simpleOp: mkdir dan delete (tanpa hasil selain ok).
 func (f *Files) simpleOp(op string) Handler {
 	return func(ctx context.Context, raw json.RawMessage) (any, error) {

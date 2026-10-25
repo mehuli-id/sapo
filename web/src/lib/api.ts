@@ -322,6 +322,15 @@ export interface FileShare {
   home?: boolean
 }
 
+// Password aplikasi untuk WebDAV (Sapo Drive); password-nya hanya
+// ditampilkan sekali saat dibuat.
+export interface AppPassword {
+  id: string
+  name: string
+  created_at: string
+  last_used_at?: string
+}
+
 export interface HomeStatus {
   pool: string
   user: string
@@ -335,6 +344,7 @@ export interface DriveInfo {
   enabled: boolean
   pool: string
   smb: boolean
+  webdav: boolean
   user: string
   home?: HomeStatus
 }
@@ -554,8 +564,12 @@ export const api = {
     post<{ ok: boolean; warning?: string }>(`/api/v1/apps/${encodeURIComponent(id)}/remove`, req),
   setAppFolders: (id: string, req: { folders: Record<string, ShareAccess>; admin_password: string }) =>
     post<{ ok: boolean; warning?: string }>(`/api/v1/apps/${encodeURIComponent(id)}/folders`, req),
-  services: () => get<{ smb: boolean; nfs: boolean }>("/api/v1/settings/services"),
-  setServices: (req: { smb?: boolean; nfs?: boolean }) => post<{ smb: boolean; nfs: boolean; warning?: string }>("/api/v1/settings/services", req),
+  services: () => get<{ smb: boolean; nfs: boolean; webdav: boolean }>("/api/v1/settings/services"),
+  setServices: (req: { smb?: boolean; nfs?: boolean; webdav?: boolean }) =>
+    post<{ smb: boolean; nfs: boolean; webdav: boolean; warning?: string }>("/api/v1/settings/services", req),
+  appPasswords: () => get<AppPassword[]>("/api/v1/account/app-passwords"),
+  createAppPassword: (name: string, password: string) => post<{ id: string; name: string; password: string }>("/api/v1/account/app-passwords", { name, password }),
+  revokeAppPassword: (id: string) => post<{ ok: boolean }>(`/api/v1/account/app-passwords/${encodeURIComponent(id)}/delete`),
   updatesStatus: () =>
     get<{
       running: boolean

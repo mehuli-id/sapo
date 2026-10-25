@@ -129,6 +129,7 @@ const (
 	// Operasi File Station (ADR 0010). Semua dijalankan sebagai akun Linux
 	// pengguna (proses pembantu), jadi izinnya ditegakkan kernel (ACL).
 	OpFilesList   = "files.list"
+	OpFilesStat   = "files.stat"
 	OpFilesMkdir  = "files.mkdir"
 	OpFilesRename = "files.rename"
 	OpFilesDelete = "files.delete"

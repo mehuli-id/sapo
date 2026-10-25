@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/mehuli-id/sapo/internal/agent"
+	"github.com/mehuli-id/sapo/internal/auth"
 	"github.com/mehuli-id/sapo/internal/proto"
 )
 
@@ -38,10 +39,16 @@ type fileShare struct {
 func (s *Server) userShares(r *http.Request) (string, map[string]fileShare, map[string]Share) {
 	sess, _, _ := s.currentSession(r)
 	u, ok := s.store.Get(sess.Username)
-	out, all := map[string]fileShare{}, map[string]Share{}
 	if !ok || u.Disabled {
-		return sess.Username, out, all
+		return sess.Username, map[string]fileShare{}, map[string]Share{}
 	}
+	out, all := s.sharesFor(u)
+	return u.Username, out, all
+}
+
+// sharesFor: folder yang boleh dibuka pengguna u (File Station dan WebDAV).
+func (s *Server) sharesFor(u auth.User) (map[string]fileShare, map[string]Share) {
+	out, all := map[string]fileShare{}, map[string]Share{}
 	for _, sh := range s.shares.list() {
 		exists := map[string]bool{}
 		for p := range sh.Permissions {
@@ -52,7 +59,7 @@ func (s *Server) userShares(r *http.Request) (string, map[string]fileShare, map[
 			all[sh.Name] = sh
 		}
 	}
-	return u.Username, out, all
+	return out, all
 }
 
 func (s *Server) handleFileShares(w http.ResponseWriter, r *http.Request) {

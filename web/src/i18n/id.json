@@ -331,7 +331,9 @@
     "home_exists": "Masih ada folder pribadi pengguna lama bernama sama. Hapus dulu di Sapo Drive (Folder sisa), atau pakai nama lain.",
     "drive_pool_in_use": "Masih ada folder pribadi di pool lain. Folder pribadi tidak dipindah otomatis.",
     "home_user_exists": "Pengguna ini masih ada; folder pribadinya tidak bisa dihapus.",
-    "home_delete_failed": "Folder pribadi gagal dihapus: {message}"
+    "home_delete_failed": "Folder pribadi gagal dihapus: {message}",
+    "webdav_off": "WebDAV dimatikan administrator.",
+    "app_password_limit": "Password aplikasi sudah terlalu banyak. Cabut yang tidak dipakai lagi."
   },
   "pool": {
     "title": "Pool penyimpanan",
@@ -674,7 +676,11 @@
     "installed": "Pembaruan terakhir dipasang {when}.",
     "installFailed": "Pemasangan pembaruan terakhir gagal (kode {code}). Lihat log.",
     "updateLog": "Log pemasangan",
-    "installInterrupted": "Pemasangan pembaruan terakhir terputus sebelum selesai. Pasang lagi: pemasangan yang terputus akan dilanjutkan dulu."
+    "installInterrupted": "Pemasangan pembaruan terakhir terputus sebelum selesai. Pasang lagi: pemasangan yang terputus akan dilanjutkan dulu.",
+    "webdav": "WebDAV",
+    "webdavHelp": "Membuka Sapo Drive dan shared folder lewat https://…/dav/ dengan password aplikasi.",
+    "webdavOn": "WebDAV dinyalakan.",
+    "webdavOff": "WebDAV dimatikan."
   },
   "appCenter": {
     "intro": "Aplikasi tambahan dari katalog Sapo. Setiap aplikasi berjalan terpisah dengan akunnya sendiri, tanpa hak istimewa, dan datanya disimpan di pool yang dipilih. Aplikasi hanya bisa membuka shared folder yang Anda berikan.",
@@ -751,6 +757,49 @@
     "onPool": "di pool {pool}",
     "deleteHome": "Hapus folder",
     "deleteHomeHelp": "Folder pribadi {user} beserta semua isinya akan dihapus permanen dan tidak bisa dikembalikan.",
-    "homeDeleted": "Folder pribadi {user} dihapus."
+    "homeDeleted": "Folder pribadi {user} dihapus.",
+    "webdavTitle": "Dari perangkat lain (WebDAV)",
+    "webdavHelp": "Semua folder yang boleh Anda buka (Drive saya dan shared folder) ada di alamat ini:",
+    "webdavLogin": "Masuk dengan nama pengguna {user} dan password aplikasi (bukan password akun).",
+    "webdavCreatePassword": "Buat password aplikasi",
+    "webdavOff": "WebDAV sedang dimatikan administrator.",
+    "webdavCert": "Sertifikat HTTPS NAS dibuat sendiri oleh NAS. Agar perangkat bisa tersambung dengan aman, unduh sertifikatnya lalu tandai sebagai tepercaya di perangkat itu. Jangan mematikan pemeriksaan sertifikat: password aplikasi bisa dicuri.",
+    "downloadCert": "Unduh sertifikat NAS",
+    "guide": {
+      "windows": {
+        "title": "Windows",
+        "steps": "1. Pasang sertifikat NAS: buka file sapo-nas.crt → Install Certificate → Local Machine → Trusted Root Certification Authorities.\n2. File Explorer → klik kanan This PC → Map network drive.\n3. Folder: {url}\n4. Centang \"Connect using different credentials\", lalu masuk sebagai {user} dengan password aplikasi."
+      },
+      "macos": {
+        "title": "macOS",
+        "steps": "1. Buka sapo-nas.crt (Keychain Access), lalu pada sertifikat itu pilih Always Trust.\n2. Finder → Go → Connect to Server (⌘K), isi {url}.\n3. Masuk sebagai {user} dengan password aplikasi."
+      },
+      "ios": {
+        "title": "iPhone dan iPad",
+        "steps": "Pakai aplikasi pengelola file yang mendukung WebDAV. Tambahkan server WebDAV dengan alamat {url}, nama pengguna {user}, dan password aplikasi. Pasang sertifikat NAS lewat Settings → General → VPN & Device Management, lalu aktifkan di Settings → General → About → Certificate Trust Settings."
+      },
+      "android": {
+        "title": "Android",
+        "steps": "Pakai aplikasi pengelola file yang mendukung WebDAV. Tambahkan server WebDAV dengan alamat {url}, nama pengguna {user}, dan password aplikasi. Pasang sertifikat NAS lewat Settings → Security → Encryption & credentials → Install a certificate."
+      },
+      "rclone": {
+        "title": "rclone (sinkron dua arah)",
+        "steps": "rclone config create sapo webdav url={url} vendor=other user={user} pass=$(rclone obscure 'PASSWORD-APLIKASI')\n\nSinkron pertama kali:\nrclone bisync ~/SapoDrive sapo:{'@'}home --resync --ca-cert sapo-nas.crt\n\nSelanjutnya (misalnya terjadwal):\nrclone bisync ~/SapoDrive sapo:{'@'}home --ca-cert sapo-nas.crt"
+      }
+    }
+  },
+  "appPasswords": {
+    "title": "Password aplikasi (WebDAV)",
+    "help": "Untuk membuka Sapo Drive dan shared folder lewat WebDAV dari komputer atau HP, karena aplikasi WebDAV tidak bisa meminta kode 2FA. Buat satu per perangkat; password ini hanya berlaku untuk WebDAV, bukan untuk login panel. Semua password aplikasi dicabut bila password akun diganti.",
+    "add": "Buat password aplikasi",
+    "create": "Buat",
+    "device": "Nama perangkat",
+    "devicePlaceholder": "misalnya: Laptop kantor",
+    "created": "Password aplikasi untuk {name}:",
+    "onlyOnce": "Salin sekarang: password ini tidak akan ditampilkan lagi. Bila lupa, cabut lalu buat yang baru.",
+    "none": "Belum ada password aplikasi.",
+    "lastUsed": "Terakhir dipakai: {when}",
+    "never": "belum pernah",
+    "revoke": "Cabut"
   }
 }

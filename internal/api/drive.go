@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/pem"
 	"errors"
 	"net/http"
 	"slices"
@@ -66,7 +67,7 @@ func (s *Server) homeExists(r *http.Request, user string) (bool, error) {
 func (s *Server) handleDrive(w http.ResponseWriter, r *http.Request) {
 	sess, _, _ := s.currentSession(r)
 	v := s.settings.get()
-	out := map[string]any{"enabled": v.HomesPool != "", "pool": v.HomesPool, "smb": !v.SMBOff, "user": sess.Username}
+	out := map[string]any{"enabled": v.HomesPool != "", "pool": v.HomesPool, "smb": !v.SMBOff, "webdav": !v.WebDAVOff, "user": sess.Username}
 	if v.HomesPool != "" {
 		homes, err := s.homesStatus(r)
 		if err != nil {
@@ -241,4 +242,18 @@ func (s *Server) handleHomeDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	s.destructive(w, r, admin, "drive.home_delete", map[string]string{"user": auditText(name), "pool": auditText(pool)}, proto.OpHomesDelete,
 		proto.HomeDeleteParams{Pool: pool, User: name}, nil)
+}
+
+// handleCertificate mengunduh sertifikat HTTPS panel (bukan rahasia), agar
+// perangkat lain bisa mempercayainya untuk WebDAV tanpa mematikan pemeriksaan
+// sertifikat.
+func (s *Server) handleCertificate(w http.ResponseWriter, _ *http.Request) {
+	if s.https == nil || s.https.Certificate == nil {
+		writeError(w, http.StatusNotFound, "not_found", "panel tidak memakai HTTPS")
+		return
+	}
+	h := w.Header()
+	h.Set("Content-Type", "application/x-pem-file")
+	h.Set("Content-Disposition", `attachment; filename="sapo-nas.crt"`)
+	_ = pem.Encode(w, &pem.Block{Type: "CERTIFICATE", Bytes: s.https.Certificate()})
 }

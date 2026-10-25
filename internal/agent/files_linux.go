@@ -92,6 +92,27 @@ func fsDo(req fsRequest) (any, error) {
 	switch req.Op {
 	case "list":
 		return fsList(root, req.Path, req.Max)
+	case "stat":
+		// O_PATH: tidak membaca isi dan tidak butuh izin baca file itu
+		// sendiri (sama dengan ls di direktori induk).
+		fd, err := openBeneath(root, req.Path, unix.O_PATH|unix.O_NOFOLLOW, 0)
+		if err != nil {
+			return nil, err
+		}
+		defer unix.Close(fd)
+		var st unix.Stat_t
+		if err := unix.Fstat(fd, &st); err != nil {
+			return nil, err
+		}
+		_, name := splitParent(req.Path)
+		e := proto.FileEntry{Name: name, Size: st.Size, ModTime: time.Unix(st.Mtim.Unix()).UTC(), Type: "other"}
+		switch st.Mode & unix.S_IFMT {
+		case unix.S_IFDIR:
+			e.Type, e.Size = "dir", 0
+		case unix.S_IFREG:
+			e.Type = "file"
+		}
+		return e, nil
 	case "mkdir":
 		parent, name := splitParent(req.Path)
 		return nil, withDir(root, parent, func(pfd int) error { return unix.Mkdirat(pfd, name, 0o777) })

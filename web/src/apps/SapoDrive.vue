@@ -45,6 +45,8 @@ onMounted(load)
 
 const size = (b: number) => formatBytes(b, locale.value, 1000)
 const host = window.location.hostname
+const davURL = `${window.location.origin}/dav/`
+const davGuides = ["windows", "macos", "ios", "android", "rclone"] as const
 const smbPaths = computed(() => (info.value ? [`\\\\${host}\\${info.value.user}`, `smb://${host}/${info.value.user}`] : []))
 async function copy(text: string) {
   try {
@@ -156,6 +158,27 @@ const removeHome = (h: HomeStatus) =>
           </div>
         </div>
         <p v-else class="text-xs text-muted-foreground">{{ t("drive.smbOff") }}</p>
+      </section>
+
+      <!-- WebDAV (tahap 2): semua folder yang boleh dibuka, dari perangkat lain -->
+      <section class="space-y-3 rounded-xl border p-4">
+        <h3 class="font-medium">{{ t("drive.webdavTitle") }}</h3>
+        <template v-if="info.webdav">
+          <p class="text-xs text-muted-foreground">{{ t("drive.webdavHelp") }}</p>
+          <div class="flex items-center gap-2">
+            <code class="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1 text-xs">{{ davURL }}</code>
+            <button type="button" class="rounded p-1 hover:bg-accent" :aria-label="t('recovery.copy')" @click="copy(davURL)"><Copy class="size-3.5" /></button>
+          </div>
+          <p class="text-xs">{{ t("drive.webdavLogin", { user: info.user }) }}</p>
+          <Button size="sm" variant="outline" @click="launch('account-security')">{{ t("drive.webdavCreatePassword") }}</Button>
+          <details v-for="os in davGuides" :key="os" class="rounded-lg border px-3 py-2 text-sm">
+            <summary class="cursor-pointer font-medium">{{ t(`drive.guide.${os}.title`) }}</summary>
+            <p class="mt-2 whitespace-pre-line text-xs text-muted-foreground">{{ t(`drive.guide.${os}.steps`, { url: davURL, user: info.user }) }}</p>
+          </details>
+          <p class="text-xs text-muted-foreground">{{ t("drive.webdavCert") }}</p>
+          <a href="/api/v1/tls/certificate" download class="inline-block"><Button size="sm" variant="outline" type="button">{{ t("drive.downloadCert") }}</Button></a>
+        </template>
+        <p v-else class="text-xs text-muted-foreground">{{ t("drive.webdavOff") }}</p>
       </section>
 
       <!-- Admin -->

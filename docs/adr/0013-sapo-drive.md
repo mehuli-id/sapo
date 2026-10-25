@@ -1,4 +1,4 @@
-# ADR 0013: Sapo Drive (tahap 1: folder pribadi)
+# ADR 0013: Sapo Drive
 
 - **Status:** Diterima
 - **Tanggal:** 2026-10-25
@@ -28,4 +28,27 @@ Pengguna NAS ingin tempat file pribadi yang hanya bisa dibuka dirinya sendiri, s
 
 - Folder pribadi tidak dipindah otomatis antar-pool; memindahkan data menunggu fitur salin/pindah antar-pool.
 - Kuota yang diturunkan di bawah pemakaian tidak menghapus file; pengguna hanya tidak bisa menambah file.
-- Tahap 2: WebDAV di port HTTPS panel untuk folder pribadi dan shared folder sesuai izin, beserta petunjuk menghubungkan Windows, macOS, iOS, Android, dan rclone.
+
+## Tahap 2: WebDAV (2026-10-25)
+
+- **`https://<nas>/dav/`** di port HTTPS panel (sapo-api, `golang.org/x/net/webdav`). Akarnya berisi `@home` (Drive saya) dan shared folder yang boleh dibuka pengguna, dengan izin yang sama dengan File Station. Akar `/dav/` dan akar setiap folder tidak bisa diubah.
+- **Setiap operasi lewat `sapod fs-helper` sebagai akun pengguna** (ADR 0010): daftar isi, `files.stat` (baru, `O_PATH` tanpa mengikuti symlink), baca dan tulis lewat file descriptor. Symlink dan berkas khusus tidak tampil. Tulis selalu ke file sementara; namanya baru diberikan (menimpa file lama) bila isi permintaan terbaca utuh, jadi unggahan yang terputus tidak pernah merusak file lama. Pindah hanya di dalam satu folder.
+- **Login: nama pengguna dan password aplikasi** (HTTP Basic, hanya lewat HTTPS; HTTP biasa ditolak). Password aplikasi dibuat pengguna sendiri di Keamanan Akun:
+  - satu per perangkat, dibuat dengan password akun;
+  - rahasia acak sekitar 75 bit, disimpan sebagai SHA-256, dan ditampilkan sekali saja;
+  - paling banyak 20 per akun, dan bisa dicabut satu per satu;
+  - semuanya dicabut bila password akun diganti atau di-reset;
+  - setiap pembuatan dan pencabutan dicatat di log audit.
+
+  Password akun tidak berlaku untuk WebDAV, dan password aplikasi tidak berlaku untuk panel, jadi 2FA panel tetap utuh. Akun nonaktif atau yang wajib mengganti password ditolak.
+- **Pembatasan**:
+  - jaringan yang diizinkan dan validasi Host sama dengan panel;
+  - percobaan login gagal dibatasi limiter (kunci tersendiri per jaringan klien dan per akun) dan dicatat di log audit;
+  - tanpa cookie, jadi tidak butuh header CSRF; permintaan dengan Origin lain ditolak;
+  - menulis ke folder baca saja dijawab 403 sebelum diteruskan;
+  - unduhan selalu `application/octet-stream`, lampiran, dan `CSP: sandbox`;
+  - perubahan (PUT, DELETE, MKCOL, MOVE, COPY) dicatat di log audit;
+  - admin bisa mematikan WebDAV di Control Panel.
+- **Sertifikat**: sertifikat HTTPS panel (bukan rahasia) bisa diunduh dari Sapo Drive (`/api/v1/tls/certificate`) untuk dipercaya di perangkat lain. Petunjuk di Sapo Drive tidak pernah menyarankan mematikan pemeriksaan sertifikat.
+- **Petunjuk di Sapo Drive** untuk Windows, macOS, iOS, Android, dan rclone (`rclone bisync` untuk sinkron dua arah).
+- Kunci WebDAV (LOCK) di memori sapo-api; hilang saat sapo-api di-restart.

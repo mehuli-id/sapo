@@ -24,6 +24,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/net/webdav"
+
 	"github.com/mehuli-id/sapo/internal/audit"
 	"github.com/mehuli-id/sapo/internal/auth"
 	"github.com/mehuli-id/sapo/internal/config"
@@ -56,6 +58,9 @@ type HTTPSInfo struct {
 	// Fingerprint mengembalikan sidik jari sertifikat yang sedang dipakai
 	// (bisa berganti saat sertifikat diperbarui).
 	Fingerprint func() string
+	// Certificate mengembalikan sertifikat yang sedang dipakai (DER), untuk
+	// dipercaya perangkat lain (WebDAV, rclone). Boleh nil.
+	Certificate func() []byte
 }
 
 // Server adalah handler HTTP sapo-api.
@@ -73,6 +78,8 @@ type Server struct {
 	hosts    map[string]bool
 	sessions *auth.Sessions
 	limiter  *auth.Limiter
+	// davLocks: kunci WebDAV (LOCK/UNLOCK) di memori.
+	davLocks webdav.LockSystem
 	// totpLimiter menghitung kode 2FA salah per akun.
 	totpLimiter *auth.Limiter
 	userRe      *regexp.Regexp
@@ -177,6 +184,7 @@ func New(o Options) (*Server, error) {
 		reenroll: pendingTOTP{entries: map[string]pendingEntry{}},
 		shares:   shares,
 		settings: settings,
+		davLocks: webdav.NewMemLS(),
 
 		resyncDelay: 30 * time.Second,
 
@@ -251,6 +259,11 @@ func New(o Options) (*Server, error) {
 	s.mux.Handle("POST /api/v1/files/rename", s.requireAuth(s.handleFileChange(proto.OpFilesRename, "files.rename")))
 	s.mux.Handle("POST /api/v1/files/delete", s.requireAuth(s.handleFileChange(proto.OpFilesDelete, "files.delete")))
 	// Control Panel.
+	s.mux.HandleFunc(davPrefix+"/", s.handleDAV)
+	s.mux.Handle("GET /api/v1/account/app-passwords", s.requireAuth(http.HandlerFunc(s.handleAppPasswords)))
+	s.mux.Handle("POST /api/v1/account/app-passwords", s.requireAuth(http.HandlerFunc(s.handleAppPasswordCreate)))
+	s.mux.Handle("POST /api/v1/account/app-passwords/{id}/delete", s.requireAuth(http.HandlerFunc(s.handleAppPasswordDelete)))
+	s.mux.Handle("GET /api/v1/tls/certificate", s.requireAuth(http.HandlerFunc(s.handleCertificate)))
 	s.mux.Handle("GET /api/v1/drive", s.requireAuth(http.HandlerFunc(s.handleDrive)))
 	s.mux.Handle("GET /api/v1/drive/admin", s.requireAdmin(http.HandlerFunc(s.handleDriveAdmin)))
 	s.mux.Handle("POST /api/v1/drive/settings", s.requireAdmin(http.HandlerFunc(s.handleDriveSettings)))
@@ -315,7 +328,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// HTTPS wajib: lewat HTTP hanya halaman petunjuk (panel dalam mode
 		// petunjuk) yang tersedia, sehingga password tidak pernah lewat HTTP.
 		writeError(rec, http.StatusForbidden, "https_required", "gunakan HTTPS di port "+s.https.Port)
-	case isMutating(r.Method) && !s.csrfOK(r):
+	case isMutating(r.Method) && !s.csrfOK(r) && !isDAV(r):
 		writeError(rec, http.StatusForbidden, "csrf", "permintaan ditolak")
 	default:
 		s.mux.ServeHTTP(rec, r)
@@ -335,7 +348,15 @@ func plainHTTPAllowed(r *http.Request) bool {
 	case "/api/v1/ui/config", "/api/v1/health":
 		return true
 	}
-	return !strings.HasPrefix(r.URL.Path, "/api/")
+	// WebDAV membawa password di setiap permintaan: tidak pernah lewat HTTP.
+	return !strings.HasPrefix(r.URL.Path, "/api/") && !isDAV(r)
+}
+
+// isDAV: permintaan WebDAV. Tanpa cookie (hanya login Basic per
+// permintaan, lihat webdav.go), jadi tidak butuh header CSRF; permintaan dari
+// halaman lain ditolak lewat Origin di handleDAV.
+func isDAV(r *http.Request) bool {
+	return r.URL.Path == davPrefix || strings.HasPrefix(r.URL.Path, davPrefix+"/")
 }
 
 func isMutating(m string) bool {
