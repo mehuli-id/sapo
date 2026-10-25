@@ -282,14 +282,6 @@ func (r *RemoteBackups) refusePool(ctx context.Context, pool string) error {
 // (penanda @induk, tidak dipasang).
 func (r *RemoteBackups) ensureRemoteParents(ctx context.Context, t proto.RBackupTarget, quota uint64) error {
 	partnerDS := t.Pool + "/sapo-backup-remote/" + t.Partner
-	defer func() {
-		// Kuota partner (0 = tanpa batas): partner tidak bisa memenuhi pool.
-		q := "none"
-		if quota > 0 {
-			q = strconv.FormatUint(quota, 10)
-		}
-		_, _ = r.b.zfs(ctx, []string{"set", "quota=" + q}, partnerDS)
-	}()
 	for _, ds := range []string{t.Pool + "/sapo-backup-remote", partnerDS} {
 		props, err := r.b.propsFn(ctx, ds, backupPropName, sharePropName)
 		if errors.Is(err, errNoDataset) {
@@ -304,6 +296,14 @@ func (r *RemoteBackups) ensureRemoteParents(ctx context.Context, t proto.RBackup
 		if props[backupPropName] != parentMarker || (props[sharePropName] != "-" && props[sharePropName] != "") {
 			return &OpError{Code: proto.ErrConflict, Message: "dataset " + ds + " sudah ada dan bukan milik backup Sapo"}
 		}
+	}
+	// Kuota partner (0 = tanpa batas); gagal memasangnya = tidak menerima.
+	q := "none"
+	if quota > 0 {
+		q = strconv.FormatUint(quota, 10)
+	}
+	if _, err := r.b.zfs(ctx, []string{"set", "quota=" + q}, partnerDS); err != nil {
+		return fmt.Errorf("kuota partner tidak bisa dipasang: %w", err)
 	}
 	return nil
 }
@@ -340,10 +340,30 @@ func (r *RemoteBackups) receivedTimes(ctx context.Context, ds, prefix string) (m
 		if !ok || !strings.HasPrefix(name, prefix) {
 			continue
 		}
-		sec, _ := strconv.ParseInt(f[1], 10, 64)
+		// Tanpa catatan (misalnya gagal ditulis) dianggap BARU: disimpan dan
+		// dihitung dalam batas harian, bukan dibuang.
+		sec, err := strconv.ParseInt(f[1], 10, 64)
+		if err != nil || sec <= 0 {
+			m[name] = r.b.now()
+			continue
+		}
 		m[name] = time.Unix(sec, 0)
 	}
 	return m, nil
+}
+
+// withReceived mengganti waktu salinan dengan waktu terima (jam penerima),
+// bukan waktu dari stream.
+func (r *RemoteBackups) withReceived(ctx context.Context, ds, prefix string, copies []proto.BackupCopy) {
+	recv, err := r.receivedTimes(ctx, ds, prefix)
+	if err != nil {
+		return
+	}
+	for i := range copies {
+		if at, ok := recv[copies[i].Name]; ok {
+			copies[i].Created = at.UTC()
+		}
+	}
 }
 
 // partnerJobs: jumlah tugas (dataset) partner di penerima.
@@ -449,15 +469,25 @@ func (r *RemoteBackups) RecvFinishOp() Handler {
 		}
 		if !s.recv {
 			s.cancel()
+			if !s.recv && s.snap != "" {
+				r.b.discardSnap(ctx, s.ds+"@"+s.snap)
+			}
 			return nil, &OpError{Code: proto.ErrInvalidParams, Message: "bukan sesi penerima"}
 		}
-		if err := s.finish(p.OK); err != nil {
-			return nil, &OpError{Code: "rbackup_failed", Message: clipTo(err.Error(), maxErrorText)}
-		}
+		recvErr := s.finish(p.OK)
 		// Waktu terima menurut jam NAS ini (stream bisa memalsukan waktu
-		// pembuatan snapshot).
+		// pembuatan snapshot). Dicatat untuk SETIAP snapshot yang jadi, juga
+		// bila aliran dilaporkan gagal (misalnya sampah setelah akhir stream),
+		// agar batas harian tidak bisa dilewati.
 		now := r.b.now()
-		_, _ = r.b.zfs(ctx, []string{"set", receivedProp + "=" + strconv.FormatInt(now.Unix(), 10)}, s.ds+"@"+s.snap)
+		if _, err := r.b.propsFn(ctx, s.ds+"@"+s.snap, "type"); err == nil {
+			if _, err := r.b.zfs(ctx, []string{"set", receivedProp + "=" + strconv.FormatInt(now.Unix(), 10)}, s.ds+"@"+s.snap); err != nil {
+				return nil, &OpError{Code: "rbackup_failed", Message: "waktu terima tidak bisa dicatat: " + clipTo(err.Error(), maxErrorText)}
+			}
+		}
+		if recvErr != nil {
+			return nil, &OpError{Code: "rbackup_failed", Message: clipTo(recvErr.Error(), maxErrorText)}
+		}
 		days := min(max(p.KeepDays, 1), 366)
 		_ = r.b.locked(ctx, func() error {
 			recv, err := r.receivedTimes(ctx, s.ds, s.prefix)
@@ -515,6 +545,7 @@ func (r *RemoteBackups) ListOp() Handler {
 				}
 				info := proto.RBackupJobInfo{Job: job, Copies: []proto.BackupCopy{}}
 				if c, err := r.b.snapshots(ctx, remoteDS(jt), rbackupPrefix(job)); err == nil && c != nil {
+					r.withReceived(ctx, remoteDS(jt), rbackupPrefix(job), c)
 					info.Copies = c
 				}
 				if props, err := r.b.propsFn(ctx, remoteDS(jt), "used"); err == nil {
@@ -531,6 +562,7 @@ func (r *RemoteBackups) ListOp() Handler {
 		if out.Copies, err = r.b.snapshots(ctx, remoteDS(t), rbackupPrefix(t.Job)); err != nil {
 			return nil, err
 		}
+		r.withReceived(ctx, remoteDS(t), rbackupPrefix(t.Job), out.Copies)
 		if out.Copies == nil {
 			out.Copies = []proto.BackupCopy{}
 		}

@@ -22,6 +22,7 @@ const (
 	dmuSubstream        = 0x1
 	dmuOstZFS           = 2
 	drrFlagClone        = 1 << 0
+	backupFeatureResume = 1 << 20
 	backupFeatureRaw    = 1 << 24
 	backupFeatureRedact = 1 << 25
 )
@@ -44,10 +45,12 @@ func checkStreamHeader(r io.Reader, incremental bool) ([]byte, error) {
 	switch {
 	case bo.Uint32(hdr[0:]) != 0: // DRR_BEGIN
 		return nil, errors.New("stream tidak diawali DRR_BEGIN")
+	case bo.Uint32(hdr[4:]) != 0:
+		return nil, errors.New("header stream tidak boleh membawa data tambahan")
 	case vi&0x3 != dmuSubstream:
 		return nil, errors.New("stream gabungan (zfs send -R/-p) tidak diterima")
-	case (vi>>2)&(backupFeatureRaw|backupFeatureRedact) != 0:
-		return nil, errors.New("stream raw/redacted tidak diterima")
+	case (vi>>2)&(backupFeatureRaw|backupFeatureRedact|backupFeatureResume) != 0:
+		return nil, errors.New("stream raw/redacted/lanjutan tidak diterima")
 	case bo.Uint32(hdr[32:]) != dmuOstZFS:
 		return nil, errors.New("hanya stream filesystem yang diterima")
 	case bo.Uint32(hdr[36:])&drrFlagClone != 0:
