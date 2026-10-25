@@ -1,0 +1,15 @@
+# ISO dev saja: root ISO live adalah overlayfs, dan penyimpanan image Podman
+# (driver overlay) tidak bisa berada di atas overlayfs. Image App Center
+# disimpan di tmpfs (sama-sama di RAM, hilang saat restart).
+[Unit]
+Description=Penyimpanan image Podman (ISO live)
+Before=sapod.service
+
+[Mount]
+What=tmpfs
+Where=/var/lib/containers
+Type=tmpfs
+Options=mode=0700,size=40%
+
+[Install]
+WantedBy=local-fs.target
