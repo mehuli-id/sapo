@@ -49,4 +49,4 @@ Backup ke pool lain (ADR 0017) dan ke NAS lain (ADR 0019) butuh disk atau NAS ke
 
 - Riwayat snapshot ZFS dan properti dataset tidak ikut ke cloud; pemulihan menghasilkan folder dengan isi file pada saat backup.
 - Unggahan pertama bisa lama bergantung kecepatan internet; batas `agent.cloud.max_run_hours`.
-- Uji asap ISO memakai MinIO di host (Docker): repo baru, repo ganda dan password salah ditolak, backup penuh dan inkremental, isi file tidak terbaca di server S3, pemulihan bencana (repo dilupakan lalu disambung lagi hanya dengan password) ke folder baru, dan pembacaan lewat SMB.
+- Uji asap ISO memakai server S3 SeaweedFS di host (Docker): repo baru, repo ganda dan password salah ditolak, backup penuh dan inkremental, isi file tidak terbaca di server S3, pemulihan bencana (repo dilupakan lalu disambung lagi hanya dengan password) ke folder baru, dan pembacaan lewat SMB.
