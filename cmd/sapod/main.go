@@ -165,7 +165,10 @@ func main() {
 	reg.Register(proto.OpSharesApply, shares.ApplyOp())
 	reg.Register(proto.OpSharesDelete, shares.DeleteOp())
 	reg.Register(proto.OpSharesUsage, shares.UsageOp())
-	snapshots := agent.NewSnapshots(shares)
+	snc := cfg.Agent.Snapshots
+	snapshots := agent.NewSnapshots(shares, agent.SnapshotTools{
+		Zpool: pc.Zpool, MaxPoolCapacity: snc.MaxPoolCapacityPercent, CallTimeout: time.Duration(snc.CallTimeoutSeconds) * time.Second,
+	})
 	go snapshots.Run(context.Background())
 	reg.Register(proto.OpSnapshotsList, snapshots.ListOp())
 	reg.Register(proto.OpSnapshotsCreate, snapshots.CreateOp())

@@ -65,17 +65,18 @@ type Agent struct {
 	SocketGroup string `yaml:"socket_group"`
 	FeaturesDir string `yaml:"features_dir"`
 	// Batas koneksi bersamaan ke socket sapod.
-	MaxConnections int      `yaml:"max_connections"`
-	Storage        Storage  `yaml:"storage"`
-	Console        Console  `yaml:"console"`
-	Accounts       Accounts `yaml:"accounts"`
-	Shares         Shares   `yaml:"shares"`
-	Time           Time     `yaml:"time"`
-	Updates        Updates  `yaml:"updates"`
-	Apps           Apps     `yaml:"apps"`
-	Network        Network  `yaml:"network"`
-	Stats          Stats    `yaml:"stats"`
-	Files          Files    `yaml:"files"`
+	MaxConnections int       `yaml:"max_connections"`
+	Storage        Storage   `yaml:"storage"`
+	Console        Console   `yaml:"console"`
+	Accounts       Accounts  `yaml:"accounts"`
+	Shares         Shares    `yaml:"shares"`
+	Time           Time      `yaml:"time"`
+	Updates        Updates   `yaml:"updates"`
+	Apps           Apps      `yaml:"apps"`
+	Network        Network   `yaml:"network"`
+	Stats          Stats     `yaml:"stats"`
+	Files          Files     `yaml:"files"`
+	Snapshots      Snapshots `yaml:"snapshots"`
 }
 
 // Accounts mengatur akun sistem untuk berbagi file. sapod hanya menyentuh
@@ -169,6 +170,22 @@ type Files struct {
 	// Batas waktu satu operasi dan penghapusan folder beserta isinya.
 	TimeoutSeconds       int `yaml:"timeout_seconds"`
 	DeleteTimeoutSeconds int `yaml:"delete_timeout_seconds"`
+}
+
+// Snapshots mengatur jadwal snapshot di sapod (ADR 0014).
+type Snapshots struct {
+	// Snapshot otomatis tidak diambil di pool yang terisi sebanyak ini
+	// (persen) atau lebih, agar snapshot tidak membuat pool penuh.
+	MaxPoolCapacityPercent int `yaml:"max_pool_capacity_percent"`
+	// Batas waktu setiap perintah zfs di penjadwal.
+	CallTimeoutSeconds int `yaml:"call_timeout_seconds"`
+}
+
+func (s Snapshots) validate() error {
+	if s.MaxPoolCapacityPercent < 50 || s.MaxPoolCapacityPercent > 99 || s.CallTimeoutSeconds < 5 || s.CallTimeoutSeconds > 120 {
+		return errors.New("agent.snapshots: max_pool_capacity_percent 50-99, call_timeout_seconds 5-120")
+	}
+	return nil
 }
 
 func (f Files) validate() error {
@@ -420,7 +437,8 @@ func Default() Config {
 			Updates: Updates{AptGet: "/usr/bin/apt-get", Dpkg: "/usr/bin/dpkg", SystemdRun: "/usr/bin/systemd-run", Unit: "sapo-updates.service",
 				LogFile: "/var/lib/sapod/updates.log", ResultFile: "/var/lib/sapod/updates-result.json", CheckTimeoutSeconds: 240,
 				InstallTimeoutSeconds: 3 * 3600},
-			Files: Files{MaxEntries: 5000, TimeoutSeconds: 30, DeleteTimeoutSeconds: 270},
+			Files:     Files{MaxEntries: 5000, TimeoutSeconds: 30, DeleteTimeoutSeconds: 270},
+			Snapshots: Snapshots{MaxPoolCapacityPercent: 90, CallTimeoutSeconds: 30},
 			Network: Network{
 				IP: "/usr/sbin/ip", Systemctl: "/usr/bin/systemctl", Hostnamectl: "/usr/bin/hostnamectl",
 				InterfacesFile: "/etc/network/interfaces", ResolvConf: "/etc/resolv.conf", HostsFile: "/etc/hosts", HostnameFile: "/etc/hostname",
@@ -643,6 +661,9 @@ func (c Config) Validate() error {
 		return errors.New("agent.time.timedatectl harus path absolut")
 	}
 	if err := c.Agent.Files.validate(); err != nil {
+		return err
+	}
+	if err := c.Agent.Snapshots.validate(); err != nil {
 		return err
 	}
 	if err := c.Agent.Stats.validate(); err != nil {

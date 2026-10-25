@@ -620,9 +620,11 @@ export const api = {
     get<{ snapshots: SnapshotInfo[]; used_by_snapshots: number }>(`/api/v1/snapshots?${new URLSearchParams({ pool: t.pool, share: t.share ?? "", user: t.user ?? "" })}`),
   createSnapshot: (t: SnapshotTarget) => post<{ name: string }>("/api/v1/snapshots", t),
   deleteSnapshot: (t: SnapshotTarget, name: string, admin_password: string) => post<{ ok: boolean }>("/api/v1/snapshots/delete", { ...t, name, admin_password }),
-  setSharePolicy: (share: string, policy: SnapshotPolicy | null) =>
-    post<{ ok: boolean; warning?: string }>(`/api/v1/shares/${encodeURIComponent(share)}/snapshot-policy`, { policy }),
-  setDrivePolicy: (policy: SnapshotPolicy | null) => post<{ ok: boolean; warning?: string }>("/api/v1/drive/snapshot-policy", { policy }),
+  // admin_password wajib bila jadwal baru akan membuang snapshot yang ada.
+  setSharePolicy: (share: string, policy: SnapshotPolicy | null, admin_password = "") =>
+    post<{ ok: boolean; warning?: string }>(`/api/v1/shares/${encodeURIComponent(share)}/snapshot-policy`, { policy, admin_password }),
+  setDrivePolicy: (policy: SnapshotPolicy | null, admin_password = "") =>
+    post<{ ok: boolean; warning?: string }>("/api/v1/drive/snapshot-policy", { policy, admin_password }),
   driveAdmin: () => get<DriveAdmin>("/api/v1/drive/admin"),
   setDrive: (req: { pool: string; quota_gb: number; admin_password: string }) => post<{ ok: boolean; warning?: string }>("/api/v1/drive/settings", req),
   setDriveQuota: (user: string, req: { quota_gb: number | null; admin_password: string }) =>

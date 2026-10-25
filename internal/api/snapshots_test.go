@@ -37,6 +37,20 @@ func TestSnapshotsAPI(t *testing.T) {
 			t.Errorf("%v harus ditolak: %d", bad, rec.Code)
 		}
 	}
+	// Menurunkan jumlah simpan di bawah jumlah snapshot yang ada (3 harian):
+	// destruktif, butuh password.
+	agent.mu.Lock()
+	agent.results[proto.OpSnapshotsList] = proto.SnapshotsListResult{Snapshots: []proto.SnapshotInfo{{Kind: "daily"}, {Kind: "daily"}, {Kind: "daily"}}}
+	agent.mu.Unlock()
+	if rec := h.do(http.MethodPost, "/api/v1/shares/keluarga/snapshot-policy", map[string]any{"policy": map[string]any{"daily": 2, "hour": 2}}); errCode(rec) != "snapshot_prune_confirm" {
+		t.Fatalf("menurunkan jumlah simpan tanpa password: %d %s", rec.Code, rec.Body)
+	}
+	if rec := h.do(http.MethodPost, "/api/v1/shares/keluarga/snapshot-policy", map[string]any{"policy": map[string]any{"daily": 2, "hour": 2}, "admin_password": "salah-sekali"}); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("password salah: %d", rec.Code)
+	}
+	if rec := h.do(http.MethodPost, "/api/v1/shares/keluarga/snapshot-policy", map[string]any{"policy": map[string]any{"daily": 2, "hour": 2}, "admin_password": adminPassword}); rec.Code != http.StatusOK {
+		t.Fatalf("menurunkan dengan password: %d %s", rec.Code, rec.Body)
+	}
 	// Semua jenis 0 = mati.
 	h.do(http.MethodPost, "/api/v1/shares/keluarga/snapshot-policy", map[string]any{"policy": map[string]any{"hour": 3}})
 	if sh, _ := h.s.shares.get("keluarga"); sh.Snapshots != nil {
@@ -44,7 +58,12 @@ func TestSnapshotsAPI(t *testing.T) {
 	}
 	// Folder pribadi: satu jadwal untuk semua.
 	h.do(http.MethodPost, "/api/v1/drive/settings", map[string]any{"pool": "tank", "admin_password": adminPassword})
-	if rec := h.do(http.MethodPost, "/api/v1/drive/snapshot-policy", map[string]any{"policy": map[string]any{"daily": 7, "hour": 1}}); rec.Code != http.StatusOK {
+	// Jenis baru untuk banyak folder: bisa membuang snapshot lama, jadi butuh
+	// password.
+	if rec := h.do(http.MethodPost, "/api/v1/drive/snapshot-policy", map[string]any{"policy": map[string]any{"daily": 7, "hour": 1}}); errCode(rec) != "snapshot_prune_confirm" {
+		t.Fatalf("jadwal Drive tanpa password: %d %s", rec.Code, rec.Body)
+	}
+	if rec := h.do(http.MethodPost, "/api/v1/drive/snapshot-policy", map[string]any{"policy": map[string]any{"daily": 7, "hour": 1}, "admin_password": adminPassword}); rec.Code != http.StatusOK {
 		t.Fatalf("jadwal Drive: %d %s", rec.Code, rec.Body)
 	}
 	if p, _ := agent.param(proto.OpHomesApply).(proto.HomesApplyParams); p.Snapshots == nil || p.Snapshots.Daily != 7 {

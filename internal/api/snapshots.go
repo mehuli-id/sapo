@@ -37,6 +37,52 @@ func normalizePolicy(p *proto.SnapshotPolicy) (*proto.SnapshotPolicy, bool) {
 	return &c, true
 }
 
+// prunes: jenis yang akan membuang snapshot otomatis yang ada bila jadwal
+// diganti dari old ke next. have: jumlah snapshot otomatis per jenis (nil =
+// tidak diketahui, dianggap ada).
+func prunes(old, next *proto.SnapshotPolicy, have map[string]int) bool {
+	if next == nil {
+		return false
+	}
+	var o proto.SnapshotPolicy
+	if old != nil {
+		o = *old
+	}
+	for _, k := range []struct {
+		kind      string
+		old, next int
+	}{{"hourly", o.Hourly, next.Hourly}, {"daily", o.Daily, next.Daily}, {"weekly", o.Weekly, next.Weekly}} {
+		if k.next == 0 {
+			continue
+		}
+		if have != nil {
+			if have[k.kind] > k.next {
+				return true
+			}
+			continue
+		}
+		if k.old == 0 || k.next < k.old {
+			return true
+		}
+	}
+	return false
+}
+
+// confirmPrune: perubahan jadwal yang akan membuang snapshot yang ada adalah
+// operasi destruktif: butuh password admin. Mengembalikan pelaku.
+func (s *Server) confirmPrune(w http.ResponseWriter, r *http.Request, needed bool, password string) (string, bool) {
+	sess, _, _ := s.currentSession(r)
+	if !needed {
+		return sess.Username, true
+	}
+	if password == "" {
+		writeErrorDetail(w, http.StatusUnauthorized, "snapshot_prune_confirm", "jadwal baru akan membuang snapshot yang ada; masukkan password", map[string]any{"field": "admin_password"})
+		return "", false
+	}
+	admin, ok := s.reauthField(w, r, password, "admin_password")
+	return admin.Username, ok
+}
+
 func (s *Server) handleSnapshotPresets(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, s.cfg.API.SnapshotPresets)
 }
@@ -45,7 +91,8 @@ func (s *Server) handleSnapshotPresets(w http.ResponseWriter, _ *http.Request) {
 // mati; snapshot yang sudah ada disimpan).
 func (s *Server) handleSharePolicy(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Policy *proto.SnapshotPolicy `json:"policy"`
+		Policy        *proto.SnapshotPolicy `json:"policy"`
+		AdminPassword string                `json:"admin_password"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
@@ -56,8 +103,22 @@ func (s *Server) handleSharePolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	if _, ok := s.shares.get(name); !ok {
+	sh, ok := s.shares.get(name)
+	if !ok {
 		writeError(w, http.StatusNotFound, "not_found", "shared folder tidak ditemukan")
+		return
+	}
+	// Jumlah snapshot otomatis yang ada; bila tidak terbaca, dianggap ada.
+	var have map[string]int
+	var list proto.SnapshotsListResult
+	if err := s.agent.Call(r.Context(), proto.OpSnapshotsList, proto.SnapshotTarget{Pool: sh.Pool, Share: name}, &list); err == nil {
+		have = map[string]int{}
+		for _, sn := range list.Snapshots {
+			have[sn.Kind]++
+		}
+	}
+	actor, ok := s.confirmPrune(w, r, prunes(sh.Snapshots, pol, have), req.AdminPassword)
+	if !ok {
 		return
 	}
 	if err := s.shares.mutate(func(cur []Share) ([]Share, error) {
@@ -72,15 +133,15 @@ func (s *Server) handleSharePolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	warning := s.syncAfterChange(r)
-	sess, _, _ := s.currentSession(r)
-	s.record(r, sess.Username, "snapshots.policy", warning == "", map[string]string{"share": name, "policy": policyText(pol)})
+	s.record(r, actor, "snapshots.policy", warning == "", map[string]string{"share": name, "policy": policyText(pol)})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "warning": warning})
 }
 
 // handleDrivePolicy mengatur jadwal snapshot semua folder pribadi.
 func (s *Server) handleDrivePolicy(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Policy *proto.SnapshotPolicy `json:"policy"`
+		Policy        *proto.SnapshotPolicy `json:"policy"`
+		AdminPassword string                `json:"admin_password"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
@@ -90,13 +151,18 @@ func (s *Server) handleDrivePolicy(w http.ResponseWriter, r *http.Request) {
 		writeErrorDetail(w, http.StatusBadRequest, "bad_request", "jadwal snapshot tidak valid", map[string]any{"field": "policy"})
 		return
 	}
+	// Banyak folder pribadi: jumlah snapshot yang ada tidak diperiksa satu per
+	// satu, jadi setiap penurunan atau jenis baru dianggap membuang.
+	actor, ok := s.confirmPrune(w, r, prunes(s.settings.get().HomesSnapshots, pol, nil), req.AdminPassword)
+	if !ok {
+		return
+	}
 	if _, err := s.settings.update(func(v *Settings) { v.HomesSnapshots = pol }); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "gagal menyimpan pengaturan")
 		return
 	}
 	warning := s.syncAfterChange(r)
-	sess, _, _ := s.currentSession(r)
-	s.record(r, sess.Username, "snapshots.policy", warning == "", map[string]string{"homes": "all", "policy": policyText(pol)})
+	s.record(r, actor, "snapshots.policy", warning == "", map[string]string{"homes": "all", "policy": policyText(pol)})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "warning": warning})
 }
 
