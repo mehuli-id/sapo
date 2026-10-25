@@ -226,6 +226,26 @@ api:
     # Maksimal 825 (batas Apple untuk sertifikat server TLS).
     validity_days: 397
     renew_before_days: 30
+  # Templat jadwal snapshot shared folder dan folder pribadi (ADR 0014):
+  # jumlah snapshot per jam, harian, dan mingguan (Senin) yang disimpan, dan
+  # jam (waktu NAS) snapshot harian/mingguan diambil. Admin juga bisa mengisi
+  # angka sendiri.
+  snapshot_presets:
+    - id: standar
+      label: { id: "Standar: 24 jam terakhir, 14 hari, 8 minggu", en: "Standard: last 24 hours, 14 days, 8 weeks" }
+      hourly: 24
+      daily: 14
+      weekly: 8
+      hour: 2
+    - id: harian
+      label: { id: "Harian: 30 hari terakhir", en: "Daily: last 30 days" }
+      daily: 30
+      hour: 2
+    - id: ringan
+      label: { id: "Ringan: 7 hari, 4 minggu", en: "Light: 7 days, 4 weeks" }
+      daily: 7
+      weekly: 4
+      hour: 2
 
 auth:
   password_min_length: 10

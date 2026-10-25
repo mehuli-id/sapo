@@ -124,7 +124,7 @@ func (s *Server) handleDriveAdmin(w http.ResponseWriter, r *http.Request) {
 			orphans = append(orphans, h)
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"pool": v.HomesPool, "quota_gb": v.HomesQuotaGB, "users": rows, "orphans": orphans})
+	writeJSON(w, http.StatusOK, map[string]any{"pool": v.HomesPool, "quota_gb": v.HomesQuotaGB, "users": rows, "orphans": orphans, "snapshots": v.HomesSnapshots})
 }
 
 // handleDriveSettings menyalakan Sapo Drive di pool (atau mematikannya:

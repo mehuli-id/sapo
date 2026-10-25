@@ -12,9 +12,10 @@ import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useLauncher } from "@/composables/useLauncher"
 import { useSession } from "@/composables/useSession"
-import type { DriveAdmin, DriveInfo, HomeStatus, PoolsResult, Wizard } from "@/lib/api"
+import type { DriveAdmin, DriveInfo, HomeStatus, PoolsResult, SnapshotPolicy, Wizard } from "@/lib/api"
 import { api, ApiError, wizardActions } from "@/lib/api"
 import { formatBytes } from "@/lib/format"
+import SnapshotPanel from "@/components/SnapshotPanel.vue"
 import WizardRunner from "@/wizard/WizardRunner.vue"
 
 const { t, locale } = useI18n()
@@ -78,6 +79,9 @@ function wizardDone() {
   notice.value = t("drive.enabled")
   load()
 }
+
+// Jadwal snapshot semua folder pribadi.
+const drivePolicy = (p: SnapshotPolicy | null) => api.setDrivePolicy(p)
 
 // --- Pengaturan admin ---
 const mode = ref("") // "default" | "quota:<user>" | "delete:<pool>/<user>" | "off"
@@ -212,6 +216,12 @@ const removeHome = (h: HomeStatus) =>
         </section>
 
         <section class="space-y-2 rounded-xl border p-4">
+          <h3 class="font-medium">{{ t("snapshots.title") }}</h3>
+          <SnapshotPanel policy-only :policy="admin.snapshots" :save="drivePolicy" @saved="load" />
+          <p class="text-xs text-muted-foreground">{{ t("drive.snapshotsHelp") }}</p>
+        </section>
+
+        <section class="space-y-2 rounded-xl border p-4">
           <h3 class="font-medium">{{ t("drive.users") }}</h3>
           <ul class="divide-y">
             <li v-for="u in admin.users" :key="u.user" class="space-y-2 py-2">
@@ -222,9 +232,16 @@ const removeHome = (h: HomeStatus) =>
                     {{ u.home ? usage(u.home) : t("drive.preparing") }} · {{ t("drive.quota") }}: {{ quotaText(u.quota_gb) }}
                   </p>
                 </div>
-                <Button v-if="mode !== `quota:${u.user}`" size="sm" variant="outline" @click="start(`quota:${u.user}`, u.quota_gb === undefined ? '' : String(Math.max(0, u.quota_gb)))">
-                  {{ t("drive.changeQuota") }}
-                </Button>
+                <div v-if="!mode.endsWith(`:${u.user}`)" class="flex gap-1">
+                  <Button v-if="u.home" size="sm" variant="outline" @click="start(`snap:${u.user}`)">{{ t("snapshots.title") }}</Button>
+                  <Button size="sm" variant="outline" @click="start(`quota:${u.user}`, u.quota_gb === undefined ? '' : String(Math.max(0, u.quota_gb)))">
+                    {{ t("drive.changeQuota") }}
+                  </Button>
+                </div>
+              </div>
+              <div v-if="mode === `snap:${u.user}` && u.home" class="space-y-2">
+                <SnapshotPanel list-only :target="{ pool: u.home.pool, user: u.user }" />
+                <Button size="sm" variant="ghost" @click="mode = ''">{{ t("common.close") }}</Button>
               </div>
               <form v-if="mode === `quota:${u.user}`" class="space-y-3" @submit.prevent="saveQuota(u.user)">
                 <div class="space-y-1.5">

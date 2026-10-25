@@ -786,7 +786,8 @@
         "title": "rclone (sinkron dua arah)",
         "steps": "rclone config create sapo webdav url={url} vendor=other user={user} pass=$(rclone obscure 'PASSWORD-APLIKASI')\n\nSinkron pertama kali:\nrclone bisync ~/SapoDrive sapo:{'@'}home --resync --ca-cert sapo-nas.crt\n\nSelanjutnya (misalnya terjadwal):\nrclone bisync ~/SapoDrive sapo:{'@'}home --ca-cert sapo-nas.crt"
       }
-    }
+    },
+    "snapshotsHelp": "Satu jadwal untuk semua folder pribadi. Snapshot tidak memakan batas ukuran pengguna."
   },
   "appPasswords": {
     "title": "Password aplikasi (WebDAV)",
@@ -801,5 +802,35 @@
     "lastUsed": "Terakhir dipakai: {when}",
     "never": "belum pernah",
     "revoke": "Cabut"
+  },
+  "snapshots": {
+    "title": "Snapshot",
+    "help": "Snapshot menyimpan keadaan folder pada waktu tertentu, jadi file yang terhapus atau berubah bisa dikembalikan. Snapshot hanya memakai ruang untuk bagian yang berubah. Di Windows, versi lama muncul di Properties → Previous Versions.",
+    "schedule": "Jadwal",
+    "off": "Mati",
+    "custom": "Atur sendiri",
+    "field": {
+      "hourly": "Per jam (disimpan)",
+      "daily": "Harian (disimpan)",
+      "weekly": "Mingguan (disimpan)",
+      "hour": "Jam harian/mingguan"
+    },
+    "summary": "Simpan {hourly} per jam, {daily} harian, {weekly} mingguan (Senin); harian dan mingguan pukul {hour}.00",
+    "offKeeps": "Snapshot yang sudah ada tidak dihapus saat jadwal dimatikan.",
+    "saveSchedule": "Simpan jadwal",
+    "saved": "Jadwal snapshot disimpan.",
+    "list": "{n} snapshot, {size} khusus snapshot",
+    "takeNow": "Ambil sekarang",
+    "taken": "Snapshot diambil.",
+    "none": "Belum ada snapshot.",
+    "delete": "Hapus snapshot",
+    "deleteHelp": "Versi lama di snapshot ini hilang permanen.",
+    "deleted": "Snapshot dihapus.",
+    "kind": {
+      "hourly": "per jam",
+      "daily": "harian",
+      "weekly": "mingguan",
+      "manual": "manual"
+    }
   }
 }

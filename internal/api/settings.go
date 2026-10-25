@@ -32,6 +32,8 @@ type Settings struct {
 	HomesPool    string           `json:"homes_pool,omitempty"`
 	HomesQuotaGB int64            `json:"homes_quota_gb,omitempty"`
 	HomeQuotaGB  map[string]int64 `json:"home_quota_gb,omitempty"`
+	// HomesSnapshots: jadwal snapshot semua folder pribadi (ADR 0014).
+	HomesSnapshots *proto.SnapshotPolicy `json:"homes_snapshots,omitempty"`
 }
 
 type settingsStore struct {

@@ -514,6 +514,43 @@ res="$(api POST /api/v1/shares/baca/delete "{\"confirm_name\":\"baca\",\"admin_p
 [[ "$res" == *' 200' ]] || fail "hapus folder baca: $res"
 echo "WebDAV: password aplikasi, daftar, unggah, unduh, folder baru, pindah, hapus; password akun, folder baca saja, dan password yang dicabut ditolak"
 
+# --- Snapshot terjadwal (ADR 0014) ------------------------------------------------
+# Jadwal per jam untuk folder versi: sapod mengambil snapshot pertama dalam
+# satu menit. Snapshot manual, "Previous Versions" lewat SMB, hapus (password
+# admin), lalu jadwal dimatikan tanpa menghapus snapshot yang ada.
+res="$(api POST /api/v1/shares "{\"name\":\"versi\",\"pool\":\"uji\",\"permissions\":{\"user:budi\":\"write\"},\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "buat folder versi: $res"
+echo "versi pertama" > "$WORK/versi.txt"
+out="$(smbclient //127.0.0.1/versi -p "$SMB_PORT" -m SMB3 -U "budi%$UPASS" -c "put $WORK/versi.txt catatan.txt" 2>&1 || true)"
+[[ "$out" != *NT_STATUS* ]] || fail "tulis ke folder versi: $out"
+res="$(api POST /api/v1/shares/versi/snapshot-policy '{"policy":{"hourly":2,"daily":0,"weekly":0,"hour":2}}')"
+[[ "$res" == *' 200' && "$res" != *system_sync_failed* ]] || fail "jadwal snapshot: $res"
+for _ in $(seq 1 50); do
+  snaps="$(api GET '/api/v1/snapshots?pool=uji&share=versi')"
+  json 'import sys; sys.exit(0 if any(s["kind"]=="hourly" for s in v["snapshots"]) else 1)' <<<"$snaps" && break
+  sleep 3
+done
+json 'assert [s["kind"] for s in v["snapshots"]]==["hourly"], v' <<<"$snaps" || fail "snapshot terjadwal tidak diambil: $snaps"
+res="$(api POST /api/v1/snapshots '{"pool":"uji","share":"versi"}')"
+[[ "$res" == *' 200' ]] || fail "snapshot manual: $res"
+manual="$(json 'print(v["name"])' <<<"$res")"
+snaps="$(api GET '/api/v1/snapshots?pool=uji&share=versi')"
+json 'assert sorted(s["kind"] for s in v["snapshots"])==["hourly","manual"], v' <<<"$snaps" || fail "daftar snapshot: $snaps"
+# Previous Versions (Windows) lewat Samba shadow_copy2.
+out="$(smbclient //127.0.0.1/versi -p "$SMB_PORT" -m SMB3 -U "budi%$UPASS" -c "allinfo catatan.txt" 2>&1 || true)"
+[[ "$out" == *"@GMT-"* ]] || fail "Previous Versions lewat SMB tidak tampil: $out"
+res="$(api POST /api/v1/snapshots/delete "{\"pool\":\"uji\",\"share\":\"versi\",\"name\":\"$manual\"}")"
+[[ "$res" == *' 401'* || "$res" == *' 400'* ]] || fail "hapus snapshot tanpa password harus ditolak: $res"
+res="$(api POST /api/v1/snapshots/delete "{\"pool\":\"uji\",\"share\":\"versi\",\"name\":\"$manual\",\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "hapus snapshot: $res"
+res="$(api POST /api/v1/shares/versi/snapshot-policy '{"policy":null}')"
+[[ "$res" == *' 200' ]] || fail "matikan jadwal: $res"
+snaps="$(api GET '/api/v1/snapshots?pool=uji&share=versi')"
+json 'assert [s["kind"] for s in v["snapshots"]]==["hourly"], v' <<<"$snaps" || fail "snapshot lama harus tetap ada setelah jadwal dimatikan: $snaps"
+res="$(api POST /api/v1/shares/versi/delete "{\"confirm_name\":\"versi\",\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "hapus folder versi: $res"
+echo "Snapshot: terjadwal per jam, manual, Previous Versions lewat SMB, hapus dengan password, jadwal dimatikan tanpa menghapus snapshot"
+
 # Ganti disk SAPOUJI2 dengan SAPOUJI3 (berisi ext4, penghapusan dikonfirmasi).
 disks_json="$(api GET /api/v1/storage/disks)"
 old_disk="$(json "print([x['name'] for x in v if x['serial']=='SAPOUJI2'][0])" <<<"$disks_json")"

@@ -786,7 +786,8 @@
         "title": "rclone (two-way sync)",
         "steps": "rclone config create sapo webdav url={url} vendor=other user={user} pass=$(rclone obscure 'APP-PASSWORD')\n\nFirst sync:\nrclone bisync ~/SapoDrive sapo:{'@'}home --resync --ca-cert sapo-nas.crt\n\nAfterwards (for example on a schedule):\nrclone bisync ~/SapoDrive sapo:{'@'}home --ca-cert sapo-nas.crt"
       }
-    }
+    },
+    "snapshotsHelp": "One schedule for all personal folders. Snapshots don’t count toward users’ size limits."
   },
   "appPasswords": {
     "title": "App passwords (WebDAV)",
@@ -801,5 +802,35 @@
     "lastUsed": "Last used: {when}",
     "never": "never",
     "revoke": "Revoke"
+  },
+  "snapshots": {
+    "title": "Snapshots",
+    "help": "A snapshot keeps the state of a folder at a point in time, so deleted or changed files can be brought back. Snapshots only use space for what changed. In Windows, older versions appear under Properties → Previous Versions.",
+    "schedule": "Schedule",
+    "off": "Off",
+    "custom": "Custom",
+    "field": {
+      "hourly": "Hourly (kept)",
+      "daily": "Daily (kept)",
+      "weekly": "Weekly (kept)",
+      "hour": "Daily/weekly hour"
+    },
+    "summary": "Keep {hourly} hourly, {daily} daily, {weekly} weekly (Monday); daily and weekly at {hour}:00",
+    "offKeeps": "Existing snapshots aren’t deleted when the schedule is turned off.",
+    "saveSchedule": "Save schedule",
+    "saved": "Snapshot schedule saved.",
+    "list": "{n} snapshots, {size} used only by snapshots",
+    "takeNow": "Take now",
+    "taken": "Snapshot taken.",
+    "none": "No snapshots yet.",
+    "delete": "Delete snapshot",
+    "deleteHelp": "The old versions in this snapshot are lost for good.",
+    "deleted": "Snapshot deleted.",
+    "kind": {
+      "hourly": "hourly",
+      "daily": "daily",
+      "weekly": "weekly",
+      "manual": "manual"
+    }
   }
 }

@@ -326,6 +326,19 @@ type API struct {
 	// Batas ukuran log audit sebelum dirotasi (MB).
 	AuditMaxMB int `yaml:"audit_max_mb"`
 	TLS        TLS `yaml:"tls"`
+	// SnapshotPresets: pilihan jadwal snapshot siap pakai di panel (ADR 0014).
+	SnapshotPresets []SnapshotPreset `yaml:"snapshot_presets"`
+}
+
+// SnapshotPreset adalah satu templat jadwal snapshot: jumlah snapshot per
+// jam, harian, dan mingguan yang disimpan, dan jam snapshot harian/mingguan.
+type SnapshotPreset struct {
+	ID     string            `yaml:"id" json:"id"`
+	Label  map[string]string `yaml:"label" json:"label"`
+	Hourly int               `yaml:"hourly" json:"hourly"`
+	Daily  int               `yaml:"daily" json:"daily"`
+	Weekly int               `yaml:"weekly" json:"weekly"`
+	Hour   int               `yaml:"hour" json:"hour"`
 }
 
 // TLS mengatur HTTPS panel di jaringan lokal (ADR 0004).
@@ -581,6 +594,12 @@ func (c Config) Validate() error {
 		return errors.New("auth.setup_totp_expiry_minutes harus lebih dari 0")
 	case c.Auth.Argon2.MemoryKiB < 8*1024 || c.Auth.Argon2.Iterations < 1 || c.Auth.Argon2.Parallelism < 1:
 		return errors.New("auth.argon2: memory_kib minimal 8192, iterations dan parallelism minimal 1")
+	}
+	for _, p := range c.API.SnapshotPresets {
+		pol := proto.SnapshotPolicy{Hourly: p.Hourly, Daily: p.Daily, Weekly: p.Weekly, Hour: p.Hour}
+		if p.ID == "" || !pol.Valid() {
+			return fmt.Errorf("api.snapshot_presets: templat %q tidak valid", p.ID)
+		}
 	}
 	if _, err := regexp.Compile(c.Auth.UsernamePattern); err != nil {
 		return fmt.Errorf("auth.username_pattern tidak valid: %w", err)

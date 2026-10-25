@@ -43,8 +43,10 @@ type Share struct {
 	NFS *ShareNFS `json:"nfs,omitempty"`
 	// Apps: aplikasi App Center → "read" atau "write" (diatur dari App
 	// Center, ADR 0012).
-	Apps      map[string]string `json:"apps,omitempty"`
-	CreatedAt time.Time         `json:"created_at"`
+	Apps map[string]string `json:"apps,omitempty"`
+	// Snapshots: jadwal snapshot (ADR 0014); nil = mati.
+	Snapshots *proto.SnapshotPolicy `json:"snapshots,omitempty"`
+	CreatedAt time.Time             `json:"created_at"`
 }
 
 // ShareNFS: klien di jaringan Clients boleh memasang folder lewat NFS, dan
@@ -211,7 +213,8 @@ func (s *Server) syncSystem(ctx context.Context) (res proto.SharesApplyResult, e
 			v := s.settings.get()
 			closed := proto.SharesApplyParams{Shares: []proto.ShareSpec{}, SMBOff: v.SMBOff, NFSOff: v.NFSOff}
 			for _, sh := range s.shares.list() {
-				closed.Shares = append(closed.Shares, proto.ShareSpec{Name: sh.Name, Pool: sh.Pool, Description: sh.Description, Read: []string{}, Write: []string{}})
+				// Izin dicabut, tetapi jadwal snapshot tetap berjalan.
+				closed.Shares = append(closed.Shares, proto.ShareSpec{Name: sh.Name, Pool: sh.Pool, Description: sh.Description, Read: []string{}, Write: []string{}, Snapshots: sh.Snapshots})
 			}
 			_ = s.agent.Call(ctx, proto.OpSharesApply, closed, nil)
 		}
@@ -244,7 +247,7 @@ func (s *Server) syncSystem(ctx context.Context) (res proto.SharesApplyResult, e
 	var homesErr error
 	homesPool := ""
 	if v.HomesPool != "" {
-		hp := proto.HomesApplyParams{Pool: v.HomesPool, Users: []proto.HomeUser{}}
+		hp := proto.HomesApplyParams{Pool: v.HomesPool, Users: []proto.HomeUser{}, Snapshots: v.HomesSnapshots}
 		for _, u := range users {
 			if exists["user:"+u.Username] {
 				hp.Users = append(hp.Users, proto.HomeUser{Name: u.Username, QuotaBytes: homeQuota(v, u.Username)})
@@ -261,7 +264,7 @@ func (s *Server) syncSystem(ctx context.Context) (res proto.SharesApplyResult, e
 	}
 	params := proto.SharesApplyParams{Shares: []proto.ShareSpec{}, SMBOff: v.SMBOff, NFSOff: v.NFSOff, HomesPool: homesPool}
 	for _, sh := range s.shares.list() {
-		spec := proto.ShareSpec{Name: sh.Name, Pool: sh.Pool, Description: sh.Description, Read: []string{}, Write: []string{}}
+		spec := proto.ShareSpec{Name: sh.Name, Pool: sh.Pool, Description: sh.Description, Read: []string{}, Write: []string{}, Snapshots: sh.Snapshots}
 		for p, level := range sh.Permissions {
 			if !exists[p] {
 				continue
