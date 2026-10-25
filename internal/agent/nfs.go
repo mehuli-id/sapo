@@ -120,6 +120,31 @@ func withNFSUser(sp proto.ShareSpec) proto.ShareSpec {
 	return sp
 }
 
+// withApps menambahkan akun aplikasi yang diberi folder ke izin folder
+// (hanya di sistem berkas; Samba memakai izin asli). Aplikasi yang tidak
+// bisa diberi folder (access) dilewati; izin tulis hanya bila katalog
+// mengizinkan. Mengembalikan izin dan aplikasi yang berlaku.
+func withApps(sp proto.ShareSpec, access map[string]bool) (proto.ShareSpec, []proto.ShareApp) {
+	var apps []proto.ShareApp
+	for _, ap := range sp.Apps {
+		canWrite, ok := access[ap.ID]
+		if !ok {
+			continue
+		}
+		ap.Write = ap.Write && canWrite
+		p := "user:" + appAccount(ap.ID)
+		sp.Read = slices.DeleteFunc(slices.Clone(sp.Read), func(x string) bool { return x == p })
+		sp.Write = slices.DeleteFunc(slices.Clone(sp.Write), func(x string) bool { return x == p })
+		if ap.Write {
+			sp.Write = append(sp.Write, p)
+		} else {
+			sp.Read = append(sp.Read, p)
+		}
+		apps = append(apps, ap)
+	}
+	return sp, apps
+}
+
 type nfsConf struct {
 	path     string
 	clients  []string

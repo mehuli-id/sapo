@@ -263,6 +263,7 @@ func New(o Options) (*Server, error) {
 	s.mux.Handle("POST /api/v1/apps/{id}/start", s.requireAdmin(s.handleAppToggle(proto.OpAppsStart, "apps.start")))
 	s.mux.Handle("POST /api/v1/apps/{id}/stop", s.requireAdmin(s.handleAppToggle(proto.OpAppsStop, "apps.stop")))
 	s.mux.Handle("POST /api/v1/apps/{id}/remove", s.requireAdmin(http.HandlerFunc(s.handleAppRemove)))
+	s.mux.Handle("POST /api/v1/apps/{id}/folders", s.requireAdmin(http.HandlerFunc(s.handleAppFolders)))
 	s.mux.Handle("GET /api/v1/updates", s.requireAdmin(s.proxyRead(proto.OpUpdatesStatus)))
 	s.mux.Handle("POST /api/v1/updates/check", s.requireAdmin(http.HandlerFunc(s.handleUpdatesCheck)))
 	s.mux.Handle("POST /api/v1/updates/install", s.requireAdmin(http.HandlerFunc(s.handleUpdatesInstall)))

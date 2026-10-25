@@ -64,6 +64,9 @@ type Shares struct {
 	aclTree func(ctx context.Context, root string, acl shareACL) error
 	// managed: UID dan GID akun buatan sapod (Accounts.Managed); nil di test.
 	managed func(name string) (uid, gid int, ok bool)
+	// apps: App Center (nil bila tidak dipakai), untuk akses aplikasi ke
+	// folder.
+	apps *Apps
 
 	jobsMu sync.Mutex
 	jobs   map[string]*aclJob
@@ -155,9 +158,20 @@ func (s *Shares) checkSpecs(specs []proto.ShareSpec) error {
 			return invalid("terlalu banyak izin di " + sp.Name)
 		}
 		for _, p := range append(slices.Clone(sp.Read), sp.Write...) {
-			if _, _, ok := principal(p); !ok {
+			// Akun aplikasi hanya lewat Apps (tidak pernah masuk Samba).
+			if _, _, ok := principal(p); !ok || strings.HasPrefix(p, "user:sapo-app-") || strings.HasPrefix(p, "group:sapo-app-") {
 				return invalid("izin tidak valid di " + sp.Name + ": " + clip(p))
 			}
+		}
+		if len(sp.Apps) > 100 {
+			return invalid("terlalu banyak aplikasi di " + sp.Name)
+		}
+		apps := map[string]bool{}
+		for _, ap := range sp.Apps {
+			if !appIDPattern.MatchString(ap.ID) || apps[ap.ID] {
+				return invalid("aplikasi tidak valid di " + sp.Name + ": " + clip(ap.ID))
+			}
+			apps[ap.ID] = true
 		}
 		if err := s.checkNFSDeny(sp); err != nil {
 			return invalid(err.Error())
@@ -197,6 +211,33 @@ func (s *Shares) ApplyOp() Handler {
 		if err != nil {
 			return nil, err
 		}
+		// Aplikasi yang bisa diberi folder (terpasang, memakai share_path).
+		var appAccess map[string]bool
+		if s.apps != nil {
+			appAccess = s.apps.shareAccess()
+		}
+		// Akun aplikasi yang hilang dari sistem tidak membuat folder gagal.
+		for id := range appAccess {
+			if _, ok := ids.users[appAccount(id)]; !ok {
+				delete(appAccess, id)
+			}
+		}
+		appMounts := map[string][]appShare{}
+		if s.apps != nil {
+			// Rencana (path folder belum diperiksa): aplikasi yang akan
+			// kehilangan akses dihentikan sebelum ACL diubah. Bila gagal,
+			// tetap dilanjutkan; pencabutan di sistem berkas tetap berlaku.
+			planned := map[string][]appShare{}
+			for _, sp := range req.Shares {
+				_, apps := withApps(sp, appAccess)
+				for _, ap := range apps {
+					planned[ap.ID] = append(planned[ap.ID], appShare{Name: sp.Name, Path: filepath.Join(s.t.MountBase, sp.Pool, sp.Name), Write: ap.Write})
+				}
+			}
+			if err := s.apps.stopReduced(ctx, planned); err != nil {
+				s.p.logWarn("aplikasi gagal dihentikan sebelum akses folder dicabut", "err", err)
+			}
+		}
 		out := proto.SharesApplyResult{Shares: []proto.ShareState{}}
 		var active []shareConf
 		var exports []nfsConf
@@ -219,6 +260,8 @@ func (s *Shares) ApplyOp() Handler {
 			}
 			// Izin di sistem berkas mencakup akun NFS; Samba memakai izin asli.
 			perms := withNFSUser(sp)
+			// Demikian juga akun aplikasi yang diberi folder ini.
+			perms, apps := withApps(perms, appAccess)
 			acl, aclErr := ids.resolve(perms)
 			path, applied, err := s.ensureDataset(ctx, sp)
 			if err == nil {
@@ -235,6 +278,9 @@ func (s *Shares) ApplyOp() Handler {
 				// Izin juga diterapkan ke isi folder yang sudah ada (latar
 				// belakang), bila berbeda dari yang terakhir diterapkan.
 				s.startACLJob(sp.Pool+"/"+sp.Name, path, acl, applied)
+				for _, ap := range apps {
+					appMounts[ap.ID] = append(appMounts[ap.ID], appShare{Name: sp.Name, Path: path, Write: ap.Write})
+				}
 				if len(sp.Read)+len(sp.Write) > 0 {
 					// Folder tanpa izin sama sekali tidak dibagikan (valid
 					// users kosong di Samba berarti semua pengguna boleh masuk).
@@ -260,9 +306,14 @@ func (s *Shares) ApplyOp() Handler {
 		if req.SMBOff {
 			active = nil
 		}
-		var nfsErr, smbErr error
+		var nfsErr, smbErr, appErr error
 		out.NFS, nfsErr = s.writeExports(ctx, exports)
 		out.SMB, smbErr = s.writeSMBConf(ctx, active)
+		// Folder aplikasi: keadaan lengkap, jadi folder yang dicabut (atau
+		// gagal disiapkan) dilepas dari container.
+		if s.apps != nil {
+			appErr = s.apps.applyShares(ctx, appMounts)
+		}
 		switch {
 		case req.SMBOff && out.SMB != "unavailable":
 			// Gagal-tertutup: Samba dimatikan walau smb.conf gagal ditulis.
@@ -270,7 +321,7 @@ func (s *Shares) ApplyOp() Handler {
 		case smbErr == nil && out.SMB == "applied":
 			smbErr = s.smbService(ctx, false)
 		}
-		if err := errors.Join(nfsErr, smbErr); err != nil {
+		if err := errors.Join(nfsErr, smbErr, appErr); err != nil {
 			return nil, err
 		}
 		return out, nil
@@ -727,13 +778,19 @@ func (s *Shares) DeleteOp() Handler {
 		if res.ExitCode != 0 || strings.TrimSpace(string(res.Stdout)) != ds {
 			return nil, &OpError{Code: proto.ErrConflict, Message: "shared folder " + ds + " berisi dataset lain"}
 		}
+		path := filepath.Join(s.t.MountBase, req.Pool, req.Name)
+		// Folder yang masih dipasang di container aplikasi tidak dihapus.
+		if s.apps != nil {
+			if id := s.apps.usingShare(path); id != "" {
+				return nil, &OpError{Code: proto.ErrConflict, Message: "shared folder " + ds + " masih dipakai aplikasi " + id + "; lepas dulu di App Center"}
+			}
+		}
 		s.stopACLJob(ds)
 		// Koneksi SMB yang masih membuka folder ditutup dulu, lalu folder
 		// dilepas. Bila masih dipakai, tidak ada yang dihapus (zfs destroy -r
 		// menghapus snapshot sebelum melepas folder).
 		_, _ = s.p.st.run(ctx, s.t.Smbcontrol, []string{"smbd", "close-share"}, req.Name)
 		// Ekspor NFS dicabut sebelum folder dilepas.
-		path := filepath.Join(s.t.MountBase, req.Pool, req.Name)
 		if err := s.unexport(ctx, func(p string) bool { return p == path }); err != nil {
 			return nil, &OpError{Code: "share_delete_failed", Message: clipTo(err.Error(), maxErrorText)}
 		}

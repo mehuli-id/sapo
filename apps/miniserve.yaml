@@ -1,0 +1,21 @@
+# Katalog App Center (ADR 0012).
+id: miniserve
+name: { id: miniserve, en: miniserve }
+description:
+  id: Menampilkan isi shared folder yang dipilih lewat browser, baca saja. Tanpa login, jadi siapa pun di jaringan yang bisa membuka port ini bisa membaca isinya.
+  en: Shows the contents of chosen shared folders in a browser, read-only. There is no login, so anyone on the network who can reach this port can read them.
+website: https://github.com/svenstaro/miniserve
+image: docker.io/svenstaro/miniserve:0.35.0@sha256:4c52dd31881a59f2da79711c827902c97f3ae531ba143c07cc1ea4f04ec988b3
+web_port: 8080
+default_port: 8092
+# miniserve tidak menyimpan data; dataset aplikasi tetap dibuat (aturan
+# App Center) dan tidak dipakai.
+data_path: /data
+env:
+  MINISERVE_PATH: /folder
+  MINISERVE_PORT: "8080"
+  MINISERVE_NO_SYMLINKS: "true"
+  MINISERVE_DIRS_FIRST: "true"
+  MINISERVE_HIDE_VERSION_FOOTER: "true"
+share_path: /folder
+memory_mb: 64

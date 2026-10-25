@@ -213,3 +213,162 @@ func TestAppsGuards(t *testing.T) {
 		t.Fatalf("port dipakai: %v", err)
 	}
 }
+
+func TestAppsShares(t *testing.T) {
+	a, root, log := testApps(t)
+	_ = os.WriteFile(filepath.Join(a.t.CatalogDir, "galeri.yaml"), []byte(`id: galeri
+name: { id: Galeri, en: Gallery }
+description: { id: Uji, en: Test }
+image: docker.io/x/galeri:1@`+testDigest+`
+web_port: 8080
+default_port: 8091
+data_path: /data
+share_path: /folder
+memory_mb: 64
+`), 0o644)
+	for _, p := range []proto.AppInstallParams{{ID: "homer", Pool: "tank", Port: 8090}, {ID: "galeri", Pool: "tank", Port: 8091}} {
+		if _, err := appCall(t, a.InstallOp(), p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := a.shares
+	// Galeri diberi film (minta tulis, katalog hanya baca); homer tidak
+	// memakai shared folder; pribadi tidak diberikan ke aplikasi mana pun.
+	_ = os.Truncate(log, 0)
+	if _, err := applyShares(t, s,
+		proto.ShareSpec{Name: "film", Pool: "tank", Read: []string{"user:ani"}, Write: []string{}, Apps: []proto.ShareApp{{ID: "galeri", Write: true}, {ID: "homer"}, {ID: "hantu"}}},
+		proto.ShareSpec{Name: "pribadi", Pool: "tank", Read: []string{}, Write: []string{"user:budi"}},
+	); err != nil {
+		t.Fatal(err)
+	}
+	q, _ := os.ReadFile(a.quadletPath("galeri"))
+	film := filepath.Join(root, "tank/film")
+	if !strings.Contains(string(q), "Volume="+film+":/folder/film:ro,nosuid,nodev,noexec\n") || !strings.Contains(string(q), "RequiresMountsFor="+film+"\n") {
+		t.Fatalf("film harus dipasang baca saja:\n%s", q)
+	}
+	if strings.Contains(string(q), "pribadi") {
+		t.Fatalf("folder yang tidak diberikan ikut dipasang:\n%s", q)
+	}
+	if q, _ := os.ReadFile(a.quadletPath("homer")); strings.Contains(string(q), "film") {
+		t.Fatalf("aplikasi tanpa share_path tidak boleh mendapat folder:\n%s", q)
+	}
+	calls, _ := os.ReadFile(log)
+	if !strings.Contains(string(calls), "u:sapo-app-galeri:r-x") || strings.Contains(string(calls), "sapo-app-homer:") || strings.Contains(string(calls), "hantu") {
+		t.Fatalf("ACL akun aplikasi salah:\n%s", calls)
+	}
+	inOrder(t, string(calls), "systemctl daemon-reload --", "systemctl try-restart --no-block -- sapo-app-galeri.service")
+	if conf, _ := os.ReadFile(s.t.SMBConf); strings.Contains(string(conf), "sapo-app") {
+		t.Fatalf("akun aplikasi tidak boleh masuk smb.conf:\n%s", conf)
+	}
+	res, _ := appCall(t, a.ListOp(), nil)
+	for _, app := range res.([]proto.InstalledApp) {
+		if app.ID == "galeri" && (len(app.Shares) != 1 || app.Shares[0] != (proto.AppShare{Name: "film"})) {
+			t.Fatalf("folder galeri = %+v", app.Shares)
+		}
+	}
+	// Folder dan pool yang dipakai aplikasi tidak bisa dihapus.
+	var oe *OpError
+	if _, err := appCall(t, s.DeleteOp(), proto.ShareDeleteParams{Name: "film", Pool: "tank"}); !errors.As(err, &oe) || oe.Code != proto.ErrConflict || !strings.Contains(oe.Message, "galeri") {
+		t.Fatalf("hapus folder yang dipakai aplikasi: %v", err)
+	}
+	// Penerapan yang sama tidak me-restart lagi.
+	_ = os.Truncate(log, 0)
+	spec := proto.ShareSpec{Name: "film", Pool: "tank", Read: []string{"user:ani"}, Write: []string{}, Apps: []proto.ShareApp{{ID: "galeri"}}}
+	if _, err := applyShares(t, s, spec); err != nil {
+		t.Fatal(err)
+	}
+	if calls, _ := os.ReadFile(log); strings.Contains(string(calls), "try-restart") {
+		t.Fatalf("tanpa perubahan tidak boleh restart:\n%s", calls)
+	}
+	// Dicabut: folder dilepas dari container dan ACL akun aplikasi hilang.
+	spec.Apps = nil
+	_ = os.Truncate(log, 0)
+	if _, err := applyShares(t, s, spec); err != nil {
+		t.Fatal(err)
+	}
+	if q, _ := os.ReadFile(a.quadletPath("galeri")); strings.Contains(string(q), "film") {
+		t.Fatalf("folder yang dicabut masih dipasang:\n%s", q)
+	}
+	calls, _ = os.ReadFile(log)
+	if strings.Contains(string(calls), "sapo-app-galeri:") {
+		t.Fatalf("ACL aplikasi masih ada:\n%s", calls)
+	}
+	if i, j := strings.Index(string(calls), "systemctl stop"), strings.Index(string(calls), "setfacl"); i < 0 || i > j {
+		t.Fatalf("aplikasi harus dihentikan sebelum ACL diubah:\n%s", calls)
+	}
+	// Dihentikan sebelum ACL diubah, lalu dijalankan lagi tanpa folder itu.
+	inOrder(t, string(calls), "systemctl stop -- sapo-app-galeri.service", "smbcontrol smbd reload-config --", "systemctl start --no-block -- sapo-app-galeri.service")
+	if id := a.usingShare(film); id != "" {
+		t.Fatalf("folder masih tercatat dipakai %s", id)
+	}
+	// systemctl gagal: catatan tidak berubah, jadi sinkronisasi ulang
+	// mencoba lagi.
+	good, _ := os.ReadFile(a.t.Systemctl)
+	_ = os.WriteFile(a.t.Systemctl, []byte("#!/bin/sh\nexit 1\n"), 0o755)
+	spec.Apps = []proto.ShareApp{{ID: "galeri"}}
+	if _, err := applyShares(t, s, spec); err == nil {
+		t.Fatal("systemctl gagal harus dilaporkan")
+	}
+	if id := a.usingShare(film); id != "" {
+		t.Fatalf("catatan tidak boleh berubah saat gagal: %s", id)
+	}
+	_ = os.WriteFile(a.t.Systemctl, good, 0o755)
+	if _, err := applyShares(t, s, spec); err != nil {
+		t.Fatal(err)
+	}
+	if id := a.usingShare(film); id != "galeri" {
+		t.Fatalf("percobaan ulang harus menerapkan: %q", id)
+	}
+}
+
+func TestAppCatalogSharePath(t *testing.T) {
+	base := appDef{ID: "x1", Image: "docker.io/x/y:1@" + testDigest, WebPort: 80, DefaultPort: 8000, DataPath: "/data", MemoryMB: 64}
+	for name, mod := range map[string]func(*appDef){
+		"bertumpuk":      func(d *appDef) { d.SharePath = "/data/media" },
+		"induk data":     func(d *appDef) { d.SharePath = "/" + "d" },
+		"relatif":        func(d *appDef) { d.SharePath = "media" },
+		"tulis saja":     func(d *appDef) { d.ShareWrite = true },
+		"id kepanjangan": func(d *appDef) { d.ID = "a" + strings.Repeat("b", 23) },
+	} {
+		d := base
+		mod(&d)
+		if name == "induk data" {
+			d.DataPath, d.SharePath = "/srv/data", "/srv"
+		}
+		if d.validate() == nil {
+			t.Errorf("%s harus ditolak", name)
+		}
+	}
+	d := base
+	d.SharePath, d.ShareWrite = "/media", true
+	if err := d.validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Semua entri katalog di repo harus valid (entri tidak valid dilewati diam-
+// diam saat berjalan).
+func TestRepoCatalogValid(t *testing.T) {
+	entries, err := os.ReadDir("../../apps")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &Apps{t: AppsTools{CatalogDir: "../../apps"}}
+	cat, err := a.catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cat) != len(entries) || len(cat) == 0 {
+		t.Fatalf("katalog valid %d dari %d file", len(cat), len(entries))
+	}
+}
+
+func TestSharesRejectAppPrincipals(t *testing.T) {
+	s, _, _ := testShares(t, "0")
+	var oe *OpError
+	for _, p := range []string{"user:sapo-app-homer", "group:sapo-app-homer"} {
+		if _, err := applyShares(t, s, proto.ShareSpec{Name: "film", Pool: "tank", Read: []string{p}, Write: []string{}}); !errors.As(err, &oe) || oe.Code != proto.ErrInvalidParams {
+			t.Errorf("%s di izin biasa harus ditolak: %v", p, err)
+		}
+	}
+}

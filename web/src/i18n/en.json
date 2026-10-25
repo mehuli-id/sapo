@@ -326,7 +326,8 @@
     "password_invalid": "The password can’t contain control characters (such as tab or newline).",
     "nfs_invalid": "Invalid NFS settings: pick a user and enter client IP addresses or networks (for example 192.168.1.0/24). Host names and overly wide networks aren’t accepted.",
     "invalid_params": "Invalid input: {message}",
-    "updates_failed": "Update failed: {message}"
+    "updates_failed": "Update failed: {message}",
+    "share_used_by_app": "This folder is still used by an app. Remove it from that app in App Center first."
   },
   "pool": {
     "title": "Storage pools",
@@ -540,7 +541,8 @@
     "nfsClientsHelp": "One per line: an IP address (192.168.1.20) or a network (192.168.1.0/24). Anyone at those addresses can open the folder without a password.",
     "nfsPickUser": "Pick a user",
     "nfsSaved": "NFS settings for {name} saved.",
-    "nfsMount": "Mount from Linux or Mac (NFS version 4):"
+    "nfsMount": "Mount from Linux or Mac (NFS version 4):",
+    "apps": "Used by apps"
   },
   "network": {
     "intro": "The NAS host name, the IP address of each network port (automatic from the router via DHCP, or a fixed address), and DNS.",
@@ -669,7 +671,7 @@
     "installInterrupted": "The last update installation stopped before finishing. Install again: the interrupted installation is resumed first."
   },
   "appCenter": {
-    "intro": "Additional apps from the Sapo catalog. Each app runs separately with its own account, without special privileges, and keeps its data on the pool you choose. Apps can’t open shared folders yet.",
+    "intro": "Additional apps from the Sapo catalog. Each app runs separately with its own account, without special privileges, and keeps its data on the pool you choose. Apps can only open the shared folders you give them.",
     "install": "Install",
     "open": "Open",
     "start": "Start",
@@ -694,6 +696,20 @@
     "removeHelp": "{name} is stopped and removed. Its data is kept, so you can install it again at any time.",
     "removeData": "Also delete the app’s data",
     "removeDataHelp": "The app’s data ({id}) will be deleted permanently and can’t be recovered.",
-    "typeId": "Type {id} to confirm"
+    "typeId": "Type {id} to confirm",
+    "folders": "Folders",
+    "foldersNone": "no shared folders yet",
+    "foldersSummary": "Folders: {list}",
+    "foldersHelp": "Choose the shared folders {name} may open. They appear at {path}/<folder name> inside the app. A running app is restarted so the change takes effect.",
+    "foldersReadOnly": "This app only gets read access.",
+    "foldersNoShares": "There are no shared folders yet. Create one in Shared Folders first.",
+    "foldersSaved": "Folders for {name} saved.",
+    "access": {
+      "none": "No access",
+      "read": "Read only",
+      "write": "Read and write"
+    },
+    "save": "Save",
+    "foldersExposure": "Anyone who can open this app (from the network, including other apps on the NAS) can see these folders, subject to the app’s own login settings. Set up the app’s admin account right after installing it."
   }
 }

@@ -194,6 +194,9 @@ const remove = (s: SharedFolder) =>
               </p>
               <p class="text-xs">{{ t("shares.access") }}: {{ summary(s.permissions) }}</p>
               <p class="text-xs">{{ s.nfs && s.nfs_access ? nfsSummary(s) : t("shares.nfsOff") }}</p>
+              <p v-if="s.apps && Object.keys(s.apps).length" class="text-xs">
+                {{ t("shares.apps") }}: {{ Object.entries(s.apps).map(([id, l]) => `${id} (${t(`permissions.${l}`)})`).join(", ") }}
+              </p>
             </div>
           </div>
           <div v-if="open !== s.name" class="flex gap-1">

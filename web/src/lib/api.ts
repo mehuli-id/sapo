@@ -248,6 +248,8 @@ export interface SharedFolder {
   // Izin efektif pengguna NFS (kosong = tidak diekspor) dan galat ekspor.
   nfs_access?: ShareAccess
   nfs_error?: string
+  // Aplikasi App Center yang diberi akses → read | write.
+  apps?: Record<string, ShareAccess>
 }
 
 export interface ShareNFS {
@@ -369,6 +371,9 @@ export interface CatalogApp {
   image: string
   default_port: number
   memory_mb: number
+  // Shared folder dipasang di <share_path>/<nama> di dalam container.
+  share_path?: string
+  share_write?: boolean
 }
 
 export interface InstalledApp {
@@ -379,6 +384,8 @@ export interface InstalledApp {
   enabled: boolean
   status?: string
   installed_at: string
+  // Shared folder yang sedang dipasang di container.
+  shares?: { name: string; write?: boolean }[]
 }
 
 export type Localized = Record<string, string>
@@ -516,7 +523,9 @@ export const api = {
   startApp: (id: string) => post<{ ok: boolean }>(`/api/v1/apps/${encodeURIComponent(id)}/start`),
   stopApp: (id: string) => post<{ ok: boolean }>(`/api/v1/apps/${encodeURIComponent(id)}/stop`),
   removeApp: (id: string, req: { remove_data: boolean; confirm_name?: string; admin_password?: string }) =>
-    post<{ ok: boolean }>(`/api/v1/apps/${encodeURIComponent(id)}/remove`, req),
+    post<{ ok: boolean; warning?: string }>(`/api/v1/apps/${encodeURIComponent(id)}/remove`, req),
+  setAppFolders: (id: string, req: { folders: Record<string, ShareAccess>; admin_password: string }) =>
+    post<{ ok: boolean; warning?: string }>(`/api/v1/apps/${encodeURIComponent(id)}/folders`, req),
   services: () => get<{ smb: boolean; nfs: boolean }>("/api/v1/settings/services"),
   setServices: (req: { smb?: boolean; nfs?: boolean }) => post<{ smb: boolean; nfs: boolean; warning?: string }>("/api/v1/settings/services", req),
   updatesStatus: () =>
