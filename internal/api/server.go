@@ -66,7 +66,10 @@ type Server struct {
 	// notify: notifikasi email (ADR 0018).
 	notify *notifier
 	// updates: pemeriksaan pembaruan terjadwal dan hasil terakhirnya.
-	updates  *updateChecks
+	updates *updateChecks
+	// partners (penerima) dan remote (pengirim): backup ke NAS lain (ADR 0019).
+	partners *partnerStore
+	remote   *remoteStore
 	cfg      config.Config
 	agent    AgentCaller
 	store    *auth.Store
@@ -170,6 +173,14 @@ func New(o Options) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	partners, err := openPartnerStore(cfg.API.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	remote, err := openRemoteStore(cfg.API.DataDir)
+	if err != nil {
+		return nil, err
+	}
 	argon := auth.Argon2Params{MemoryKiB: cfg.Auth.Argon2.MemoryKiB, Iterations: cfg.Auth.Argon2.Iterations, Parallelism: cfg.Auth.Argon2.Parallelism}
 	dummy, err := auth.HashPassword("sapo-dummy-password", argon)
 	if err != nil {
@@ -196,6 +207,8 @@ func New(o Options) (*Server, error) {
 		settings: settings,
 		notify:   notify,
 		updates:  updates,
+		partners: partners,
+		remote:   remote,
 		davLocks: newDAVLockTable(),
 
 		resyncDelay: 30 * time.Second,
@@ -285,6 +298,21 @@ func New(o Options) (*Server, error) {
 	s.mux.Handle("GET /api/v1/notify", s.requireAdmin(http.HandlerFunc(s.handleNotify)))
 	s.mux.Handle("POST /api/v1/notify", s.requireAdmin(http.HandlerFunc(s.handleNotifySet)))
 	s.mux.Handle("POST /api/v1/notify/test", s.requireAdmin(http.HandlerFunc(s.handleNotifyTest)))
+	// Backup ke NAS lain (ADR 0019): admin pengirim dan penerima, lalu API
+	// partner (token NAS pengirim, tanpa sesi).
+	s.mux.Handle("GET /api/v1/remote-backups", s.requireAdmin(http.HandlerFunc(s.handleRemoteBackups)))
+	s.mux.Handle("POST /api/v1/remote-backups/targets", s.requireAdmin(http.HandlerFunc(s.handleTargetAdd)))
+	s.mux.Handle("POST /api/v1/remote-backups/targets/{id}/delete", s.requireAdmin(http.HandlerFunc(s.handleTargetDelete)))
+	s.mux.Handle("POST /api/v1/remote-backups/jobs", s.requireAdmin(http.HandlerFunc(s.handleRemoteJobSet)))
+	s.mux.Handle("POST /api/v1/remote-backups/jobs/{id}/run", s.requireAdmin(http.HandlerFunc(s.handleRemoteJobRun)))
+	s.mux.Handle("POST /api/v1/remote-backups/jobs/{id}/delete", s.requireAdmin(http.HandlerFunc(s.handleRemoteJobDelete)))
+	s.mux.Handle("GET /api/v1/backup-partners", s.requireAdmin(http.HandlerFunc(s.handlePartners)))
+	s.mux.Handle("POST /api/v1/backup-partners", s.requireAdmin(http.HandlerFunc(s.handlePartnerCreate)))
+	s.mux.Handle("POST /api/v1/backup-partners/{id}/delete", s.requireAdmin(http.HandlerFunc(s.handlePartnerDelete)))
+	s.mux.Handle("POST /api/v1/backup-partners/{id}/jobs/{job}/restore", s.requireAdmin(http.HandlerFunc(s.handlePartnerRestore)))
+	s.mux.HandleFunc("GET /api/v1/rbackup/hello", s.handlePartnerHello)
+	s.mux.HandleFunc("GET /api/v1/rbackup/jobs/{job}/copies", s.handlePartnerCopies)
+	s.mux.HandleFunc("POST /api/v1/rbackup/jobs/{job}/receive", s.handlePartnerReceive)
 	s.mux.Handle("GET /api/v1/backups", s.requireAdmin(http.HandlerFunc(s.handleBackups)))
 	s.mux.Handle("POST /api/v1/backups", s.requireAdmin(http.HandlerFunc(s.handleBackupSet)))
 	s.mux.Handle("POST /api/v1/backups/{id}/run", s.requireAdmin(http.HandlerFunc(s.handleBackupRun)))
@@ -363,7 +391,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// HTTPS wajib: lewat HTTP hanya halaman petunjuk (panel dalam mode
 		// petunjuk) yang tersedia, sehingga password tidak pernah lewat HTTP.
 		writeError(rec, http.StatusForbidden, "https_required", "gunakan HTTPS di port "+s.https.Port)
-	case isMutating(r.Method) && !s.csrfOK(r) && !isDAV(r):
+	case isMutating(r.Method) && !s.csrfOK(r) && !isDAV(r) && !isPartnerAPI(r):
 		writeError(rec, http.StatusForbidden, "csrf", "permintaan ditolak")
 	default:
 		s.mux.ServeHTTP(rec, r)

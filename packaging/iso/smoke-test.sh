@@ -846,6 +846,73 @@ for _ in $(seq 1 10); do
 done
 cmp -s "$WORK/pulih.txt" "$WORK/tetap.txt" || fail "isi folder pulihan lewat SMB: $out"
 [[ "$out" != *baru.txt* ]] || fail "salinan pertama tidak boleh berisi file sesudahnya: $out"
+# --- Backup ke NAS lain (ADR 0019) ---------------------------------------------------
+# NAS ini berperan sebagai pengirim dan penerima (127.0.0.1:5001): partner
+# dibuat di pool cadangan, kode pemasangan dipakai untuk memasangkan, folder
+# tetap dikirim penuh lalu inkremental lewat HTTPS, lalu salinan pertama
+# dipulihkan sebagai folder baru dan dibaca lewat SMB.
+res="$(api POST /api/v1/backup-partners '{"name":"NAS uji","pool":"cadangan","keep":3,"admin_password":"'"$PASS"'"}')"
+[[ "$res" == *' 200' ]] || fail "buat partner: $res"
+partner="$(json 'print(v["id"])' <<<"$res")"
+code="$(json 'print(v["code"])' <<<"$res")"
+last="${code: -1}"; [[ "$last" == 0 ]] && other=1 || other=0
+res="$(api POST /api/v1/remote-backups/targets '{"name":"NAS uji","address":"127.0.0.1:5001","code":"'"${code%?}$other"'","admin_password":"'"$PASS"'"}')"
+[[ "$res" == *'"pairing_failed"'* ]] || fail "kode dengan sidik jari lain harus ditolak: $res"
+res="$(api POST /api/v1/remote-backups/targets '{"name":"NAS uji","address":"127.0.0.1:5001","code":"'"$code"'","admin_password":"'"$PASS"'"}')"
+[[ "$res" == *' 200' ]] || fail "pasangkan NAS tujuan: $res"
+res="$(api POST /api/v1/remote-backups/jobs '{"share":"tetap","target":"'"$partner"'","hour":3,"enabled":false,"admin_password":"'"$PASS"'"}')"
+[[ "$res" == *' 200' ]] || fail "tugas ke NAS lain: $res"
+rjob="$(json 'print(v["id"])' <<<"$res")"
+remote_now() { # remote_now JUMLAH_SALINAN
+  local res
+  res="$(api POST "/api/v1/remote-backups/jobs/$rjob/run" '{}')"
+  [[ "$res" == *' 200' ]] || fail "backup ke NAS lain sekarang: $res"
+  for _ in $(seq 1 60); do
+    rb="$(api GET /api/v1/remote-backups)"
+    json "import sys; j=v['jobs'][0]; sys.exit(0 if not j['running'] and (j.get('last_copies')==$1 or j.get('last_error')) else 1)" <<<"$rb" && break
+    sleep 2
+  done
+  json "j=v['jobs'][0]; assert j['last_ok'] and j['last_copies']==$1 and j['last_bytes']>0, j" <<<"$rb" || fail "backup ke NAS lain ($1): $rb"
+}
+remote_now 1
+echo "ke NAS lain" > "$WORK/jauh.txt"
+out="$(smbclient //127.0.0.1/tetap -p "$SMB_PORT" -m SMB3 -U "budi%$UPASS" -c "put $WORK/jauh.txt jauh.txt" 2>&1 || true)"
+[[ "$out" != *NT_STATUS* ]] || fail "tulis jauh.txt: $out"
+remote_now 2
+res="$(api GET /api/v1/backup-partners)"
+json 'j=v[0]["jobs"][0]; assert len(j["copies"])==2 and j["used_bytes"]>0, v' <<<"$res" || fail "salinan di penerima: $res"
+rfirst="$(json 'print(v[0]["jobs"][0]["copies"][0]["name"])' <<<"$res")"
+res="$(api POST /api/v1/backup-partners/$partner/jobs/$rjob/restore '{"copy":"'"$rfirst"'","name":"dari-nas","admin_password":"'"$PASS"'"}')"
+[[ "$res" == *' 200' ]] || fail "pulihkan salinan dari NAS lain: $res"
+for _ in $(seq 1 60); do
+  bk="$(api GET /api/v1/backups)"
+  json 'import sys; r=v["restores"][-1]; sys.exit(0 if r["name"]=="dari-nas" and not r["running"] else 1)' <<<"$bk" && break
+  sleep 2
+done
+json 'r=v["restores"][-1]; assert r["ok"] and r["present"], r' <<<"$bk" || fail "pemulihan dari NAS lain: $bk"
+res="$(api GET /api/v1/shares)"
+json 'p=[s for s in v if s["name"]=="dari-nas"][0]; assert p["pool"]=="cadangan" and p["permissions"]=={}, p' <<<"$res" || fail "folder dari NAS lain: $res"
+res="$(api POST /api/v1/shares/dari-nas "{\"permissions\":{\"user:budi\":\"read\"},\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "izin folder dari NAS lain: $res"
+for _ in $(seq 1 10); do
+  out="$(smbclient //127.0.0.1/dari-nas -p "$SMB_PORT" -m SMB3 -U "budi%$UPASS" -c "get catatan.txt $WORK/dari-nas.txt; ls" 2>&1 || true)"
+  [[ "$out" == *catatan.txt* ]] && break
+  sleep 2
+done
+cmp -s "$WORK/dari-nas.txt" "$WORK/tetap.txt" || fail "isi folder dari NAS lain lewat SMB: $out"
+[[ "$out" != *jauh.txt* ]] || fail "salinan pertama tidak boleh berisi file sesudahnya: $out"
+res="$(api POST /api/v1/storage/pools/cadangan/destroy "{\"confirm_name\":\"cadangan\",\"password\":\"$PASS\"}")"
+[[ "$res" == *' 409' ]] || fail "pool berisi backup dari NAS lain tidak boleh dihapus: $res"
+# Bersih-bersih: folder pulihan, tugas, NAS tujuan, partner beserta salinan.
+res="$(api POST /api/v1/shares/dari-nas/delete "{\"confirm_name\":\"dari-nas\",\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "hapus folder dari-nas: $res"
+res="$(api POST "/api/v1/remote-backups/jobs/$rjob/delete" '{"admin_password":"'"$PASS"'"}')"
+[[ "$res" == *' 200' ]] || fail "hapus tugas ke NAS lain: $res"
+res="$(api POST "/api/v1/remote-backups/targets/$partner/delete" '{}')"
+[[ "$res" == *' 200' ]] || fail "hapus NAS tujuan: $res"
+res="$(api POST /api/v1/backup-partners/$partner/delete '{"delete_data":true,"confirm_name":"NAS uji","admin_password":"'"$PASS"'"}')"
+[[ "$res" == *' 200' ]] || fail "hapus partner beserta salinan: $res"
+echo "Backup ke NAS lain: dipasangkan dengan kode (sidik jari lain ditolak), penuh lalu inkremental lewat HTTPS ($(json 'print(v["jobs"][0]["last_bytes"])' <<<"$rb") byte terakhir), salinan dipulihkan di penerima dan terbaca lewat SMB, pool penerima tidak bisa dihapus selama ada salinan"
 res="$(api POST "/api/v1/backups/$bk_id/delete" "{\"delete_data\":true,\"confirm_name\":\"$bk_id\",\"admin_password\":\"$PASS\"}")"
 [[ "$res" == *' 200' ]] || fail "hapus tugas backup: $res"
 res="$(api POST /api/v1/storage/pools/cadangan/destroy "{\"confirm_name\":\"cadangan\",\"password\":\"$PASS\"}")"

@@ -720,61 +720,72 @@ func (b *Backups) RestoreOp() Handler {
 		} else if !exists {
 			return nil, &OpError{Code: proto.ErrNotFound, Message: "salinan tugas ini tidak ada di pool " + j.DestPool}
 		}
-		target := j.SrcPool + "/" + p.Name
-		if _, err := b.propsFn(ctx, target, "type"); !errors.Is(err, errNoDataset) {
-			return nil, &OpError{Code: proto.ErrConflict, Message: "folder " + p.Name + " sudah ada; pilih nama lain"}
-		}
-		if !b.runMu.TryLock() {
-			return nil, &OpError{Code: proto.ErrBusy, Message: "backup atau pemulihan lain sedang berjalan"}
-		}
-		rec := proto.BackupRestore{JobID: j.ID, Copy: p.Copy, Pool: j.SrcPool, Name: p.Name, Started: b.now().UTC(), Running: true}
-		if err := b.update(func(st *backupState) error {
-			st.Restores = append(st.Restores, rec)
-			// Catatan lama dibuang, kecuali pemulihan berhasil yang belum
-			// didaftarkan sapo-api.
-			for len(st.Restores) > 20 {
-				i := slices.IndexFunc(st.Restores, func(r proto.BackupRestore) bool { return !r.Running && (r.Claimed || !r.OK) })
-				if i < 0 {
-					break
-				}
-				st.Restores = slices.Delete(st.Restores, i, i+1)
-			}
-			return nil
-		}); err != nil {
-			b.runMu.Unlock()
+		if err := b.startRestore(ctx, j.ID, destDataset(j), p.Copy, j.SrcPool, p.Name); err != nil {
 			return nil, err
 		}
-		go func() {
-			defer b.runMu.Unlock()
-			ctx, cancel := context.WithTimeout(context.Background(), b.t.MaxRun)
-			defer cancel()
-			_, err := b.pipe(ctx, []string{"send", "-L", "-c", "--", destDataset(j) + "@" + p.Copy},
-				[]string{"receive", "-u", "-o", sharePropName + "=" + p.Name, "-o", "devices=off", "-o", "setuid=off", "--", target})
-			if err == nil {
-				// Snapshot salinan yang ikut terbawa tidak diperlukan folder baru.
-				_, _ = b.zfs(ctx, []string{"destroy"}, target+"@"+p.Copy)
-				_, err = b.zfs(ctx, []string{"mount"}, target)
-			}
-			_ = b.update(func(st *backupState) error {
-				for i := range st.Restores {
-					r := &st.Restores[i]
-					if r.Running && r.Pool == rec.Pool && r.Name == rec.Name {
-						r.Running, r.OK, r.Finished = false, err == nil, b.now().UTC()
-						if err != nil {
-							r.Error = clipTo(err.Error(), maxErrorText)
-						}
-					}
-				}
-				return nil
-			})
-			if err != nil {
-				b.shares.p.logWarn("pemulihan backup gagal", "tugas", j.ID, "err", err)
-			} else {
-				b.shares.p.logInfo("backup dipulihkan sebagai folder baru", "tugas", j.ID, "folder", target)
-			}
-		}()
 		return map[string]bool{"ok": true}, nil
 	}
+}
+
+// startRestore memulihkan snapshot srcDS@copy menjadi shared folder BARU
+// pool/name di latar belakang (folder yang ada tidak pernah ditimpa) dan
+// mencatatnya untuk sapo-api (backups.list/claim). jobID: tugas asal (untuk
+// izin folder asal di sapo-api), "remote:…" untuk salinan dari NAS lain.
+func (b *Backups) startRestore(ctx context.Context, jobID, srcDS, copyName, pool, name string) error {
+	target := pool + "/" + name
+	if _, err := b.propsFn(ctx, target, "type"); !errors.Is(err, errNoDataset) {
+		return &OpError{Code: proto.ErrConflict, Message: "folder " + name + " sudah ada; pilih nama lain"}
+	}
+	if !b.runMu.TryLock() {
+		return &OpError{Code: proto.ErrBusy, Message: "backup atau pemulihan lain sedang berjalan"}
+	}
+	rec := proto.BackupRestore{JobID: jobID, Copy: copyName, Pool: pool, Name: name, Started: b.now().UTC(), Running: true}
+	if err := b.update(func(st *backupState) error {
+		st.Restores = append(st.Restores, rec)
+		// Catatan lama dibuang, kecuali pemulihan berhasil yang belum
+		// didaftarkan sapo-api.
+		for len(st.Restores) > 20 {
+			i := slices.IndexFunc(st.Restores, func(r proto.BackupRestore) bool { return !r.Running && (r.Claimed || !r.OK) })
+			if i < 0 {
+				break
+			}
+			st.Restores = slices.Delete(st.Restores, i, i+1)
+		}
+		return nil
+	}); err != nil {
+		b.runMu.Unlock()
+		return err
+	}
+	go func() {
+		defer b.runMu.Unlock()
+		ctx, cancel := context.WithTimeout(context.Background(), b.t.MaxRun)
+		defer cancel()
+		_, err := b.pipe(ctx, []string{"send", "-L", "-c", "--", srcDS + "@" + copyName},
+			[]string{"receive", "-u", "-o", sharePropName + "=" + name, "-o", "devices=off", "-o", "setuid=off", "--", target})
+		if err == nil {
+			// Snapshot salinan yang ikut terbawa tidak diperlukan folder baru.
+			_, _ = b.zfs(ctx, []string{"destroy"}, target+"@"+copyName)
+			_, err = b.zfs(ctx, []string{"mount"}, target)
+		}
+		_ = b.update(func(st *backupState) error {
+			for i := range st.Restores {
+				r := &st.Restores[i]
+				if r.Running && r.Pool == rec.Pool && r.Name == rec.Name {
+					r.Running, r.OK, r.Finished = false, err == nil, b.now().UTC()
+					if err != nil {
+						r.Error = clipTo(err.Error(), maxErrorText)
+					}
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			b.shares.p.logWarn("pemulihan backup gagal", "tugas", jobID, "err", err)
+		} else {
+			b.shares.p.logInfo("backup dipulihkan sebagai folder baru", "tugas", jobID, "folder", target)
+		}
+	}()
+	return nil
 }
 
 // ClaimOp mengembalikan handler backups.claim: sapo-api mengklaim folder

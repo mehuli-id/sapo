@@ -100,6 +100,7 @@ function validateField(f: WizardField): string {
   if (f.type === "choice") return f.options?.some((o) => o.value === v) ? "" : t("wizard.required")
   if (f.type === "pool-select") return poolChoices(f).some((p) => p.name === v) ? "" : t("shares.pickPool")
   if (f.type === "share-select") return props.context?.shares?.some((x) => x.name === v) ? "" : t("wizard.required")
+  if (f.type === "target-select") return props.context?.targets?.some((x) => x.id === v) ? "" : t("wizard.required")
   if (f.type === "confirm" && f.match_context === "pool") return v === props.context?.pool?.name ? "" : t("wizard.mismatch")
   if (f.type === "disk-select" && f.required && !v) return t("pool.pickDisks")
   if (f.type === "pool-layout") {
@@ -214,6 +215,7 @@ const reviewRows = computed(() =>
         } else if (f.type === "pool-layout") value = value ? t(`pool.layout.${value}.name`) : ""
         else if (f.type === "choice") value = pick(f.options?.find((o) => o.value === value)?.label, locale.value)
         else if (f.type === "group-select") value = splitList(value).join(", ") || "—"
+        else if (f.type === "target-select") value = props.context?.targets?.find((x) => x.id === value)?.name ?? value
         else if (f.type === "toggle") value = value === "yes" ? t("wizard.yes") : t("wizard.no")
         else if (f.type === "permissions")
           value =
@@ -445,6 +447,26 @@ const reviewRows = computed(() =>
             <Check v-if="values[f.key] === x.name" class="size-4 shrink-0 text-primary" />
           </button>
           <p v-if="!(context?.shares ?? []).length" class="text-sm text-muted-foreground">{{ t("backup.noShares") }}</p>
+        </div>
+
+        <!-- NAS tujuan backup -->
+        <div v-else-if="f.type === 'target-select'" :id="`wz-${f.key}`" role="radiogroup" class="space-y-2">
+          <button
+            v-for="x in context?.targets ?? []"
+            :key="x.id"
+            type="button"
+            role="radio"
+            :aria-checked="values[f.key] === x.id"
+            :class="cn('flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-left text-sm hover:bg-accent', values[f.key] === x.id && 'border-primary ring-1 ring-primary')"
+            @click="values[f.key] = x.id"
+          >
+            <span>
+              <span class="block font-medium">{{ x.name }}</span>
+              <span class="block font-mono text-xs text-muted-foreground">{{ x.address }}</span>
+            </span>
+            <Check v-if="values[f.key] === x.id" class="size-4 shrink-0 text-primary" />
+          </button>
+          <p v-if="!(context?.targets ?? []).length" class="text-sm text-muted-foreground">{{ t("rbackup.noTargets") }}</p>
         </div>
 
         <!-- Izin folder -->

@@ -110,6 +110,8 @@ func main() {
 	go handler.NotifyLoop(ctx)
 	// Pemeriksaan pembaruan terjadwal (tidak memasang apa pun).
 	go handler.UpdateCheckLoop(ctx)
+	// Backup ke NAS lain (ADR 0019).
+	go handler.RemoteBackupLoop(ctx)
 	newServer := func(addr string) *http.Server {
 		return &http.Server{
 			Addr:              addr,

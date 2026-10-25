@@ -354,7 +354,12 @@
     "smtp_invalid": "Pengaturan server SMTP tidak valid.",
     "smtp_password_required": "Isi password SMTP: server, port, keamanan, atau username berubah.",
     "notify_failed": "Email gagal dikirim. Periksa pengaturan server di bawah ini.",
-    "notify_not_configured": "Notifikasi email belum diatur."
+    "notify_not_configured": "Notifikasi email belum diatur.",
+    "pairing_code_invalid": "Kode pemasangan tidak valid. Salin ulang dari NAS tujuan.",
+    "pairing_failed": "NAS tujuan tidak bisa dipasangkan.",
+    "target_exists": "NAS tujuan ini sudah dipasangkan.",
+    "target_used": "NAS tujuan masih dipakai tugas backup.",
+    "rbackup_failed": "Pengiriman backup gagal."
   },
   "pool": {
     "title": "Pool penyimpanan",
@@ -975,5 +980,35 @@
       "backup_failed": "Backup gagal",
       "updates_available": "Ada pembaruan sistem"
     }
+  },
+  "rbackup": {
+    "sendTitle": "Ke NAS lain",
+    "sendHelp": "Salin shared folder setiap hari ke NAS Sapo lain lewat HTTPS, misalnya di rumah atau kantor lain. Pasangkan dulu NAS tujuan dengan kode dari NAS itu.",
+    "addTarget": "Tambah NAS tujuan",
+    "addJob": "Tugas ke NAS lain",
+    "paired": "NAS tujuan dipasangkan. Sekarang buat tugas backup ke NAS itu.",
+    "fingerprint": "Sidik jari",
+    "deleteTarget": "Hapus NAS tujuan",
+    "targetDeleted": "NAS tujuan dihapus.",
+    "noTargets": "Belum ada NAS tujuan. Tambahkan dulu di Backup → Ke NAS lain.",
+    "schedule": "Setiap hari pukul {hour}.00",
+    "remoteCopies": "{n} salinan di NAS tujuan",
+    "deleteJobHelp": "Tugas dan snapshot backup-nya di folder ini dihapus. Salinan di {target} tetap ada dan hanya bisa dihapus dari NAS itu.",
+    "recvTitle": "Terima dari NAS lain",
+    "recvHelp": "NAS ini bisa menyimpan backup dari NAS Sapo lain. Salinan tidak dibagikan lewat jaringan dan hanya bisa dihapus dari sini.",
+    "addPartner": "Tambah NAS pengirim",
+    "codeTitle": "Kode pemasangan (hanya tampil sekali)",
+    "codeHelp": "Masukkan kode ini di NAS pengirim: Backup → Ke NAS lain → Tambah NAS tujuan. Siapa pun yang memegang kode ini bisa mengirim backup ke NAS ini.",
+    "copy": "Salin kode",
+    "copied": "Tersalin",
+    "partnerInfo": "Disimpan di pool {pool}, {keep} salinan per folder",
+    "lastSeen": "terakhir terhubung {when}",
+    "noCopiesYet": "Belum ada salinan yang diterima.",
+    "restoreHelp": "Salinan dipulihkan sebagai shared folder baru di pool {pool} di NAS ini, tanpa izin pengguna. Beri izin di Shared Folder setelahnya.",
+    "restoreStarted": "Pemulihan ke folder {name} dimulai. Folder muncul di Shared Folder setelah selesai.",
+    "deletePartner": "Hapus NAS pengirim",
+    "deletePartnerHelp": "Kode pemasangan dicabut: NAS itu tidak bisa mengirim backup lagi. Salinan yang sudah diterima tetap disimpan kecuali Anda memilih untuk menghapusnya.",
+    "deletePartnerData": "Hapus juga semua salinannya di pool {pool}",
+    "partnerDeleted": "NAS pengirim dihapus."
   }
 }

@@ -1,0 +1,64 @@
+# Wizard partner backup (ADR 0019, sisi penerima): NAS ini menerima backup
+# dari NAS Sapo lain. Hasilnya kode pemasangan sekali tampil, dimasukkan di
+# NAS pengirim.
+id: backup-partner-add
+action: rbackup.partner_create
+admin_only: true
+title:
+  id: Terima backup dari NAS lain
+  en: Receive backups from another NAS
+finish_label:
+  id: Buat kode pemasangan
+  en: Create pairing code
+
+steps:
+  - id: partner
+    title: { id: NAS pengirim, en: Sending NAS }
+    description:
+      id: >-
+        NAS Sapo lain akan mengirim salinan shared folder-nya ke NAS ini
+        setiap hari. Salinan disimpan terpisah, tidak dibagikan lewat
+        jaringan, dan hanya bisa dihapus dari NAS ini.
+      en: >-
+        Another Sapo NAS will send copies of its shared folders to this NAS
+        every day. Copies are stored separately, aren't shared on the
+        network, and can only be deleted from this NAS.
+    help:
+      id: >-
+        NAS pengirim tidak bisa menghapus salinan atau mengubah jumlah simpan
+        di sini, jadi backup tetap aman walau NAS pengirim dibobol.
+      en: >-
+        The sending NAS can't delete copies or change how many are kept here,
+        so backups stay safe even if the sending NAS is compromised.
+    fields:
+      - key: name
+        type: text
+        required: true
+        autocomplete: "off"
+        label: { id: Nama NAS pengirim, en: Name of the sending NAS }
+        placeholder: { id: NAS rumah, en: Home NAS }
+      - key: pool
+        type: pool-select
+        required: true
+        label: { id: Simpan salinan di pool, en: Store copies on pool }
+      - key: keep
+        type: text
+        required: true
+        default: "30"
+        pattern: "^([1-9][0-9]?|[12][0-9]{2}|3[0-5][0-9]|36[0-6])$"
+        autocomplete: "off"
+        label: { id: Jumlah salinan disimpan per folder (1–366), en: Copies kept per folder (1–366) }
+
+  - id: summary
+    type: review
+    title: { id: Ringkasan, en: Summary }
+    description:
+      id: Kode pemasangan tampil sekali setelah ini. Salin dan masukkan di NAS pengirim (Backup → Ke NAS lain).
+      en: The pairing code is shown once after this. Copy it into the sending NAS (Backup → To another NAS).
+    fields:
+      - key: admin_password
+        type: current-password
+        required: true
+        secret: true
+        autocomplete: current-password
+        label: { id: Password Anda, en: Your password }

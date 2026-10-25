@@ -1,0 +1,62 @@
+# Wizard NAS tujuan backup (ADR 0019, sisi pengirim): alamat dan kode
+# pemasangan dari NAS tujuan. Sidik jari sertifikat tujuan diperiksa dengan
+# kode, lalu dikunci.
+id: backup-target-add
+action: rbackup.target_add
+admin_only: true
+title:
+  id: Tambah NAS tujuan backup
+  en: Add backup destination NAS
+finish_label:
+  id: Pasangkan
+  en: Pair
+
+steps:
+  - id: code
+    title: { id: NAS tujuan, en: Destination NAS }
+    description:
+      id: >-
+        Di NAS tujuan, buka Backup → Terima dari NAS lain → Tambah NAS
+        pengirim, lalu salin kode pemasangannya ke sini.
+      en: >-
+        On the destination NAS, open Backup → Receive from another NAS → Add
+        sending NAS, then copy its pairing code here.
+    help:
+      id: >-
+        Kode memuat sidik jari sertifikat NAS tujuan, jadi data hanya dikirim
+        ke NAS itu. Bila sertifikat NAS tujuan berganti (misalnya nama
+        host-nya diubah), pasangkan ulang.
+      en: >-
+        The code contains the destination NAS's certificate fingerprint, so
+        data is only sent to that NAS. If its certificate changes (for
+        example its host name changes), pair again.
+    fields:
+      - key: name
+        type: text
+        required: true
+        autocomplete: "off"
+        label: { id: Nama, en: Name }
+        placeholder: { id: NAS kantor, en: Office NAS }
+      - key: address
+        type: text
+        required: true
+        autocomplete: "off"
+        label: { id: Alamat NAS tujuan, en: Destination NAS address }
+        placeholder: { id: "192.168.1.20 atau nas-kantor.local", en: "192.168.1.20 or office-nas.local" }
+      - key: code
+        type: text
+        required: true
+        autocomplete: "off"
+        pattern: "^SAPO1-[a-z0-9]{8,32}-[A-Za-z0-9_-]{20,64}-[0-9a-f]{32}$"
+        label: { id: Kode pemasangan, en: Pairing code }
+
+  - id: summary
+    type: review
+    title: { id: Ringkasan, en: Summary }
+    fields:
+      - key: admin_password
+        type: current-password
+        required: true
+        secret: true
+        autocomplete: current-password
+        label: { id: Password Anda, en: Your password }
