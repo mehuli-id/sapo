@@ -19,3 +19,4 @@ Setiap keputusan arsitektur penting dicatat di sini sebagai file bernomor (`NNNN
 | [0013](0013-sapo-drive.md) | Sapo Drive: folder pribadi per pengguna (dataset ZFS, SMB [homes], File Station) dan WebDAV dengan password aplikasi | Diterima |
 | [0014](0014-snapshots.md) | Snapshot ZFS terjadwal per folder (jadwal di properti dataset, Previous Versions lewat SMB) | Diterima |
 | [0015](0015-external-storage.md) | Penyimpanan eksternal USB (exFAT/FAT/NTFS, izin per grup saat dipasang, disk USB tidak untuk pool kecuali diizinkan) | Diterima |
+| [0016](0016-installer.md) | Installer ke disk dari panel (salin squashfs ISO, root ext4, GRUB BIOS+UEFI, pengaturan sesi ikut) | Diterima |

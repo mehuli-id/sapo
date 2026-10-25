@@ -49,6 +49,6 @@ Sapo Drive tahap 1 (ADR 0013): folder pribadi per pengguna, dataset `<pool>/sapo
 Snapshot terjadwal (ADR 0014): jadwal per shared folder dan untuk semua folder pribadi di properti ZFS `sapo:snap`, `sapod` mengambil/membuang snapshot setiap menit, snapshot manual, hapus dengan password, "Previous Versions" lewat Samba `shadow_copy2`.
 Pemulihan di File Station: "Versi sebelumnya" (snapshot sebagai akar baca saja `FilesTarget.Snapshot`) dan `files.restore` (salin sebagai pengguna, nama baru bila sudah ada).
 Penyimpanan eksternal (ADR 0015): drive USB exFAT/FAT/NTFS dipasang `sapod` sebagai folder eksternal (grup + ro/rw lewat opsi mount, `nosuid,nodev,noexec`), diingat per UUID, dibuka lewat File Station/WebDAV/SMB, dilepas dengan aman; disk USB tidak untuk pool kecuali diizinkan, identitas disk kembar ditolak.
+Installer ke disk (ADR 0016): wizard di Storage Manager saat berjalan dari ISO; `sapod install-run` (unit `sapo-install`) membuat partisi BIOS/EFI/root ext4, menyalin squashfs ISO dan pengaturan sesi live (`agent.install.copy_paths`), memasang GRUB BIOS+UEFI; uji asap ISO boot ulang dari disk itu tanpa ISO.
 Berikutnya (urutan disepakati):
-1. Installer ke disk (ISO sekarang hanya berjalan dari RAM).
-2. Backup shared folder ke drive lain (pool cadangan di USB).
+1. Backup shared folder ke drive lain (pool cadangan di USB).

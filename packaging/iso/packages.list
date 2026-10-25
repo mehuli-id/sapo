@@ -19,4 +19,9 @@ acl
 nfs-kernel-server
 # App Center (fitur app-center, ADR 0012): Podman + Quadlet.
 podman
+# Installer ke disk (ADR 0016): partisi, format, dan GRUB untuk BIOS dan UEFI.
+gdisk
+dosfstools
+grub-pc-bin
+grub-efi-amd64-bin
 # SSH sengaja tidak dipasang: user live memakai password bawaan.

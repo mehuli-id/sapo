@@ -1,0 +1,73 @@
+# Wizard memasang Sapo ke disk sistem (ADR 0016). sapod memeriksa ulang disk
+# (identitas, tidak dipakai, bukan USB, ukuran) sebelum menghapusnya.
+id: install
+action: system.install
+admin_only: true
+destructive: true
+title:
+  id: Pasang Sapo ke disk
+  en: Install Sapo to disk
+finish_label:
+  id: Hapus disk dan pasang Sapo
+  en: Erase the disk and install Sapo
+
+steps:
+  - id: disk
+    title: { id: Disk sistem, en: System disk }
+    description:
+      id: >-
+        Sapo sekarang berjalan dari RAM: semua perubahan hilang saat NAS
+        dimatikan. Pilih satu disk untuk sistem Sapo. Seluruh isinya dihapus.
+      en: >-
+        Sapo is running from RAM: all changes are lost when the NAS is turned
+        off. Choose one disk for the Sapo system. Everything on it is erased.
+    help:
+      id: >-
+        Pakai disk kecil tersendiri (misalnya SSD 32 GB atau lebih), bukan
+        disk data. Data tetap di pool ZFS di disk lain; bila disk sistem
+        rusak, cukup pasang ulang ke disk baru dan pool dipakai lagi. Akun,
+        pengaturan, dan pool dari sesi ini ikut terbawa.
+      en: >-
+        Use a small separate disk (for example a 32 GB or larger SSD), not a
+        data disk. Data stays in ZFS pools on other disks; if the system disk
+        fails, just install again to a new disk and the pools are used again.
+        Accounts, settings, and pools from this session are carried over.
+    fields:
+      - key: disk
+        type: disk-select
+        max: 1
+        required: true
+        label: { id: Disk sistem, en: System disk }
+
+  - id: confirm
+    type: review
+    title: { id: Konfirmasi, en: Confirm }
+    description:
+      id: >-
+        Setelah tombol terakhir ditekan, isi disk ini langsung dihapus dan
+        tidak bisa dikembalikan. Pemasangan berjalan beberapa menit; jangan
+        matikan NAS sampai selesai.
+      en: >-
+        After you press the last button, this disk is erased right away and
+        can't be recovered. Installation takes a few minutes; don't turn off
+        the NAS until it's done.
+    fields:
+      - key: erase_ok
+        type: erase-confirm
+        source: disk
+        required: true
+        label:
+          id: Saya mengerti semua data di disk ini akan dihapus permanen
+          en: I understand all data on this disk will be permanently erased
+      - key: confirm_name
+        type: confirm
+        match: disk
+        required: true
+        autocomplete: "off"
+        label: { id: Ketik ulang nama disk, en: Type the disk name again }
+      - key: password
+        type: current-password
+        required: true
+        secret: true
+        autocomplete: current-password
+        label: { id: Password Anda, en: Your password }

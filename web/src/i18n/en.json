@@ -340,7 +340,9 @@
     "restore_too_large": "Too large to restore at once. Restore the folders inside one by one, or use Previous Versions in Windows.",
     "disk_usb": "USB disks aren’t used for pools unless allowed in the disk selection step.",
     "disk_identity": "The disk has the same serial number or WWN as another disk, so it can’t be identified for sure. Connect it directly (SATA) or use another enclosure.",
-    "external_unsupported": "This drive can’t be mounted: {message}"
+    "external_unsupported": "This drive can’t be mounted: {message}",
+    "install_not_live": "The installer is only available while Sapo runs from the ISO.",
+    "install_disk_small": "The disk is too small for the Sapo system."
   },
   "pool": {
     "title": "Storage pools",
@@ -880,5 +882,15 @@
       "duplicate_uuid": "Another drive has the same UUID (a clone): unplug one of them first.",
       "system_partition": "System partition (EFI, Microsoft Reserved, or Recovery): not mounted here."
     }
+  },
+  "install": {
+    "title": "Sapo is running from RAM",
+    "help": "All changes are lost when the NAS is turned off. Install Sapo to a system disk so the NAS boots from it; accounts, settings, and pools from this session are carried over.",
+    "start": "Install to disk",
+    "started": "Installation to {name} started.",
+    "running": "Installing ({step})… Don’t turn off the NAS.",
+    "done": "Sapo is installed on {disk}. Remove the ISO media (or change the boot order), then restart the NAS.",
+    "failed": "Installation failed at step {step}: {error}. Data in pools wasn’t touched; fix the problem and try again.",
+    "interrupted": "interrupted before finishing"
   }
 }

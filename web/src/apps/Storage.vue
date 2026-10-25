@@ -3,6 +3,7 @@ import { onMounted, reactive, ref } from "vue"
 import { useI18n } from "vue-i18n"
 import { CircleCheck, HardDrive, Plus, RefreshCw, Thermometer, Timer, TriangleAlert } from "@lucide/vue"
 import ExternalStorage from "@/components/ExternalStorage.vue"
+import InstallPanel from "@/components/InstallPanel.vue"
 import PoolCard from "@/components/PoolCard.vue"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -90,7 +91,7 @@ async function scrub(name: string, action: "start" | "stop") {
   }
 }
 
-async function openWizard(id: "pool-create" | "pool-replace" | "pool-destroy", on: { pool?: Pool; vdev?: Vdev } = {}) {
+async function openWizard(id: "pool-create" | "pool-replace" | "pool-destroy" | "install", on: { pool?: Pool; vdev?: Vdev } = {}) {
   wizardFailed.value = false
   done.value = null
   try {
@@ -115,14 +116,17 @@ const doneKey: Record<string, string> = {
   "storage.pool_create": "pool.created",
   "storage.pool_replace": "pool.replaced",
   "storage.pool_destroy": "pool.destroyed",
+  "system.install": "install.started",
 }
 
 function wizardDone(values: Record<string, string>) {
-  done.value = { key: doneKey[wizard.value!.action] ?? "pool.created", name: values.name || target.value.pool?.name || "" }
+  done.value = { key: doneKey[wizard.value!.action] ?? "pool.created", name: values.name || target.value.pool?.name || values.disk || "" }
   wizard.value = null
   target.value = {}
   load()
+  setTimeout(() => installPanel.value?.load(), 500)
 }
+const installPanel = ref<InstanceType<typeof InstallPanel> | null>(null)
 
 const usableDisks = () => (disks.value ?? []).filter((d) => !ineligibleReason(d, !!pools.value?.allow_removable)).length
 
@@ -192,6 +196,8 @@ const num = (n: number) => new Intl.NumberFormat(locale.value).format(n)
         <RefreshCw :class="loading && 'animate-spin'" />{{ t("storage.refresh") }}
       </Button>
     </div>
+
+    <InstallPanel ref="installPanel" @install="openWizard('install')" />
 
     <!-- Pool -->
     <section class="space-y-3">

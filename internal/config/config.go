@@ -14,6 +14,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -78,6 +79,7 @@ type Agent struct {
 	Files          Files     `yaml:"files"`
 	Snapshots      Snapshots `yaml:"snapshots"`
 	External       External  `yaml:"external"`
+	Install        Install   `yaml:"install"`
 }
 
 // Accounts mengatur akun sistem untuk berbagi file. sapod hanya menyentuh
@@ -179,6 +181,63 @@ type Files struct {
 	// file yang ditimpa; {time} = waktu snapshot / waktu pemulihan.
 	RestoreLabel  string `yaml:"restore_label"`
 	ReplacedLabel string `yaml:"replaced_label"`
+}
+
+// Install mengatur installer ke disk (ADR 0016).
+type Install struct {
+	LiveMarker     string `yaml:"live_marker"`
+	SquashfsRoot   string `yaml:"squashfs_root"`
+	MinDiskGB      int    `yaml:"min_disk_gb"`
+	Unit           string `yaml:"unit"`
+	ParamsFile     string `yaml:"params_file"`
+	LogFile        string `yaml:"log_file"`
+	ResultFile     string `yaml:"result_file"`
+	TimeoutSeconds int    `yaml:"timeout_seconds"`
+	Target         string `yaml:"target"`
+	KernelCmdline  string `yaml:"kernel_cmdline"`
+	// Programs: wipefs, sgdisk, mkfs_vfat, mkfs_ext4, mount, umount, cp,
+	// chroot, blkid, udevadm, sync.
+	Programs map[string]string `yaml:"programs"`
+	// CopyPaths: pengaturan sesi live yang disalin ke sistem terpasang;
+	// RemovePaths: berkas khusus ISO yang dibuang darinya; RemoveUsers: akun
+	// live; PurgePackages: paket live.
+	CopyPaths     []string `yaml:"copy_paths"`
+	RemovePaths   []string `yaml:"remove_paths"`
+	RemoveUsers   []string `yaml:"remove_users"`
+	PurgePackages []string `yaml:"purge_packages"`
+}
+
+// InstallPrograms adalah nama program yang wajib ada di agent.install.programs.
+var InstallPrograms = []string{"wipefs", "sgdisk", "mkfs_vfat", "mkfs_ext4", "mount", "umount", "cp", "chroot", "blkid", "udevadm", "sync"}
+
+var packageName = regexp.MustCompile(`^[a-z0-9][a-z0-9+.-]+$`)
+
+func (i Install) validate() error {
+	clean := func(p string) bool { return filepath.IsAbs(p) && filepath.Clean(p) == p && p != "/" }
+	for _, p := range []string{i.LiveMarker, i.SquashfsRoot, i.ParamsFile, i.LogFile, i.ResultFile, i.Target} {
+		if !clean(p) {
+			return errors.New("agent.install: path harus absolut dan bersih")
+		}
+	}
+	for _, name := range InstallPrograms {
+		if !filepath.IsAbs(i.Programs[name]) {
+			return fmt.Errorf("agent.install.programs.%s harus path absolut", name)
+		}
+	}
+	for _, p := range append(slices.Clone(i.CopyPaths), i.RemovePaths...) {
+		if !clean(p) {
+			return fmt.Errorf("agent.install: path %q harus absolut dan bersih", p)
+		}
+	}
+	for _, n := range append(slices.Clone(i.RemoveUsers), i.PurgePackages...) {
+		if !packageName.MatchString(n) {
+			return fmt.Errorf("agent.install: nama %q tidak valid", n)
+		}
+	}
+	if i.MinDiskGB < 4 || i.TimeoutSeconds < 300 || !strings.HasSuffix(i.Unit, ".service") || strings.ContainsAny(i.KernelCmdline, "\"\n\\$`") {
+		return errors.New("agent.install: min_disk_gb minimal 4, timeout_seconds minimal 300, unit .service, kernel_cmdline tanpa tanda kutip")
+	}
+	return nil
 }
 
 // External mengatur penyimpanan eksternal USB (ADR 0015).
@@ -479,6 +538,13 @@ func Default() Config {
 				RestoreLabel: "dipulihkan {time}", ReplacedLabel: "sebelum dipulihkan {time}"},
 			Snapshots: Snapshots{MaxPoolCapacityPercent: 90, CallTimeoutSeconds: 30},
 			External:  External{Mount: "/usr/bin/mount", Umount: "/usr/bin/umount", MountBase: "/srv/sapo-external", StateFile: "/var/lib/sapod/external.json"},
+			Install: Install{LiveMarker: "/run/live/medium", SquashfsRoot: "/run/live/rootfs/filesystem.squashfs", MinDiskGB: 16,
+				Unit: "sapo-install.service", ParamsFile: "/var/lib/sapod/install-params.json", LogFile: "/var/lib/sapod/install.log",
+				ResultFile: "/var/lib/sapod/install-result.json", TimeoutSeconds: 3600, Target: "/mnt/sapo-install",
+				KernelCmdline: "quiet",
+				Programs: map[string]string{"wipefs": "/usr/sbin/wipefs", "sgdisk": "/usr/sbin/sgdisk", "mkfs_vfat": "/usr/sbin/mkfs.vfat",
+					"mkfs_ext4": "/usr/sbin/mkfs.ext4", "mount": "/usr/bin/mount", "umount": "/usr/bin/umount", "cp": "/usr/bin/cp",
+					"chroot": "/usr/sbin/chroot", "blkid": "/usr/sbin/blkid", "udevadm": "/usr/bin/udevadm", "sync": "/usr/bin/sync"}},
 			Network: Network{
 				IP: "/usr/sbin/ip", Systemctl: "/usr/bin/systemctl", Hostnamectl: "/usr/bin/hostnamectl",
 				InterfacesFile: "/etc/network/interfaces", ResolvConf: "/etc/resolv.conf", HostsFile: "/etc/hosts", HostnameFile: "/etc/hostname",
@@ -701,6 +767,9 @@ func (c Config) Validate() error {
 		return errors.New("agent.time.timedatectl harus path absolut")
 	}
 	if err := c.Agent.Files.validate(); err != nil {
+		return err
+	}
+	if err := c.Agent.Install.validate(); err != nil {
 		return err
 	}
 	if err := c.Agent.External.validate(c.Agent.Storage.Pools.MountBase); err != nil {
