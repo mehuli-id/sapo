@@ -81,7 +81,7 @@ function wizardDone() {
 }
 
 // Jadwal snapshot semua folder pribadi.
-const drivePolicy = (p: SnapshotPolicy | null) => api.setDrivePolicy(p)
+const drivePolicy = (p: SnapshotPolicy | null, pw: string) => api.setDrivePolicy(p, pw)
 
 // --- Pengaturan admin ---
 const mode = ref("") // "default" | "quota:<user>" | "delete:<pool>/<user>" | "off"

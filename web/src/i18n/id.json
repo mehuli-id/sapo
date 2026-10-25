@@ -333,7 +333,8 @@
     "home_user_exists": "Pengguna ini masih ada; folder pribadinya tidak bisa dihapus.",
     "home_delete_failed": "Folder pribadi gagal dihapus: {message}",
     "webdav_off": "WebDAV dimatikan administrator.",
-    "app_password_limit": "Password aplikasi sudah terlalu banyak. Cabut yang tidak dipakai lagi."
+    "app_password_limit": "Password aplikasi sudah terlalu banyak. Cabut yang tidak dipakai lagi.",
+    "snapshot_prune_confirm": "Jadwal baru akan membuang snapshot yang ada. Masukkan password."
   },
   "pool": {
     "title": "Pool penyimpanan",
@@ -831,6 +832,7 @@
       "daily": "harian",
       "weekly": "mingguan",
       "manual": "manual"
-    }
+    },
+    "pruneConfirm": "Jadwal baru ini akan membuang snapshot lama yang melebihi jumlah simpan. Masukkan password untuk melanjutkan."
   }
 }

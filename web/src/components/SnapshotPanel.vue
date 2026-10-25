@@ -19,7 +19,7 @@ const props = defineProps<{
   policyOnly?: boolean
   // listOnly: hanya daftar (jadwal diatur di tempat lain).
   listOnly?: boolean
-  save?: (p: SnapshotPolicy | null) => Promise<{ warning?: string }>
+  save?: (p: SnapshotPolicy | null, adminPassword: string) => Promise<{ warning?: string }>
 }>()
 const emit = defineEmits<{ saved: [] }>()
 
@@ -82,12 +82,28 @@ async function run(name: string, fn: () => Promise<unknown>, done: string) {
     busy.value = ""
   }
 }
-const savePolicy = () =>
-  run("policy", async () => {
-    const res = await props.save!(chosen.value)
+// Jadwal yang akan membuang snapshot yang ada butuh password (dijawab server
+// dengan snapshot_prune_confirm).
+const needPassword = ref(false)
+const policyPassword = ref("")
+async function savePolicy() {
+  busy.value = "policy"
+  error.value = notice.value = ""
+  try {
+    const res = await props.save!(chosen.value, policyPassword.value)
+    if (res?.warning) throw new ApiError(200, res.warning, "")
+    needPassword.value = false
+    policyPassword.value = ""
+    notice.value = t("snapshots.saved")
     emit("saved")
-    return res
-  }, t("snapshots.saved"))
+    await load()
+  } catch (e) {
+    if (e instanceof ApiError && e.code === "snapshot_prune_confirm") needPassword.value = true
+    else error.value = message(e)
+  } finally {
+    busy.value = ""
+  }
+}
 const takeNow = () => run("create", () => api.createSnapshot(props.target!), t("snapshots.taken"))
 const del = reactive({ name: "", password: "" })
 const remove = () =>
@@ -121,6 +137,11 @@ const when = (s: string) => new Date(s).toLocaleString(locale.value, { dateStyle
       </div>
       <p class="text-xs text-muted-foreground">{{ summary(chosen) }}</p>
       <p v-if="!chosen && policy" class="text-xs">{{ t("snapshots.offKeeps") }}</p>
+      <div v-if="needPassword" class="space-y-1.5 rounded-lg border border-destructive/40 bg-destructive/5 p-2.5">
+        <p class="text-sm">{{ t("snapshots.pruneConfirm") }}</p>
+        <Label for="snap-ppw" class="text-xs">{{ t("account.password") }}</Label>
+        <Input id="snap-ppw" v-model="policyPassword" type="password" autocomplete="current-password" class="max-w-xs" />
+      </div>
       <Button type="submit" size="sm" :disabled="!!busy"><LoaderCircle v-if="busy === 'policy'" class="animate-spin" />{{ t("snapshots.saveSchedule") }}</Button>
     </form>
 

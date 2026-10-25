@@ -80,17 +80,44 @@ func (s *Shares) setSnapPolicy(ctx context.Context, ds string, p *proto.Snapshot
 	return nil
 }
 
+// SnapshotTools mengatur penjadwal (agent.snapshots di sapo.yaml).
+type SnapshotTools struct {
+	Zpool string
+	// MaxPoolCapacity: snapshot otomatis tidak diambil di pool yang terisi
+	// sebanyak ini (persen) atau lebih.
+	MaxPoolCapacity int
+	// CallTimeout: batas waktu setiap perintah zfs/zpool.
+	CallTimeout time.Duration
+}
+
+// snapAutoProp menandai snapshot buatan penjadwal (nilainya jenisnya). Hanya
+// snapshot bertanda yang pernah dibuang otomatis.
+const snapAutoProp = "sapo:auto"
+
+// snapFuture: snapshot yang tanggalnya lebih maju dari ini (jam sistem
+// pernah salah) tidak dihitung sebagai snapshot periode berjalan.
+const snapFuture = time.Hour
+
 // Snapshots melayani snapshots.* dan menjalankan jadwal.
 type Snapshots struct {
 	shares *Shares
+	t      SnapshotTools
 	// now dan location diganti di test.
 	now      func() time.Time
 	location func() *time.Location
+	// warned: peringatan yang sama paling sering sekali per jam.
+	warned map[string]time.Time
 }
 
 // NewSnapshots menyiapkan snapshot di atas shared folder (zfs, kunci pool).
-func NewSnapshots(shares *Shares) *Snapshots {
-	return &Snapshots{shares: shares, now: time.Now, location: localZone}
+func NewSnapshots(shares *Shares, t SnapshotTools) *Snapshots {
+	if t.MaxPoolCapacity == 0 {
+		t.MaxPoolCapacity = 90
+	}
+	if t.CallTimeout == 0 {
+		t.CallTimeout = 30 * time.Second
+	}
+	return &Snapshots{shares: shares, t: t, now: time.Now, location: localZone, warned: map[string]time.Time{}}
 }
 
 // localZone membaca zona waktu sistem setiap kali (bisa diubah dari Control
@@ -120,25 +147,51 @@ func (sn *Snapshots) Run(ctx context.Context) {
 	}
 }
 
+func (sn *Snapshots) warn(key, msg string, args ...any) {
+	if last, ok := sn.warned[key]; ok && sn.now().Sub(last) < time.Hour {
+		return
+	}
+	sn.warned[key] = sn.now()
+	sn.shares.p.logWarn(msg, args...)
+}
+
+// run menjalankan zfs/zpool dengan batas waktu per perintah. Galat program
+// (kode keluar bukan 0) dikembalikan bersama baris pertama stderr.
+func (sn *Snapshots) run(ctx context.Context, prog string, flags []string, operands ...string) (toolResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, sn.t.CallTimeout)
+	defer cancel()
+	res, err := sn.shares.p.st.run(ctx, prog, flags, operands...)
+	if err == nil && res.ExitCode != 0 {
+		err = errors.New(clipTo(firstLine(res.Stderr), maxErrorText))
+	}
+	return res, err
+}
+
 type snapEntry struct {
 	name    string
 	kind    string
 	created time.Time
 	used    uint64
+	// auto: dibuat penjadwal (properti sapo:auto), boleh dibuang otomatis.
+	auto bool
 }
 
-// Tick mengambil snapshot yang sudah waktunya dan membuang yang lama. Bila
-// operasi pool lain sedang berjalan, dilewati sampai menit berikutnya.
+// poolState: pool yang sehat (ONLINE/DEGRADED) dan persen terisinya.
+type poolState struct {
+	ok       bool
+	capacity int
+}
+
+// Tick mengambil snapshot yang sudah waktunya dan membuang yang lama. Kunci
+// pool hanya diambil per dataset; bila operasi pool lain sedang berjalan,
+// dataset itu dilewati sampai menit berikutnya.
 func (sn *Snapshots) Tick(ctx context.Context) {
 	sh := sn.shares
-	if !sh.p.write.TryLock() {
-		return
-	}
-	defer sh.p.write.Unlock()
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-	defer cancel()
-	res, err := sh.p.st.run(ctx, sh.t.Zfs, []string{"list", "-H", "-p", "-t", "filesystem", "-o", "name," + snapPropName + "," + sharePropName + "," + homePropName})
-	if err != nil || res.ExitCode != 0 {
+	res, err := sn.run(ctx, sh.t.Zfs, []string{"list", "-H", "-p", "-t", "filesystem", "-o", "name," + snapPropName + "," + sharePropName + "," + homePropName})
+	if err != nil {
+		if !errors.Is(err, errToolMissing) {
+			sn.warn("list", "jadwal snapshot: daftar dataset gagal dibaca", "err", err)
+		}
 		return
 	}
 	type dsPolicy struct {
@@ -159,15 +212,55 @@ func (sn *Snapshots) Tick(ctx context.Context) {
 	if len(due) == 0 {
 		return
 	}
-	snaps, err := sn.listAll(ctx)
-	if err != nil {
-		return
+	pools := sn.pools(ctx)
+	// Satu daftar untuk semua; bila gagal (misalnya terlalu banyak snapshot),
+	// per dataset.
+	all, allErr := sn.listSnapshots(ctx, "")
+	if allErr != nil {
+		sn.warn("snaplist", "jadwal snapshot: daftar snapshot gagal dibaca; dicoba per folder", "err", allErr)
 	}
 	now := sn.now()
 	loc := sn.location()
 	for _, d := range due {
-		sn.apply(ctx, d.ds, d.p, snaps[d.ds], now, loc)
+		pool, _, _ := strings.Cut(d.ds, "/")
+		ps := pools[pool]
+		if !ps.ok {
+			sn.warn("pool:"+pool, "jadwal snapshot: pool tidak sehat atau tidak terbaca, dilewati", "pool", pool)
+			continue
+		}
+		have := all[d.ds]
+		if allErr != nil {
+			one, err := sn.listSnapshots(ctx, d.ds)
+			if err != nil {
+				sn.warn("snaplist:"+d.ds, "jadwal snapshot: daftar snapshot folder gagal dibaca", "dataset", d.ds, "err", err)
+				continue
+			}
+			have = one[d.ds]
+		}
+		if !sh.p.write.TryLock() {
+			continue
+		}
+		sn.apply(ctx, d.ds, d.p, have, now, loc, ps.capacity >= sn.t.MaxPoolCapacity)
+		sh.p.write.Unlock()
 	}
+}
+
+func (sn *Snapshots) pools(ctx context.Context) map[string]poolState {
+	out := map[string]poolState{}
+	res, err := sn.run(ctx, sn.t.Zpool, []string{"list", "-H", "-p", "-o", "name,health,capacity"})
+	if err != nil {
+		return out
+	}
+	sc := bufio.NewScanner(bytes.NewReader(res.Stdout))
+	for sc.Scan() {
+		f := strings.Split(sc.Text(), "\t")
+		if len(f) != 3 {
+			continue
+		}
+		c, _ := strconv.Atoi(strings.TrimSuffix(f[2], "%"))
+		out[f[0]] = poolState{ok: f[1] == "ONLINE" || f[1] == "DEGRADED", capacity: c}
+	}
+	return out
 }
 
 // sapoDataset: <pool>/<folder> bertanda sapo:share, atau
@@ -184,31 +277,35 @@ func sapoDataset(ds, share, home string) bool {
 	return false
 }
 
-// listAll: snapshot buatan Sapo per dataset.
-func (sn *Snapshots) listAll(ctx context.Context) (map[string][]snapEntry, error) {
+// listSnapshots: snapshot bernama Sapo per dataset (semua dataset bila ds
+// kosong, atau hanya ds).
+func (sn *Snapshots) listSnapshots(ctx context.Context, ds string) (map[string][]snapEntry, error) {
 	sh := sn.shares
-	res, err := sh.p.st.run(ctx, sh.t.Zfs, []string{"list", "-H", "-p", "-t", "snapshot", "-o", "name,creation,used"})
+	flags := []string{"list", "-H", "-p", "-t", "snapshot", "-o", "name,creation,used," + snapAutoProp}
+	var operands []string
+	if ds != "" {
+		flags = append(flags, "-d", "1")
+		operands = []string{ds}
+	}
+	res, err := sn.run(ctx, sh.t.Zfs, flags, operands...)
 	if err != nil {
 		return nil, err
-	}
-	if res.ExitCode != 0 {
-		return nil, fmt.Errorf("zfs list: %s", firstLine(res.Stderr))
 	}
 	out := map[string][]snapEntry{}
 	sc := bufio.NewScanner(bytes.NewReader(res.Stdout))
 	for sc.Scan() {
 		f := strings.Split(sc.Text(), "\t")
-		if len(f) != 3 {
+		if len(f) != 4 {
 			continue
 		}
-		ds, name, ok := strings.Cut(f[0], "@")
+		dsName, name, ok := strings.Cut(f[0], "@")
 		m := snapNamePattern.FindStringSubmatch(name)
 		if !ok || m == nil {
 			continue
 		}
 		sec, _ := strconv.ParseInt(f[1], 10, 64)
 		used, _ := strconv.ParseUint(f[2], 10, 64)
-		out[ds] = append(out[ds], snapEntry{name: name, kind: m[1], created: time.Unix(sec, 0), used: used})
+		out[dsName] = append(out[dsName], snapEntry{name: name, kind: m[1], created: time.Unix(sec, 0), used: used, auto: f[3] == m[1] && m[1] != "manual"})
 	}
 	return out, nil
 }
@@ -237,7 +334,9 @@ func periodStart(kind string, p proto.SnapshotPolicy, now time.Time, loc *time.L
 	}
 }
 
-func (sn *Snapshots) apply(ctx context.Context, ds string, p proto.SnapshotPolicy, have []snapEntry, now time.Time, loc *time.Location) {
+// apply: full = pool hampir penuh (snapshot baru tidak diambil, yang lama
+// tetap dibuang sesuai jadwal).
+func (sn *Snapshots) apply(ctx context.Context, ds string, p proto.SnapshotPolicy, have []snapEntry, now time.Time, loc *time.Location, full bool) {
 	sh := sn.shares
 	for _, k := range []struct {
 		kind string
@@ -248,10 +347,21 @@ func (sn *Snapshots) apply(ctx context.Context, ds string, p proto.SnapshotPolic
 			continue
 		}
 		var mine []snapEntry
+		future := false
 		for _, e := range have {
-			if e.kind == k.kind {
-				mine = append(mine, e)
+			if e.kind != k.kind || !e.auto {
+				continue
 			}
+			// Bertanggal masa depan (jam sistem pernah salah): tidak dihitung
+			// dan tidak dibuang otomatis; admin bisa menghapusnya di panel.
+			if e.created.After(now.Add(snapFuture)) {
+				future = true
+				continue
+			}
+			mine = append(mine, e)
+		}
+		if future {
+			sn.warn("future:"+ds, "snapshot bertanggal masa depan diabaikan (periksa jam NAS)", "dataset", ds)
 		}
 		start := periodStart(k.kind, p, now, loc)
 		taken := false
@@ -260,23 +370,33 @@ func (sn *Snapshots) apply(ctx context.Context, ds string, p proto.SnapshotPolic
 				taken = true
 			}
 		}
-		if !taken {
+		switch {
+		case taken:
+		case full:
+			sn.warn("full:"+ds, "pool hampir penuh: snapshot otomatis tidak diambil", "dataset", ds, "batas_persen", sn.t.MaxPoolCapacity)
+		default:
 			name := snapName(k.kind, now)
-			res, err := sh.p.st.run(ctx, sh.t.Zfs, []string{"snapshot"}, ds+"@"+name)
-			if err != nil || res.ExitCode != 0 {
-				sh.p.logWarn("snapshot gagal diambil", "dataset", ds, "jenis", k.kind, "err", err)
+			if _, err := sn.run(ctx, sh.t.Zfs, []string{"snapshot", "-o", snapAutoProp + "=" + k.kind}, ds+"@"+name); err != nil {
+				sn.warn("snap:"+ds, "snapshot gagal diambil", "dataset", ds, "jenis", k.kind, "err", err)
 				continue
 			}
-			mine = append(mine, snapEntry{name: name, kind: k.kind, created: now})
+			mine = append(mine, snapEntry{name: name, kind: k.kind, created: now, auto: true})
 		}
-		// Terbaru dulu; yang melebihi jumlah simpan dibuang.
+		// Terbaru dulu; yang melebihi jumlah simpan dibuang (satu perintah).
 		sort.Slice(mine, func(i, j int) bool { return mine[i].created.After(mine[j].created) })
-		for _, e := range mine[min(len(mine), k.keep):] {
-			res, err := sh.p.st.run(ctx, sh.t.Zfs, []string{"destroy"}, ds+"@"+e.name)
-			if err != nil || res.ExitCode != 0 {
-				sh.p.logWarn("snapshot lama gagal dibuang", "snapshot", ds+"@"+e.name, "err", err)
-			}
+		old := mine[min(len(mine), k.keep):]
+		if len(old) == 0 {
+			continue
 		}
+		names := make([]string, len(old))
+		for i, e := range old {
+			names[i] = e.name
+		}
+		if _, err := sn.run(ctx, sh.t.Zfs, []string{"destroy"}, ds+"@"+strings.Join(names, ",")); err != nil {
+			sn.warn("prune:"+ds, "snapshot lama gagal dibuang", "dataset", ds, "err", err)
+			continue
+		}
+		sh.p.logInfo("snapshot lama dibuang sesuai jadwal", "dataset", ds, "jenis", k.kind, "snapshot", strings.Join(names, ","))
 	}
 }
 
@@ -366,7 +486,7 @@ func (sn *Snapshots) CreateOp() Handler {
 			return nil, err
 		}
 		name := snapName("manual", sn.now())
-		res, err := sh.p.st.run(ctx, sh.t.Zfs, []string{"snapshot"}, ds+"@"+name)
+		res, err := sh.p.st.run(ctx, sh.t.Zfs, []string{"snapshot", "-o", snapAutoProp + "=manual"}, ds+"@"+name)
 		if err != nil {
 			return nil, err
 		}

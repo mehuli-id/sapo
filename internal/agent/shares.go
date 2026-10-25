@@ -276,8 +276,12 @@ func (s *Shares) ApplyOp() Handler {
 			if err == nil {
 				err = s.setPermissions(ctx, path, perms)
 			}
+			// Jadwal snapshot yang gagal diatur tidak menahan berbagi folder.
 			if err == nil {
-				err = s.setSnapPolicy(ctx, sp.Pool+"/"+sp.Name, sp.Snapshots)
+				if serr := s.setSnapPolicy(ctx, sp.Pool+"/"+sp.Name, sp.Snapshots); serr != nil {
+					st.SnapshotError = clipTo(serr.Error(), maxErrorText)
+					s.p.logWarn("jadwal snapshot gagal diatur", "folder", sp.Name, "err", serr)
+				}
 			}
 			st.Path = path
 			if err != nil {

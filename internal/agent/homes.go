@@ -201,7 +201,11 @@ func (h *Homes) ensureHome(ctx context.Context, pool string, u proto.HomeUser, s
 			return err
 		}
 	}
-	return sh.setSnapPolicy(ctx, ds, snap)
+	// Jadwal snapshot yang gagal diatur tidak menahan folder pribadi.
+	if err := sh.setSnapPolicy(ctx, ds, snap); err != nil {
+		sh.p.logWarn("jadwal snapshot folder pribadi gagal diatur", "dataset", ds, "err", err)
+	}
+	return nil
 }
 
 func (h *Homes) zfs(ctx context.Context, flags []string, ds string) error {

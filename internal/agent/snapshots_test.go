@@ -55,7 +55,7 @@ func TestSnapPeriodStart(t *testing.T) {
 
 // testSnapshots: zfs tiruan yang mencatat perintah dan mengembalikan daftar
 // dataset dan snapshot dari file.
-func testSnapshots(t *testing.T, datasets, snapshots string) (*Snapshots, string) {
+func testSnapshots(t *testing.T, datasets, snapshots string, pools ...string) (*Snapshots, string) {
 	t.Helper()
 	s, _, _ := testShares(t, "0")
 	dir := t.TempDir()
@@ -70,7 +70,13 @@ func testSnapshots(t *testing.T, datasets, snapshots string) (*Snapshots, string
 	zfs := filepath.Join(dir, "zfs")
 	_ = os.WriteFile(zfs, []byte(script), 0o755)
 	s.t.Zfs = zfs
-	sn := NewSnapshots(s)
+	pl := "tank\tONLINE\t10\n"
+	if len(pools) > 0 {
+		pl = pools[0]
+	}
+	zpool := filepath.Join(dir, "zpool")
+	_ = os.WriteFile(zpool, []byte("#!/bin/sh\nprintf '"+strings.ReplaceAll(pl, "\t", "\\t")+"'\n"), 0o755)
+	sn := NewSnapshots(s, SnapshotTools{Zpool: zpool, MaxPoolCapacity: 90, CallTimeout: 5 * time.Second})
 	sn.location = func() *time.Location { return time.UTC }
 	return sn, log
 }
@@ -88,13 +94,15 @@ func TestSnapshotsTick(t *testing.T) {
 		"tank/aneh\th2;x\taneh\t-",
 	}, "\n") + "\n"
 	snaps := strings.Join([]string{
-		"tank/keluarga@sapo-hourly_GMT-" + old(1) + "\t" + sec(1) + "\t0",
-		"tank/keluarga@sapo-hourly_GMT-" + old(2) + "\t" + sec(2) + "\t0",
-		"tank/keluarga@sapo-hourly_GMT-" + old(3) + "\t" + sec(3) + "\t0",
-		"tank/keluarga@sapo-manual_GMT-" + old(30) + "\t" + sec(30) + "\t0",
-		"tank/keluarga@buatan-admin\t" + sec(40) + "\t0",
+		"tank/keluarga@sapo-hourly_GMT-" + old(1) + "\t" + sec(1) + "\t0\thourly",
+		"tank/keluarga@sapo-hourly_GMT-" + old(2) + "\t" + sec(2) + "\t0\thourly",
+		"tank/keluarga@sapo-hourly_GMT-" + old(3) + "\t" + sec(3) + "\t0\thourly",
+		// Bernama pola Sapo tetapi dibuat dari terminal (tanpa penanda).
+		"tank/keluarga@sapo-hourly_GMT-" + old(4) + "\t" + sec(4) + "\t0\t-",
+		"tank/keluarga@sapo-manual_GMT-" + old(30) + "\t" + sec(30) + "\t0\tmanual",
+		"tank/keluarga@buatan-admin\t" + sec(40) + "\t0\t-",
 		// Harian hari ini sudah ada (setelah jam 3).
-		"tank/sapo-home/budi@sapo-daily_GMT-" + old(6) + "\t" + sec(6) + "\t0",
+		"tank/sapo-home/budi@sapo-daily_GMT-" + old(6) + "\t" + sec(6) + "\t0\tdaily",
 	}, "\n") + "\n"
 	sn, log := testSnapshots(t, datasets, snaps)
 	sn.now = func() time.Time { return now }
@@ -103,18 +111,16 @@ func TestSnapshotsTick(t *testing.T) {
 	c := string(calls)
 	// keluarga: jam ini belum ada → diambil; simpan 2 jam-an → 2 terlama
 	// dibuang; manual dan snapshot buatan admin tidak disentuh.
-	want := "snapshot -- tank/keluarga@sapo-hourly_GMT-" + now.Format(snapTimeFormat)
+	want := "snapshot -o sapo:auto=hourly -- tank/keluarga@sapo-hourly_GMT-" + now.Format(snapTimeFormat)
 	if !strings.Contains(c, want) {
 		t.Fatalf("snapshot jam ini tidak diambil:\n%s", c)
 	}
-	for _, h := range []int{2, 3} {
-		if !strings.Contains(c, "destroy -- tank/keluarga@sapo-hourly_GMT-"+old(h)) {
-			t.Errorf("snapshot %d jam lalu harus dibuang:\n%s", h, c)
-		}
+	if !strings.Contains(c, "destroy -- tank/keluarga@sapo-hourly_GMT-"+old(2)+",sapo-hourly_GMT-"+old(3)+"\n") {
+		t.Errorf("snapshot 2 dan 3 jam lalu harus dibuang (satu perintah):\n%s", c)
 	}
 	for _, line := range strings.Split(c, "\n") {
 		if strings.HasPrefix(line, "snapshot") || strings.HasPrefix(line, "destroy") {
-			for _, bad := range []string{"tank/lain", "tank/mati", "tank/aneh", "sapo-home/budi", "manual", "buatan-admin", "GMT-" + old(1)} {
+			for _, bad := range []string{"tank/lain", "tank/mati", "tank/aneh", "sapo-home/budi", "manual", "buatan-admin", "GMT-" + old(1) + ",", "GMT-" + old(1) + "\n", old(4)} {
 				if strings.Contains(line, bad) {
 					t.Errorf("tidak boleh: %s", line)
 				}
@@ -146,7 +152,7 @@ func TestSnapshotsOps(t *testing.T) {
 	if props[snapPropName] != "off" {
 		t.Fatalf("sapo:snap = %q", props[snapPropName])
 	}
-	sn := NewSnapshots(s)
+	sn := NewSnapshots(s, SnapshotTools{})
 	call := func(h Handler, p any) error {
 		raw, _ := json.Marshal(p)
 		_, err := h(context.Background(), raw)
@@ -173,6 +179,31 @@ func TestSMBConfShadowCopy(t *testing.T) {
 	for _, w := range []string{"vfs objects = shadow_copy2", "shadow:snapdir = .zfs/snapshot", "shadow:format = _GMT-%Y.%m.%d-%H.%M.%S"} {
 		if !strings.Contains(conf, w) {
 			t.Errorf("smb.conf tanpa %q", w)
+		}
+	}
+}
+
+// Jam sistem pernah maju (snapshot bertanggal masa depan), pool hampir
+// penuh, atau pool tidak sehat: tidak ada snapshot salah ambil dan tidak ada
+// yang terbuang.
+func TestSnapshotsGuards(t *testing.T) {
+	now := time.Date(2026, 10, 28, 10, 5, 0, 0, time.UTC)
+	future := now.AddDate(5, 0, 0)
+	ds := "tank/keluarga\th2.d0.w0.t3\tkeluarga\t-\n"
+	snaps := "tank/keluarga@sapo-hourly_GMT-" + future.Format(snapTimeFormat) + "\t" + strconv.FormatInt(future.Unix(), 10) + "\t0\thourly\n"
+	sn, log := testSnapshots(t, ds, snaps)
+	sn.now = func() time.Time { return now }
+	sn.Tick(context.Background())
+	c, _ := os.ReadFile(log)
+	if !strings.Contains(string(c), "snapshot -o sapo:auto=hourly") || strings.Contains(string(c), "destroy") {
+		t.Fatalf("snapshot masa depan harus diabaikan (bukan menghentikan jadwal atau dibuang):\n%s", c)
+	}
+	for name, pools := range map[string]string{"penuh": "tank\tONLINE\t95\n", "rusak": "tank\tSUSPENDED\t10\n"} {
+		sn, log := testSnapshots(t, ds, "", pools)
+		sn.now = func() time.Time { return now }
+		sn.Tick(context.Background())
+		if c, _ := os.ReadFile(log); strings.Contains("\n"+string(c), "\nsnapshot -o") {
+			t.Errorf("pool %s: snapshot tidak boleh diambil:\n%s", name, c)
 		}
 	}
 }

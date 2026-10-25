@@ -592,6 +592,8 @@ type ShareState struct {
 	Error string `json:"error,omitempty"`
 	// NFSError: folder siap, tetapi ekspor NFS-nya tidak dipasang.
 	NFSError string `json:"nfs_error,omitempty"`
+	// SnapshotError: folder siap, tetapi jadwal snapshot-nya gagal diatur.
+	SnapshotError string `json:"snapshot_error,omitempty"`
 }
 
 // ShareDeleteParams adalah parameter shares.delete.

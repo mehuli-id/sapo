@@ -149,6 +149,13 @@ agent:
     timeout_seconds: 30
     delete_timeout_seconds: 270
 
+  # Snapshot terjadwal (ADR 0014): snapshot otomatis berhenti diambil di pool
+  # yang terisi max_pool_capacity_percent atau lebih (snapshot lama tetap
+  # dibuang sesuai jadwal), dan setiap perintah zfs dibatasi waktunya.
+  snapshots:
+    max_pool_capacity_percent: 90
+    call_timeout_seconds: 30
+
   # Resource Monitor: sampel CPU, memori, jaringan, dan disk diambil setiap
   # interval_seconds selama ada yang melihat (berhenti setelah
   # idle_stop_seconds), riwayat history sampel (300 × 2 detik = 10 menit).

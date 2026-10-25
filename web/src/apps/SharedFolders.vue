@@ -68,7 +68,7 @@ function summary(p: Record<string, ShareAccess>) {
 }
 
 // Jadwal snapshot satu folder (SnapshotPanel).
-const sharePolicy = (name: string) => (p: SnapshotPolicy | null) => api.setSharePolicy(name, p)
+const sharePolicy = (name: string) => (p: SnapshotPolicy | null, pw: string) => api.setSharePolicy(name, p, pw)
 
 // --- Buat (wizard) ---
 async function openWizard() {
