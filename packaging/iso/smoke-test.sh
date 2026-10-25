@@ -787,8 +787,9 @@ sysdisk="$(json 'print(v["name"])' <<<"$sysref 0")"
 res="$(api POST /api/v1/system/install "{\"disk\":$sysref,\"confirm_name\":\"$sysdisk\",\"password\":\"$PASS\"}")"
 [[ "$res" == *' 200' ]] || fail "mulai pasang ke disk: $res"
 start=$SECONDS
+# Panel berhenti sebentar saat pengaturan disalin (data sapo-api utuh).
 for _ in $(seq 1 300); do
-  st="$(api GET /api/v1/system/install)"
+  st="$(api GET /api/v1/system/install || true)"
   json 'import sys; sys.exit(0 if not v["running"] and (v.get("last") or {}).get("finished_at") else 1)' <<<"$st" 2>/dev/null && break
   sleep 4
 done
