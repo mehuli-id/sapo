@@ -349,3 +349,76 @@ func TestAppsAPI(t *testing.T) {
 		t.Fatalf("nama sapo-: %d %s", rec.Code, rec.Body)
 	}
 }
+
+func TestAppFoldersAPI(t *testing.T) {
+	agent := shareAgent()
+	agent.results[proto.OpAppsCatalog] = []proto.CatalogApp{{ID: "galeri", SharePath: "/folder"}, {ID: "homer"}}
+	agent.results[proto.OpAppsList] = []proto.InstalledApp{{ID: "galeri", Installed: true}, {ID: "homer", Installed: true}}
+	agent.results[proto.OpAppsRemove] = map[string]bool{"ok": true}
+	h := newHarness(t, agent)
+	h.runSetup()
+	if rec := h.do(http.MethodPost, "/api/v1/shares", map[string]any{"name": "keluarga", "pool": "tank", "permissions": map[string]string{}, "admin_password": adminPassword}); rec.Code != http.StatusOK {
+		t.Fatalf("buat folder: %d %s", rec.Code, rec.Body)
+	}
+	for name, c := range map[string]struct {
+		app  string
+		body map[string]any
+		code int
+	}{
+		"tanpa password":        {"galeri", map[string]any{"folders": map[string]string{"keluarga": "read"}}, http.StatusUnauthorized},
+		"tulis tidak diizinkan": {"galeri", map[string]any{"folders": map[string]string{"keluarga": "write"}, "admin_password": adminPassword}, http.StatusBadRequest},
+		"folder tidak ada":      {"galeri", map[string]any{"folders": map[string]string{"hantu": "read"}, "admin_password": adminPassword}, http.StatusBadRequest},
+		"tanpa share_path":      {"homer", map[string]any{"folders": map[string]string{"keluarga": "read"}, "admin_password": adminPassword}, http.StatusBadRequest},
+		"tidak di katalog":      {"jahat", map[string]any{"folders": map[string]string{"keluarga": "read"}, "admin_password": adminPassword}, http.StatusNotFound},
+	} {
+		if rec := h.do(http.MethodPost, "/api/v1/apps/"+c.app+"/folders", c.body); rec.Code != c.code {
+			t.Errorf("%s: %d %s", name, rec.Code, rec.Body)
+		}
+	}
+	if rec := h.do(http.MethodPost, "/api/v1/apps/galeri/folders", map[string]any{"folders": map[string]string{"keluarga": "read"}, "admin_password": adminPassword}); rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "system_sync_failed") {
+		t.Fatalf("beri folder: %d %s", rec.Code, rec.Body)
+	}
+	apply, _ := agent.param(proto.OpSharesApply).(proto.SharesApplyParams)
+	if len(apply.Shares) != 1 || len(apply.Shares[0].Apps) != 1 || apply.Shares[0].Apps[0] != (proto.ShareApp{ID: "galeri"}) {
+		t.Fatalf("shares.apply = %+v", apply)
+	}
+	// Folder yang dipakai aplikasi tidak bisa dihapus.
+	if rec := h.do(http.MethodPost, "/api/v1/shares/keluarga/delete", map[string]any{"confirm_name": "keluarga", "admin_password": adminPassword}); errCode(rec) != "share_used_by_app" {
+		t.Fatalf("hapus folder dipakai aplikasi: %d %s", rec.Code, rec.Body)
+	}
+	// Mengubah izin folder tidak menghapus akses aplikasi.
+	if rec := h.do(http.MethodPost, "/api/v1/shares/keluarga", map[string]any{"description": "baru"}); rec.Code != http.StatusOK {
+		t.Fatalf("ubah keterangan: %d %s", rec.Code, rec.Body)
+	}
+	if sh, _ := h.s.shares.get("keluarga"); sh.Apps["galeri"] != "read" {
+		t.Fatalf("akses aplikasi hilang: %+v", sh)
+	}
+	// Aplikasi dihapus: aksesnya dicabut.
+	if rec := h.do(http.MethodPost, "/api/v1/apps/galeri/remove", map[string]any{"remove_data": false}); rec.Code != http.StatusOK {
+		t.Fatalf("hapus aplikasi: %d %s", rec.Code, rec.Body)
+	}
+	apply, _ = agent.param(proto.OpSharesApply).(proto.SharesApplyParams)
+	if sh, _ := h.s.shares.get("keluarga"); sh.Apps != nil || len(apply.Shares[0].Apps) != 0 {
+		t.Fatalf("akses aplikasi harus dicabut: %+v %+v", sh, apply)
+	}
+	// Sisa akses aplikasi yang tidak terpasang lagi: bisa dicabut, dan tidak
+	// menahan penghapusan folder.
+	agent.results[proto.OpAppsList] = []proto.InstalledApp{}
+	_ = h.s.shares.mutate(func(cur []Share) ([]Share, error) {
+		cur[0].Apps = map[string]string{"hantu": "write"}
+		return cur, nil
+	})
+	if rec := h.do(http.MethodPost, "/api/v1/apps/hantu/folders", map[string]any{"folders": map[string]string{}, "admin_password": adminPassword}); rec.Code != http.StatusOK {
+		t.Fatalf("cabut sisa akses: %d %s", rec.Code, rec.Body)
+	}
+	if sh, _ := h.s.shares.get("keluarga"); sh.Apps != nil {
+		t.Fatalf("sisa akses tidak dicabut: %+v", sh)
+	}
+	_ = h.s.shares.mutate(func(cur []Share) ([]Share, error) {
+		cur[0].Apps = map[string]string{"hantu": "write"}
+		return cur, nil
+	})
+	if rec := h.do(http.MethodPost, "/api/v1/shares/keluarga/delete", map[string]any{"confirm_name": "keluarga", "admin_password": adminPassword}); rec.Code != http.StatusOK {
+		t.Fatalf("hapus folder dengan sisa akses: %d %s", rec.Code, rec.Body)
+	}
+}

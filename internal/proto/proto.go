@@ -481,6 +481,16 @@ type ShareSpec struct {
 	Write       []string `json:"write"`
 	// NFS: folder juga diekspor lewat NFS (nil = tidak).
 	NFS *NFSExport `json:"nfs,omitempty"`
+	// Apps: aplikasi App Center yang diberi akses ke folder (ADR 0012).
+	Apps []ShareApp `json:"apps,omitempty"`
+}
+
+// ShareApp: aplikasi ID boleh membaca folder (dan menulis bila Write).
+// Folder dipasang di dalam container aplikasi, dan akun aplikasinya
+// mendapat entri ACL sendiri; Samba tidak memakainya.
+type ShareApp struct {
+	ID    string `json:"id"`
+	Write bool   `json:"write,omitempty"`
 }
 
 // MaxNFSClients membatasi jumlah jaringan klien NFS per folder.
@@ -740,6 +750,11 @@ type CatalogApp struct {
 	Image       string            `json:"image"`
 	DefaultPort int               `json:"default_port"`
 	MemoryMB    int               `json:"memory_mb"`
+	// SharePath: shared folder yang diberikan dipasang di
+	// <SharePath>/<nama folder> di dalam container (kosong = aplikasi tidak
+	// memakai shared folder). ShareWrite: aplikasi boleh diberi izin tulis.
+	SharePath  string `json:"share_path,omitempty"`
+	ShareWrite bool   `json:"share_write,omitempty"`
 }
 
 // InstalledApp adalah aplikasi yang terpasang (atau datanya masih ada).
@@ -754,6 +769,15 @@ type InstalledApp struct {
 	Enabled     bool      `json:"enabled"`
 	Status      string    `json:"status,omitempty"`
 	InstalledAt time.Time `json:"installed_at"`
+	// Shares: shared folder yang sedang dipasang di container aplikasi.
+	Shares []AppShare `json:"shares,omitempty"`
+}
+
+// AppShare: shared folder Name dipasang di container aplikasi (bisa ditulis
+// bila Write).
+type AppShare struct {
+	Name  string `json:"name"`
+	Write bool   `json:"write,omitempty"`
 }
 
 // AppParams menunjuk satu aplikasi.

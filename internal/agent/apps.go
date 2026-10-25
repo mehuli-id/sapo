@@ -51,6 +51,7 @@ type Apps struct {
 // NewApps menyiapkan App Center.
 func NewApps(t AppsTools, shares *Shares) *Apps {
 	a := &Apps{t: t, shares: shares, chown: os.Lchown, portFree: portFree}
+	shares.apps = a
 	// Pool yang masih berisi data aplikasi tidak dihapus (dicek paling awal,
 	// sebelum ekspor NFS dicabut).
 	shares.p.beforeDestroy = append([]func(context.Context, string) error{a.refusePool}, shares.p.beforeDestroy...)
@@ -68,6 +69,11 @@ func (a *Apps) refusePool(_ context.Context, pool string) error {
 	for id, s := range st.Apps {
 		if s.HasData && s.Pool == pool {
 			return &OpError{Code: proto.ErrConflict, Message: "pool " + pool + " masih berisi data aplikasi " + id + "; hapus aplikasi itu beserta datanya dulu di App Center"}
+		}
+		for _, sh := range s.Shares {
+			if strings.HasPrefix(sh.Path, filepath.Join(a.t.MountBase, pool)+"/") {
+				return &OpError{Code: proto.ErrConflict, Message: "shared folder " + sh.Name + " di pool " + pool + " masih dipakai aplikasi " + id + "; lepas dulu di App Center"}
+			}
 		}
 	}
 	return nil
@@ -95,10 +101,15 @@ type appDef struct {
 	DataPath    string            `yaml:"data_path"`
 	Env         map[string]string `yaml:"env"`
 	MemoryMB    int               `yaml:"memory_mb"`
+	// SharePath: tempat shared folder yang diberikan admin dipasang di dalam
+	// container (<share_path>/<nama folder>); kosong = tidak memakai shared
+	// folder. ShareWrite: aplikasi boleh diberi izin tulis.
+	SharePath  string `yaml:"share_path"`
+	ShareWrite bool   `yaml:"share_write"`
 }
 
 var (
-	appIDPattern    = regexp.MustCompile(`^[a-z][a-z0-9-]{1,30}$`)
+	appIDPattern    = regexp.MustCompile(`^[a-z][a-z0-9-]{1,22}$`)
 	appImagePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._/-]*(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$`)
 	appPathPattern  = regexp.MustCompile(`^(/[A-Za-z0-9._-]+)+$`)
 	appEnvKey       = regexp.MustCompile(`^[A-Z_][A-Z0-9_]{0,63}$`)
@@ -117,6 +128,12 @@ func (d appDef) validate() error {
 		return errors.New("data_path tidak valid")
 	case d.MemoryMB < 32 || d.MemoryMB > 65536:
 		return errors.New("memory_mb tidak valid")
+	case d.SharePath != "" && !appPathPattern.MatchString(d.SharePath):
+		return errors.New("share_path tidak valid")
+	case d.SharePath != "" && (pathWithin(d.SharePath, d.DataPath) || pathWithin(d.DataPath, d.SharePath)):
+		return errors.New("share_path dan data_path tidak boleh bertumpuk")
+	case d.ShareWrite && d.SharePath == "":
+		return errors.New("share_write tanpa share_path")
 	}
 	for k, v := range d.Env {
 		if !appEnvKey.MatchString(k) || !appEnvValue.MatchString(v) {
@@ -125,6 +142,9 @@ func (d appDef) validate() error {
 	}
 	return nil
 }
+
+// pathWithin: p sama dengan dir atau berada di bawahnya.
+func pathWithin(p, dir string) bool { return p == dir || strings.HasPrefix(p, dir+"/") }
 
 // catalog membaca semua entri katalog yang valid.
 func (a *Apps) catalog() (map[string]appDef, error) {
@@ -170,6 +190,16 @@ type appState struct {
 	Enabled     bool      `json:"enabled"`
 	HasData     bool      `json:"has_data"`
 	InstalledAt time.Time `json:"installed_at"`
+	// Shares: shared folder yang dipasang di container (diatur lewat
+	// shares.apply, lihat ApplyShares).
+	Shares []appShare `json:"shares,omitempty"`
+}
+
+// appShare adalah satu shared folder yang dipasang di container aplikasi.
+type appShare struct {
+	Name  string `json:"name"`
+	Path  string `json:"path"`
+	Write bool   `json:"write,omitempty"`
 }
 
 func (a *Apps) load() (appsState, error) {
@@ -232,7 +262,7 @@ func (a *Apps) CatalogOp() Handler {
 		out := []proto.CatalogApp{}
 		for _, d := range cat {
 			out = append(out, proto.CatalogApp{ID: d.ID, Name: d.Name, Description: d.Description, Website: d.Website,
-				Image: d.Image, DefaultPort: d.DefaultPort, MemoryMB: d.MemoryMB})
+				Image: d.Image, DefaultPort: d.DefaultPort, MemoryMB: d.MemoryMB, SharePath: d.SharePath, ShareWrite: d.ShareWrite})
 		}
 		sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 		return out, nil
@@ -256,6 +286,9 @@ func (a *Apps) ListOp() Handler {
 			app := proto.InstalledApp{ID: id, Pool: s.Pool, Port: s.Port, Installed: s.Installed, Enabled: s.Enabled, InstalledAt: s.InstalledAt}
 			if s.Installed {
 				app.Status = a.status(ctx, id)
+			}
+			for _, sh := range s.Shares {
+				app.Shares = append(app.Shares, proto.AppShare{Name: sh.Name, Write: sh.Write})
 			}
 			out = append(out, app)
 		}
@@ -479,6 +512,9 @@ func renderQuadlet(d appDef, s *appState, dataPath string) []byte {
 	var b bytes.Buffer
 	b.WriteString("# Dibuat oleh sapod (Sapo, App Center). Jangan diubah manual.\n")
 	fmt.Fprintf(&b, "[Unit]\nDescription=Aplikasi Sapo: %s\nAfter=network-online.target local-fs.target zfs-mount.service\nWants=network-online.target\nRequiresMountsFor=%s\n", d.ID, dataPath)
+	for _, sh := range s.Shares {
+		fmt.Fprintf(&b, "RequiresMountsFor=%s\n", sh.Path)
+	}
 	// Aplikasi yang terus gagal (misalnya datanya hilang) berhenti dicoba.
 	b.WriteString("StartLimitIntervalSec=600\nStartLimitBurst=5\n\n")
 	b.WriteString("[Container]\n")
@@ -486,6 +522,20 @@ func renderQuadlet(d appDef, s *appState, dataPath string) []byte {
 	fmt.Fprintf(&b, "User=%d\nGroup=%d\n", s.UID, s.UID)
 	fmt.Fprintf(&b, "PublishPort=%d:%d\n", s.Port, d.WebPort)
 	fmt.Fprintf(&b, "Volume=%s:%s\n", dataPath, d.DataPath)
+	// Shared folder: baca saja kecuali diberi izin tulis. Izin di dalamnya
+	// tetap ditegakkan kernel lewat ACL akun aplikasi. Induknya tmpfs kecil
+	// milik root (tidak bisa ditulis aplikasi), agar selalu ada walau belum
+	// ada folder yang diberikan.
+	if d.SharePath != "" {
+		fmt.Fprintf(&b, "Tmpfs=%s:size=64k,mode=0755,nosuid,nodev,noexec\n", d.SharePath)
+		for _, sh := range s.Shares {
+			mode := "ro"
+			if sh.Write && d.ShareWrite {
+				mode = "rw"
+			}
+			fmt.Fprintf(&b, "Volume=%s:%s/%s:%s,nosuid,nodev,noexec\n", sh.Path, d.SharePath, sh.Name, mode)
+		}
+	}
 	keys := make([]string, 0, len(d.Env))
 	for k := range d.Env {
 		keys = append(keys, k)
@@ -553,7 +603,7 @@ func (a *Apps) setEnabled(enable bool) Handler {
 				return nil, err
 			}
 			_ = os.Remove(a.quadletPath(p.ID))
-			s.Installed, s.Enabled = false, false
+			s.Installed, s.Enabled, s.Shares = false, false, nil
 			if err := a.save(st); err != nil {
 				return nil, err
 			}
@@ -665,7 +715,7 @@ func (a *Apps) RemoveOp() Handler {
 				return nil, err
 			}
 			_ = a.systemctl(ctx, []string{"daemon-reload"})
-			s.Installed, s.Enabled = false, false
+			s.Installed, s.Enabled, s.Shares = false, false, nil
 			if err := a.save(st); err != nil {
 				return nil, err
 			}
@@ -711,4 +761,168 @@ func (a *Apps) RemoveOp() Handler {
 		a.logInfo("aplikasi dihapus", "app", p.ID, "data_dihapus", p.RemoveData)
 		return map[string]bool{"ok": true}, nil
 	}
+}
+
+// --- Akses shared folder (dipanggil Shares.ApplyOp) --------------------------
+
+// shareAccess mengembalikan aplikasi yang bisa diberi shared folder
+// (terpasang dan memakai share_path di katalog) beserta apakah boleh menulis.
+func (a *Apps) shareAccess() map[string]bool {
+	cat, err := a.catalog()
+	if err != nil {
+		return nil
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	st, err := a.load()
+	if err != nil {
+		return nil
+	}
+	out := map[string]bool{}
+	for id, s := range st.Apps {
+		if d, ok := cat[id]; ok && s.Installed && d.SharePath != "" {
+			out[id] = d.ShareWrite
+		}
+	}
+	return out
+}
+
+// applyShares mencatat shared folder setiap aplikasi (keadaan lengkap:
+// aplikasi yang tidak ada di daftar tidak mendapat folder), menulis ulang
+// file Quadlet aplikasi yang berubah, lalu menerapkannya ke container.
+// Aplikasi yang kehilangan folder atau izin tulis dihentikan dulu (sinkron)
+// agar container tidak terus memegang pemasangan lama; yang hanya mendapat
+// folder baru di-restart di latar belakang. Catatan disimpan hanya bila
+// semuanya berhasil, jadi sinkronisasi ulang mencoba lagi.
+func (a *Apps) applyShares(ctx context.Context, want map[string][]appShare) error {
+	cat, err := a.catalog()
+	if err != nil {
+		return err
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	st, err := a.load()
+	if err != nil {
+		return err
+	}
+	type change struct {
+		id     string
+		reduce bool
+	}
+	var changed []change
+	for id, s := range st.Apps {
+		next := slices.Clone(want[id])
+		sort.Slice(next, func(i, j int) bool { return next[i].Name < next[j].Name })
+		if slices.Equal(s.Shares, next) {
+			continue
+		}
+		changed = append(changed, change{id, reducesShares(s.Shares, next)})
+		s.Shares = next
+	}
+	if len(changed) == 0 {
+		return nil
+	}
+	sort.Slice(changed, func(i, j int) bool { return changed[i].id < changed[j].id })
+	var errs []error
+	reload := false
+	for _, c := range changed {
+		s := st.Apps[c.id]
+		def, ok := cat[c.id]
+		if !s.Installed || !ok {
+			continue
+		}
+		if c.reduce {
+			// Gagal dihentikan: akses lama mungkin masih berlaku, jadi
+			// catatan tidak disimpan dan dicoba lagi.
+			if err := a.systemctl(ctx, []string{"stop"}, appUnit(c.id)); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+		}
+		if err := a.writeQuadlet(def, s, filepath.Join(a.t.MountBase, s.Pool, "sapo-apps", c.id)); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		reload = true
+	}
+	if reload {
+		if err := a.systemctl(ctx, []string{"daemon-reload"}); err != nil {
+			return errors.Join(append(errs, err)...)
+		}
+	}
+	for _, c := range changed {
+		s := st.Apps[c.id]
+		if _, ok := cat[c.id]; !ok || !s.Installed {
+			continue
+		}
+		action := []string{"try-restart", "--no-block"}
+		if c.reduce {
+			if !s.Enabled {
+				continue
+			}
+			action = []string{"start", "--no-block"}
+		}
+		if err := a.systemctl(ctx, action, appUnit(c.id)); err != nil {
+			errs = append(errs, err)
+		}
+		a.logInfo("shared folder aplikasi diperbarui", "app", c.id, "folder", len(s.Shares))
+	}
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+	return a.save(st)
+}
+
+// stopReduced menghentikan (sinkron) aplikasi yang akan kehilangan folder
+// atau izin tulis menurut rencana want, sebelum ACL folder diubah, agar
+// container tidak sempat memakai izin lama selama perubahan berjalan.
+func (a *Apps) stopReduced(ctx context.Context, want map[string][]appShare) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	st, err := a.load()
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for id, s := range st.Apps {
+		if s.Installed && reducesShares(s.Shares, want[id]) {
+			errs = append(errs, a.systemctl(ctx, []string{"stop"}, appUnit(id)))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// reducesShares: next mencabut folder atau izin tulis yang ada di cur.
+func reducesShares(cur, next []appShare) bool {
+	for _, c := range cur {
+		i := slices.IndexFunc(next, func(n appShare) bool { return n.Name == c.Name && n.Path == c.Path })
+		if i < 0 || (c.Write && !next[i].Write) {
+			return true
+		}
+	}
+	return false
+}
+
+// usingShare mengembalikan aplikasi yang memasang folder di path (kosong
+// bila tidak ada).
+func (a *Apps) usingShare(path string) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	st, err := a.load()
+	if err != nil {
+		return "?"
+	}
+	ids := make([]string, 0, len(st.Apps))
+	for id := range st.Apps {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	for _, id := range ids {
+		for _, sh := range st.Apps[id].Shares {
+			if sh.Path == path {
+				return id
+			}
+		}
+	}
+	return ""
 }

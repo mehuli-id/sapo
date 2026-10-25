@@ -1,15 +1,15 @@
 <script setup lang="ts">
 // App Center (hanya admin, ADR 0012): katalog aplikasi kurasi, pasang di
-// pool, jalankan/hentikan, buka, dan hapus (data disimpan kecuali dipilih
-// dihapus juga).
+// pool, jalankan/hentikan, buka, beri akses shared folder, dan hapus (data
+// disimpan kecuali dipilih dihapus juga).
 import { computed, onMounted, onUnmounted, reactive, ref } from "vue"
 import { useI18n } from "vue-i18n"
-import { CircleCheck, ExternalLink, LayoutGrid, LoaderCircle, Play, Square, Trash2, TriangleAlert } from "@lucide/vue"
+import { CircleCheck, ExternalLink, FolderOpen, LayoutGrid, LoaderCircle, Play, Square, Trash2, TriangleAlert } from "@lucide/vue"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
-import type { CatalogApp, InstalledApp, PoolsResult } from "@/lib/api"
+import type { CatalogApp, InstalledApp, PoolsResult, SharedFolder, ShareAccess } from "@/lib/api"
 import { api, ApiError } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
@@ -17,6 +17,7 @@ const { t, locale } = useI18n()
 const catalog = ref<CatalogApp[] | null>(null)
 const installed = ref<InstalledApp[]>([])
 const pools = ref<PoolsResult | null>(null)
+const shares = ref<SharedFolder[]>([])
 const error = ref("")
 const notice = ref("")
 const busy = ref(false)
@@ -29,7 +30,7 @@ const loc = (m: Record<string, string>) => m[locale.value] ?? m.en ?? Object.val
 
 async function load() {
   try {
-    ;[catalog.value, installed.value, pools.value] = await Promise.all([api.appCatalog(), api.installedApps(), api.pools()])
+    ;[catalog.value, installed.value, pools.value, shares.value] = await Promise.all([api.appCatalog(), api.installedApps(), api.pools(), api.shares()])
   } catch (e) {
     error.value = message(e)
   }
@@ -52,8 +53,8 @@ const byId = computed(() => Object.fromEntries(installed.value.map((a) => [a.id,
 const appURL = (a: InstalledApp) => `http://${window.location.hostname}:${a.port}/`
 
 // --- Pasang ---
-const mode = ref("") // "install:<id>" | "remove:<id>"
-const form = reactive({ pool: "", port: 0, password: "", removeData: false, confirm: "" })
+const mode = ref("") // "install:<id>" | "remove:<id>" | "folders:<id>"
+const form = reactive({ pool: "", port: 0, password: "", removeData: false, confirm: "", folders: {} as Record<string, ShareAccess | "none"> })
 function start(m: string, app?: CatalogApp) {
   mode.value = m
   error.value = notice.value = ""
@@ -64,6 +65,7 @@ function start(m: string, app?: CatalogApp) {
     password: "",
     removeData: false,
     confirm: "",
+    folders: Object.fromEntries(shares.value.map((sh) => [sh.name, (app && sh.apps?.[app.id]) || "none"])),
   })
 }
 async function run(fn: () => Promise<unknown>, done: string) {
@@ -73,7 +75,7 @@ async function run(fn: () => Promise<unknown>, done: string) {
     await fn()
     notice.value = done
     mode.value = ""
-    installed.value = await api.installedApps()
+    ;[installed.value, shares.value] = await Promise.all([api.installedApps(), api.shares()])
   } catch (e) {
     error.value = message(e)
   } finally {
@@ -87,6 +89,16 @@ const remove = (app: CatalogApp) =>
     () => api.removeApp(app.id, form.removeData ? { remove_data: true, confirm_name: form.confirm, admin_password: form.password } : { remove_data: false }),
     t(form.removeData ? "appCenter.removedData" : "appCenter.removed", { name: loc(app.name) }),
   )
+// Folder yang diberikan (keadaan tersimpan di panel).
+const appFolders = (id: string) =>
+  shares.value.filter((sh) => sh.apps?.[id]).map((sh) => `${sh.name} (${t(`permissions.${sh.apps![id]}`)})`)
+async function saveFolders(app: CatalogApp) {
+  const folders = Object.fromEntries(Object.entries(form.folders).filter(([, l]) => l !== "none")) as Record<string, ShareAccess>
+  await run(async () => {
+    const res = await api.setAppFolders(app.id, { folders, admin_password: form.password })
+    if (res.warning) throw new ApiError(200, res.warning, "")
+  }, t("appCenter.foldersSaved", { name: loc(app.name) }))
+}
 const toggle = (app: CatalogApp, on: boolean) =>
   run(() => (on ? api.startApp(app.id) : api.stopApp(app.id)), t(on ? "appCenter.started" : "appCenter.stopped", { name: loc(app.name) }))
 
@@ -115,6 +127,9 @@ function statusText(a: InstalledApp) {
               <p v-if="byId[app.id]" :class="cn('text-xs', byId[app.id]!.status === 'failed' && byId[app.id]!.enabled ? 'text-destructive' : '')">
                 {{ statusText(byId[app.id]!) }} · {{ t("appCenter.onPool", { pool: byId[app.id]!.pool, port: byId[app.id]!.port }) }}
               </p>
+              <p v-if="app.share_path && byId[app.id]?.installed" class="text-xs">
+                {{ t("appCenter.foldersSummary", { list: appFolders(app.id).join(", ") || t("appCenter.foldersNone") }) }}
+              </p>
             </div>
           </div>
           <div v-if="!mode.endsWith(`:${app.id}`)" class="flex flex-wrap gap-1">
@@ -122,6 +137,7 @@ function statusText(a: InstalledApp) {
               <a v-if="byId[app.id]!.enabled && byId[app.id]!.status === 'active'" :href="appURL(byId[app.id]!)" target="_blank" rel="noopener noreferrer">
                 <Button size="sm"><ExternalLink />{{ t("appCenter.open") }}</Button>
               </a>
+              <Button v-if="app.share_path" size="sm" variant="outline" @click="start(`folders:${app.id}`, app)"><FolderOpen />{{ t("appCenter.folders") }}</Button>
               <Button v-if="byId[app.id]!.enabled" size="sm" variant="outline" :disabled="busy" @click="toggle(app, false)"><Square />{{ t("appCenter.stop") }}</Button>
               <Button v-else size="sm" variant="outline" :disabled="busy" @click="toggle(app, true)"><Play />{{ t("appCenter.start") }}</Button>
               <Button size="sm" variant="ghost" class="text-destructive hover:text-destructive" @click="start(`remove:${app.id}`, app)"><Trash2 /></Button>
@@ -158,6 +174,37 @@ function statusText(a: InstalledApp) {
           </div>
           <div class="flex gap-2">
             <Button type="submit" size="sm" :disabled="busy || !form.password || !form.pool"><LoaderCircle v-if="busy" class="animate-spin" />{{ t("appCenter.install") }}</Button>
+            <Button type="button" size="sm" variant="ghost" @click="mode = ''">{{ t("common.cancel") }}</Button>
+          </div>
+        </form>
+
+        <form v-else-if="mode === `folders:${app.id}`" class="space-y-3 border-t pt-3" @submit.prevent="saveFolders(app)">
+          <p class="text-xs text-muted-foreground">
+            {{ t("appCenter.foldersHelp", { name: loc(app.name), path: app.share_path }) }}
+            <template v-if="!app.share_write"> {{ t("appCenter.foldersReadOnly") }}</template>
+          </p>
+          <p class="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-2.5 text-xs">
+            <TriangleAlert class="mt-0.5 size-4 shrink-0" />{{ t("appCenter.foldersExposure") }}
+          </p>
+          <p v-if="!shares.length" class="rounded-lg bg-muted p-3 text-sm">{{ t("appCenter.foldersNoShares") }}</p>
+          <div v-for="sh in shares" :key="sh.name" class="flex flex-wrap items-center justify-between gap-2">
+            <Label :for="`ap-f-${app.id}-${sh.name}`" class="font-normal">{{ sh.name }}</Label>
+            <select
+              :id="`ap-f-${app.id}-${sh.name}`"
+              v-model="form.folders[sh.name]"
+              class="h-8 rounded-md border border-input bg-transparent px-2 text-sm shadow-xs focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+            >
+              <option value="none">{{ t("appCenter.access.none") }}</option>
+              <option value="read">{{ t("appCenter.access.read") }}</option>
+              <option v-if="app.share_write" value="write">{{ t("appCenter.access.write") }}</option>
+            </select>
+          </div>
+          <div class="space-y-1.5">
+            <Label :for="`ap-fp-${app.id}`">{{ t("account.password") }}</Label>
+            <Input :id="`ap-fp-${app.id}`" v-model="form.password" type="password" autocomplete="current-password" class="max-w-xs" />
+          </div>
+          <div class="flex gap-2">
+            <Button type="submit" size="sm" :disabled="busy || !form.password"><LoaderCircle v-if="busy" class="animate-spin" />{{ t("appCenter.save") }}</Button>
             <Button type="button" size="sm" variant="ghost" @click="mode = ''">{{ t("common.cancel") }}</Button>
           </div>
         </form>

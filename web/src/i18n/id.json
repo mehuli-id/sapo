@@ -326,7 +326,8 @@
     "password_invalid": "Password tidak boleh berisi karakter kendali (misalnya tab atau baris baru).",
     "nfs_invalid": "Pengaturan NFS tidak valid: pilih pengguna dan isi alamat IP atau jaringan klien (misalnya 192.168.1.0/24). Nama komputer dan jaringan yang terlalu luas tidak diterima.",
     "invalid_params": "Isian tidak valid: {message}",
-    "updates_failed": "Pembaruan gagal: {message}"
+    "updates_failed": "Pembaruan gagal: {message}",
+    "share_used_by_app": "Folder ini masih dipakai aplikasi. Lepas dulu dari aplikasi itu di App Center."
   },
   "pool": {
     "title": "Pool penyimpanan",
@@ -540,7 +541,8 @@
     "nfsClientsHelp": "Satu per baris: alamat IP (192.168.1.20) atau jaringan (192.168.1.0/24). Siapa pun di alamat itu bisa membuka folder tanpa password.",
     "nfsPickUser": "Pilih pengguna",
     "nfsSaved": "Pengaturan NFS {name} disimpan.",
-    "nfsMount": "Pasang dari Linux atau Mac (NFS versi 4):"
+    "nfsMount": "Pasang dari Linux atau Mac (NFS versi 4):",
+    "apps": "Dipakai aplikasi"
   },
   "network": {
     "intro": "Nama host NAS, alamat IP setiap port jaringan (otomatis dari router lewat DHCP, atau alamat tetap), dan DNS.",
@@ -669,7 +671,7 @@
     "installInterrupted": "Pemasangan pembaruan terakhir terputus sebelum selesai. Pasang lagi: pemasangan yang terputus akan dilanjutkan dulu."
   },
   "appCenter": {
-    "intro": "Aplikasi tambahan dari katalog Sapo. Setiap aplikasi berjalan terpisah dengan akunnya sendiri, tanpa hak istimewa, dan datanya disimpan di pool yang dipilih. Belum bisa membuka shared folder.",
+    "intro": "Aplikasi tambahan dari katalog Sapo. Setiap aplikasi berjalan terpisah dengan akunnya sendiri, tanpa hak istimewa, dan datanya disimpan di pool yang dipilih. Aplikasi hanya bisa membuka shared folder yang Anda berikan.",
     "install": "Pasang",
     "open": "Buka",
     "start": "Jalankan",
@@ -694,6 +696,20 @@
     "removeHelp": "{name} dihentikan dan dilepas. Datanya disimpan, jadi bisa dipasang lagi kapan saja.",
     "removeData": "Hapus juga data aplikasi",
     "removeDataHelp": "Data aplikasi ({id}) akan dihapus permanen dan tidak bisa dikembalikan.",
-    "typeId": "Ketik {id} untuk konfirmasi"
+    "typeId": "Ketik {id} untuk konfirmasi",
+    "folders": "Folder",
+    "foldersNone": "belum ada shared folder",
+    "foldersSummary": "Folder: {list}",
+    "foldersHelp": "Pilih shared folder yang boleh dibuka {name}. Folder muncul di {path}/<nama folder> di dalam aplikasi. Aplikasi yang sedang berjalan dinyalakan ulang agar perubahan berlaku.",
+    "foldersReadOnly": "Aplikasi ini hanya mendapat izin baca.",
+    "foldersNoShares": "Belum ada shared folder. Buat dulu di Shared Folder.",
+    "foldersSaved": "Folder untuk {name} disimpan.",
+    "access": {
+      "none": "Tidak ada akses",
+      "read": "Baca saja",
+      "write": "Baca dan tulis"
+    },
+    "save": "Simpan",
+    "foldersExposure": "Siapa pun yang bisa membuka aplikasi ini (dari jaringan, termasuk aplikasi lain di NAS) bisa melihat folder ini sesuai pengaturan login aplikasinya. Siapkan akun admin aplikasi segera setelah dipasang."
   }
 }

@@ -397,6 +397,44 @@ apps="$(api GET /api/v1/apps)"
 json 'assert v==[], v' <<<"$apps" || fail "Homer masih tercatat: $apps"
 echo "App Center: Homer dipasang lewat Podman (akun sendiri, tanpa capability), menjawab di port 8090, dihentikan, lalu dihapus beserta data"
 
+# Akses shared folder untuk aplikasi: miniserve (menampilkan folder lewat
+# HTTP) hanya diberi folder media (baca saja). File yang sudah ada sebelum
+# akses diberikan harus terbaca (ACL akun aplikasi diterapkan ke isi folder),
+# folder pribadi tidak pernah terlihat.
+for f in media pribadi; do
+  res="$(api POST /api/v1/shares "{\"name\":\"$f\",\"pool\":\"uji\",\"permissions\":{\"user:budi\":\"write\"},\"admin_password\":\"$PASS\"}")"
+  [[ "$res" == *' 200' ]] || fail "buat folder $f: $res"
+  echo "isi $f" > "$WORK/$f.txt"
+  out="$(smbclient "//127.0.0.1/$f" -p "$SMB_PORT" -m SMB3 -U "budi%$UPASS" -c "put $WORK/$f.txt isi.txt" 2>&1 || true)"
+  [[ "$out" != *NT_STATUS* ]] || fail "tulis ke $f: $out"
+done
+res="$(api POST /api/v1/apps/install "{\"id\":\"miniserve\",\"pool\":\"uji\",\"port\":8090,\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "pasang miniserve: $res"
+app_get() { curl -fsS --max-time 5 "http://127.0.0.1:$APP_PORT/$1" 2>/dev/null; }
+for _ in $(seq 1 100); do app_get "" >/dev/null && break; sleep 3; done
+app_get "" >/dev/null || fail "miniserve tidak berjalan: $(api GET /api/v1/apps)"
+res="$(api POST /api/v1/apps/miniserve/folders "{\"folders\":{\"media\":\"write\"},\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 400' ]] || fail "izin tulis untuk aplikasi baca saja harus ditolak: $res"
+res="$(api POST /api/v1/apps/miniserve/folders "{\"folders\":{\"media\":\"read\"},\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' && "$res" != *system_sync_failed* ]] || fail "beri folder media: $res; status sinkronisasi: $(api GET /api/v1/system/sync)"
+for _ in $(seq 1 40); do [[ "$(app_get media/isi.txt)" == "isi media" ]] && break; sleep 3; done
+[[ "$(app_get media/isi.txt)" == "isi media" ]] || fail "miniserve tidak bisa membaca folder media: $(app_get '' | head -c 500)"
+if app_get pribadi/isi.txt >/dev/null; then fail "folder pribadi tidak boleh terlihat oleh aplikasi"; fi
+res="$(api POST /api/v1/shares/media/delete "{\"confirm_name\":\"media\",\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *'"share_used_by_app"'*' 409' ]] || fail "folder yang dipakai aplikasi tidak boleh dihapus: $res"
+# Dicabut: folder dilepas dari container.
+res="$(api POST /api/v1/apps/miniserve/folders "{\"folders\":{},\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' && "$res" != *system_sync_failed* ]] || fail "cabut folder media: $res"
+for _ in $(seq 1 40); do app_get "" >/dev/null && ! app_get media/isi.txt >/dev/null && break; sleep 3; done
+if app_get media/isi.txt >/dev/null; then fail "folder yang dicabut masih terbaca oleh aplikasi"; fi
+res="$(api POST /api/v1/apps/miniserve/remove "{\"remove_data\":true,\"confirm_name\":\"miniserve\",\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "hapus miniserve: $res"
+for f in media pribadi; do
+  res="$(api POST /api/v1/shares/$f/delete "{\"confirm_name\":\"$f\",\"admin_password\":\"$PASS\"}")"
+  [[ "$res" == *' 200' ]] || fail "hapus folder $f: $res"
+done
+echo "App Center: miniserve membaca folder media yang diberikan (termasuk file lama), tidak melihat folder pribadi, izin tulis ditolak, folder yang dipakai tidak bisa dihapus, dan pencabutan melepas folder"
+
 # Ganti disk SAPOUJI2 dengan SAPOUJI3 (berisi ext4, penghapusan dikonfirmasi).
 disks_json="$(api GET /api/v1/storage/disks)"
 old_disk="$(json "print([x['name'] for x in v if x['serial']=='SAPOUJI2'][0])" <<<"$disks_json")"

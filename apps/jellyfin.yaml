@@ -1,0 +1,20 @@
+# Katalog App Center (ADR 0012).
+id: jellyfin
+name: { id: Jellyfin, en: Jellyfin }
+description:
+  id: Server media untuk menonton film, serial, dan mendengarkan musik dari shared folder di TV, HP, atau browser.
+  en: A media server for watching films and series and listening to music from shared folders on a TV, phone, or browser.
+website: https://jellyfin.org
+image: docker.io/jellyfin/jellyfin:12.3.20261023-013714@sha256:2038fe038ab3876a80f6e7b7e0aef6607b032c7dc0c9b3ad3296d0b2eba3bbb5
+web_port: 8096
+default_port: 8096
+# Konfigurasi, database, dan cache Jellyfin di dataset aplikasi.
+data_path: /config
+env:
+  HOME: /config
+  JELLYFIN_CACHE_DIR: /config/cache
+  XDG_CACHE_HOME: /config/cache
+# Shared folder yang dipilih admin muncul di /media/<nama folder> (baca
+# saja: Jellyfin tidak perlu mengubah koleksi media).
+share_path: /media
+memory_mb: 2048

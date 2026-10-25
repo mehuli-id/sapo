@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"net/http"
 	"net/netip"
 	"os"
@@ -39,8 +40,11 @@ type Share struct {
 	// Permissions: "user:nama" / "group:nama" → "read" atau "write".
 	Permissions map[string]string `json:"permissions"`
 	// NFS: folder juga diekspor lewat NFS (nil = tidak).
-	NFS       *ShareNFS `json:"nfs,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	NFS *ShareNFS `json:"nfs,omitempty"`
+	// Apps: aplikasi App Center → "read" atau "write" (diatur dari App
+	// Center, ADR 0012).
+	Apps      map[string]string `json:"apps,omitempty"`
+	CreatedAt time.Time         `json:"created_at"`
 }
 
 // ShareNFS: klien di jaringan Clients boleh memasang folder lewat NFS, dan
@@ -86,6 +90,7 @@ func (st *shareStore) list() []Share {
 	for i, sh := range st.shares {
 		sh.Permissions = cloneMap(sh.Permissions)
 		sh.NFS = sh.NFS.clone()
+		sh.Apps = maps.Clone(sh.Apps)
 		out[i] = sh
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
@@ -111,6 +116,7 @@ func (st *shareStore) mutate(fn func([]Share) ([]Share, error)) error {
 	for i, sh := range st.shares {
 		sh.Permissions = cloneMap(sh.Permissions)
 		sh.NFS = sh.NFS.clone()
+		sh.Apps = maps.Clone(sh.Apps)
 		cur[i] = sh
 	}
 	next, err := fn(cur)
@@ -246,6 +252,10 @@ func (s *Server) syncSystem(ctx context.Context) (res proto.SharesApplyResult, e
 		}
 		slices.Sort(spec.Read)
 		slices.Sort(spec.Write)
+		for id, level := range sh.Apps {
+			spec.Apps = append(spec.Apps, proto.ShareApp{ID: id, Write: level == "write"})
+		}
+		sort.Slice(spec.Apps, func(i, j int) bool { return spec.Apps[i].ID < spec.Apps[j].ID })
 		if sh.NFS != nil && exists["user:"+sh.NFS.User] {
 			// Ekspor hanya untuk pengguna aktif yang punya akses ke folder.
 			if u, ok := byName[sh.NFS.User]; ok && !u.Disabled {
@@ -701,6 +711,26 @@ func (s *Server) handleShareDelete(w http.ResponseWriter, r *http.Request) {
 	if req.ConfirmName != name {
 		writeErrorDetail(w, http.StatusBadRequest, "confirm_mismatch", "nama yang diketik ulang tidak sama", map[string]any{"field": "confirm_name"})
 		return
+	}
+	// Folder yang diberikan ke aplikasi terpasang dilepas dulu di App
+	// Center. Sisa akses aplikasi yang sudah dihapus tidak menahan (sapod
+	// tetap menolak bila folder masih dipasang di container).
+	if len(sh.Apps) > 0 {
+		var installed []proto.InstalledApp
+		if err := s.agent.Call(r.Context(), proto.OpAppsList, nil, &installed); err != nil {
+			s.agentError(w, proto.OpAppsList, err)
+			return
+		}
+		var using []string
+		for _, id := range slices.Sorted(maps.Keys(sh.Apps)) {
+			if slices.ContainsFunc(installed, func(a proto.InstalledApp) bool { return a.ID == id && a.Installed }) {
+				using = append(using, id)
+			}
+		}
+		if len(using) > 0 {
+			writeErrorDetail(w, http.StatusConflict, "share_used_by_app", "shared folder masih dipakai aplikasi", map[string]any{"apps": using})
+			return
+		}
 	}
 	admin, ok := s.reauthField(w, r, req.AdminPassword, "admin_password")
 	if !ok {
