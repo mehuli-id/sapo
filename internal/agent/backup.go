@@ -237,15 +237,21 @@ func (b *Backups) zfsPipe(ctx context.Context, send, recv []string) (uint64, err
 
 // snapshots: snapshot dataset ds yang namanya berawalan prefix, terlama dulu.
 func (b *Backups) snapshots(ctx context.Context, ds, prefix string) ([]proto.BackupCopy, error) {
-	out, err := b.zfs(ctx, []string{"list", "-H", "-p", "-t", "snapshot", "-d", "1", "-o", "name,creation"}, ds)
+	// Urutan menurut createtxg (urutan transaksi di pool ini): waktu
+	// creation snapshot hasil receive berasal dari stream dan bisa dipalsukan.
+	out, err := b.zfs(ctx, []string{"list", "-H", "-p", "-t", "snapshot", "-d", "1", "-o", "name,creation,createtxg"}, ds)
 	if err != nil {
 		return nil, err
 	}
-	var list []proto.BackupCopy
+	type entry struct {
+		c   proto.BackupCopy
+		txg uint64
+	}
+	var list []entry
 	sc := bufio.NewScanner(strings.NewReader(out))
 	for sc.Scan() {
 		f := strings.Split(sc.Text(), "\t")
-		if len(f) != 2 {
+		if len(f) != 3 {
 			continue
 		}
 		_, name, ok := strings.Cut(f[0], "@")
@@ -253,10 +259,15 @@ func (b *Backups) snapshots(ctx context.Context, ds, prefix string) ([]proto.Bac
 			continue
 		}
 		sec, _ := strconv.ParseInt(f[1], 10, 64)
-		list = append(list, proto.BackupCopy{Name: name, Created: time.Unix(sec, 0).UTC()})
+		txg, _ := strconv.ParseUint(f[2], 10, 64)
+		list = append(list, entry{proto.BackupCopy{Name: name, Created: time.Unix(sec, 0).UTC()}, txg})
 	}
-	sort.Slice(list, func(i, j int) bool { return list[i].Created.Before(list[j].Created) })
-	return list, nil
+	sort.SliceStable(list, func(i, j int) bool { return list[i].txg < list[j].txg })
+	res := make([]proto.BackupCopy, 0, len(list))
+	for _, e := range list {
+		res = append(res, e.c)
+	}
+	return res, nil
 }
 
 // checkSource: dataset sumber adalah shared folder Sapo.

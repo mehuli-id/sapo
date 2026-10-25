@@ -63,7 +63,7 @@ func (f *fakeZFS) run(_ context.Context, flags []string, ops ...string) (string,
 		sort.Strings(keys)
 		var b strings.Builder
 		for _, k := range keys {
-			b.WriteString(k + "\t" + itoa64(f.snaps[k].Unix()) + "\n")
+			b.WriteString(k + "\t" + itoa64(f.snaps[k].Unix()) + "\t" + itoa64(f.snaps[k].UnixNano()) + "\n")
 		}
 		return b.String(), nil
 	}

@@ -879,6 +879,22 @@ echo "ke NAS lain" > "$WORK/jauh.txt"
 out="$(smbclient //127.0.0.1/tetap -p "$SMB_PORT" -m SMB3 -U "budi%$UPASS" -c "put $WORK/jauh.txt jauh.txt" 2>&1 || true)"
 [[ "$out" != *NT_STATUS* ]] || fail "tulis jauh.txt: $out"
 remote_now 2
+# Partner jahat dengan token sah: stream gabungan (zfs send -R/-p) buatan
+# sendiri ditolak sapod sebelum zfs receive, tanpa membuat dataset.
+ptoken="$(cut -d- -f3 <<<"$code")"
+python3 -c '
+import struct, sys
+h = bytearray(312)
+struct.pack_into("<IIQQ", h, 0, 0, 0, 0x2F5bacbac, 2)  # DRR_BEGIN, COMPOUNDSTREAM
+struct.pack_into("<I", h, 32, 2)
+sys.stdout.buffer.write(bytes(h) + b"usb/jahat@x" * 100)' > "$WORK/jahat.zstream"
+res="$(curl -ksS -X POST -H "Authorization: Sapo-Backup $partner:$ptoken" --data-binary @"$WORK/jahat.zstream" -w ' %{http_code}' \
+  "$HTTPS/api/v1/rbackup/jobs/jahat/receive?snap=sapo-rbackup-jahat_GMT-2026.10.28-01.00.00")"
+[[ "$res" != *' 200' ]] || fail "stream gabungan dari partner harus ditolak: $res"
+res="$(api GET /api/v1/backup-partners)"
+json 'assert [j["job"] for j in v[0]["jobs"]]==["'"$rjob"'"], v' <<<"$res" || fail "stream ditolak tidak boleh membuat dataset: $res"
+res="$(curl -ksS -H "Authorization: Sapo-Backup $partner:salah" -w ' %{http_code}' "$HTTPS/api/v1/rbackup/hello")"
+[[ "$res" == *' 401' ]] || fail "token partner salah harus ditolak: $res"
 res="$(api GET /api/v1/backup-partners)"
 json 'j=v[0]["jobs"][0]; assert len(j["copies"])==2 and j["used_bytes"]>0, v' <<<"$res" || fail "salinan di penerima: $res"
 rfirst="$(json 'print(v[0]["jobs"][0]["copies"][0]["name"])' <<<"$res")"
@@ -912,7 +928,7 @@ res="$(api POST "/api/v1/remote-backups/targets/$partner/delete" '{}')"
 [[ "$res" == *' 200' ]] || fail "hapus NAS tujuan: $res"
 res="$(api POST /api/v1/backup-partners/$partner/delete '{"delete_data":true,"confirm_name":"NAS uji","admin_password":"'"$PASS"'"}')"
 [[ "$res" == *' 200' ]] || fail "hapus partner beserta salinan: $res"
-echo "Backup ke NAS lain: dipasangkan dengan kode (sidik jari lain ditolak), penuh lalu inkremental lewat HTTPS ($(json 'print(v["jobs"][0]["last_bytes"])' <<<"$rb") byte terakhir), salinan dipulihkan di penerima dan terbaca lewat SMB, pool penerima tidak bisa dihapus selama ada salinan"
+echo "Backup ke NAS lain: dipasangkan dengan kode (sidik jari lain ditolak), penuh lalu inkremental lewat HTTPS ($(json 'print(v["jobs"][0]["last_bytes"])' <<<"$rb") byte terakhir), stream gabungan dan token salah ditolak, salinan dipulihkan di penerima dan terbaca lewat SMB, pool penerima tidak bisa dihapus selama ada salinan"
 res="$(api POST "/api/v1/backups/$bk_id/delete" "{\"delete_data\":true,\"confirm_name\":\"$bk_id\",\"admin_password\":\"$PASS\"}")"
 [[ "$res" == *' 200' ]] || fail "hapus tugas backup: $res"
 res="$(api POST /api/v1/storage/pools/cadangan/destroy "{\"confirm_name\":\"cadangan\",\"password\":\"$PASS\"}")"
