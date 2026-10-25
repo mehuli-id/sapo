@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import NotifyPanel from "@/components/NotifyPanel.vue"
 import { useLauncher } from "@/composables/useLauncher"
+import type { UpdateSchedule } from "@/lib/api"
 import { api, ApiError } from "@/lib/api"
 
 const { t, locale } = useI18n()
@@ -127,6 +128,7 @@ async function check() {
   updError.value = ""
   try {
     pkgs.value = (await api.checkUpdates()).packages
+    loadSchedule()
   } catch (e) {
     updError.value = message(e)
   } finally {
@@ -134,6 +136,36 @@ async function check() {
   }
 }
 const sapoUpdate = computed(() => pkgs.value?.some((p) => p.name === "sapo"))
+
+// Pemeriksaan otomatis harian (hasil terakhir juga ditampilkan tanpa harus
+// menekan "Periksa").
+const sched = ref<UpdateSchedule | null>(null)
+const schedForm = reactive({ on: true, hour: "4" })
+const schedMsg = ref("")
+async function loadSchedule() {
+  try {
+    sched.value = await api.updateSchedule()
+    Object.assign(schedForm, { on: !sched.value.off, hour: String(sched.value.hour) })
+    if (!pkgs.value && sched.value.last) pkgs.value = sched.value.last.packages
+  } catch (e) {
+    updError.value = message(e)
+  }
+}
+const schedHourOK = computed(() => /^([01]?[0-9]|2[0-3])$/.test(schedForm.hour))
+async function saveSchedule() {
+  updError.value = schedMsg.value = ""
+  try {
+    await api.setUpdateSchedule(!schedForm.on, Number(schedForm.hour))
+    schedMsg.value = t("controlPanel.scheduleSaved")
+    await loadSchedule()
+  } catch (e) {
+    updError.value = message(e)
+  }
+}
+const lastChecked = computed(() => {
+  const at = sched.value?.last?.checked_at
+  return at && !at.startsWith("0001") ? new Date(at).toLocaleString(locale.value, { dateStyle: "medium", timeStyle: "short" }) : ""
+})
 async function install() {
   updError.value = ""
   try {
@@ -149,6 +181,7 @@ async function install() {
 
 onMounted(async () => {
   pollUpdates()
+  loadSchedule()
   api.services().then((s) => (services.value = s), (e) => (svcError.value = message(e)))
   loadTime()
   clock = window.setInterval(() => (tick.value = Date.now()), 30_000)
@@ -233,6 +266,8 @@ onMounted(async () => {
       </details>
       <template v-if="!upd?.running && !installing">
         <Button size="sm" variant="outline" :disabled="checking" @click="check"><LoaderCircle v-if="checking" class="animate-spin" />{{ t("controlPanel.checkUpdates") }}</Button>
+        <p v-if="lastChecked" class="text-xs text-muted-foreground">{{ t("controlPanel.lastChecked", { when: lastChecked }) }}</p>
+        <p v-if="sched?.last_error" class="flex items-start gap-1 text-xs text-destructive"><TriangleAlert class="mt-0.5 size-3.5 shrink-0" />{{ t("controlPanel.checkFailed") }}: {{ sched.last_error }}</p>
         <p v-if="pkgs && !pkgs.length" class="flex items-center gap-2 text-sm"><CircleCheck class="size-4 text-emerald-600" />{{ t("controlPanel.upToDate") }}</p>
         <form v-else-if="pkgs" class="space-y-3" @submit.prevent="install">
           <p class="text-sm">{{ t("controlPanel.available", { count: pkgs.length }) }}</p>
@@ -247,6 +282,16 @@ onMounted(async () => {
           <Button type="submit" size="sm" :disabled="!updPassword">{{ t("controlPanel.install") }}</Button>
         </form>
       </template>
+      <form v-if="sched" class="flex flex-wrap items-end gap-3 border-t pt-3" @submit.prevent="saveSchedule">
+        <label class="flex items-center gap-2 text-sm"><input v-model="schedForm.on" type="checkbox" class="size-4 accent-primary" />{{ t("controlPanel.autoCheck") }}</label>
+        <div class="space-y-1.5">
+          <Label for="cp-upd-hour">{{ t("controlPanel.autoCheckHour") }}</Label>
+          <Input id="cp-upd-hour" v-model="schedForm.hour" inputmode="numeric" autocomplete="off" class="w-20" :disabled="!schedForm.on" />
+        </div>
+        <Button type="submit" size="sm" variant="outline" :disabled="!schedHourOK">{{ t("users.save") }}</Button>
+        <p class="basis-full text-xs text-muted-foreground">{{ t("controlPanel.autoCheckHelp") }}</p>
+        <p v-if="schedMsg" class="flex basis-full items-center gap-2 text-sm"><CircleCheck class="size-4 text-emerald-600" />{{ schedMsg }}</p>
+      </form>
       <p v-if="updError" class="flex items-center gap-2 text-sm text-destructive" role="alert"><TriangleAlert class="size-4" />{{ updError }}</p>
     </section>
 

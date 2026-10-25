@@ -145,8 +145,9 @@ func (s *Server) handleUpdatesCheck(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(timeout + 15*time.Second))
-	var out proto.UpdatesCheckResult
-	if err := s.agent.Call(ctx, proto.OpUpdatesCheck, nil, &out); err != nil {
+	// Hasil manual juga dicatat (Control Panel dan notifikasi).
+	out, err := s.runUpdateCheck(ctx)
+	if err != nil {
 		s.agentError(w, proto.OpUpdatesCheck, err)
 		return
 	}

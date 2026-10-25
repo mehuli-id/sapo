@@ -33,6 +33,6 @@ Backup terjadwal (ADR 0017), kesehatan pool, SMART, dan ruang pool hanya terliha
 
 ## Akibat
 
-- Pembaruan sistem belum dikabarkan lewat email: memeriksanya butuh `apt-get update` berkala, menyusul bersama jadwal pemeriksaan pembaruan.
+- Pembaruan sistem dikabarkan lewat kejadian `updates_available` dari hasil pemeriksaan harian (ADR 0011, tambahan); kejadian ini tidak mengirim email "pulih" setelah pembaruan dipasang.
 - Satu saluran (email). Saluran lain (Telegram, webhook) bisa ditambahkan di notifier yang sama.
 - Uji asap ISO menjalankan server SMTP kecil di host: email uji, pool hampir penuh (ambang diturunkan), dan email pulih harus diterima; login tanpa enkripsi ditolak.

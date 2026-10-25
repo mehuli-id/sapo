@@ -713,7 +713,13 @@
     "webdav": "WebDAV",
     "webdavHelp": "Membuka Sapo Drive dan shared folder lewat https://…/dav/ dengan password aplikasi.",
     "webdavOn": "WebDAV dinyalakan.",
-    "webdavOff": "WebDAV dimatikan."
+    "webdavOff": "WebDAV dimatikan.",
+    "lastChecked": "Diperiksa terakhir: {when}",
+    "checkFailed": "Pemeriksaan terakhir gagal",
+    "autoCheck": "Periksa pembaruan otomatis setiap hari",
+    "autoCheckHour": "Jam (0–23)",
+    "autoCheckHelp": "Hanya memeriksa, tidak memasang. Bila notifikasi email menyala, Anda mendapat email saat ada pembaruan.",
+    "scheduleSaved": "Jadwal pemeriksaan disimpan."
   },
   "appCenter": {
     "intro": "Aplikasi tambahan dari katalog Sapo. Setiap aplikasi berjalan terpisah dengan akunnya sendiri, tanpa hak istimewa, dan datanya disimpan di pool yang dipilih. Aplikasi hanya bisa membuka shared folder yang Anda berikan.",
@@ -966,7 +972,8 @@
       "pool_health": "Pool tidak sehat (disk rusak atau hilang)",
       "pool_full": "Pool hampir penuh",
       "disk_smart": "Disk melaporkan masalah (SMART)",
-      "backup_failed": "Backup gagal"
+      "backup_failed": "Backup gagal",
+      "updates_available": "Ada pembaruan sistem"
     }
   }
 }

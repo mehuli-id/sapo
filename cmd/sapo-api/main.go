@@ -108,6 +108,8 @@ func main() {
 	go handler.SyncLoop(ctx)
 	// Notifikasi email (ADR 0018).
 	go handler.NotifyLoop(ctx)
+	// Pemeriksaan pembaruan terjadwal (tidak memasang apa pun).
+	go handler.UpdateCheckLoop(ctx)
 	newServer := func(addr string) *http.Server {
 		return &http.Server{
 			Addr:              addr,

@@ -458,6 +458,14 @@ type API struct {
 	SnapshotPresets []SnapshotPreset `yaml:"snapshot_presets"`
 	// Notify: notifikasi email (ADR 0018).
 	Notify Notify `yaml:"notify"`
+	// UpdateCheck: pemeriksaan pembaruan terjadwal (bawaan; admin bisa
+	// mengubah jam atau mematikannya di Control Panel).
+	UpdateCheck UpdateCheck `yaml:"update_check"`
+}
+
+// UpdateCheck: jam bawaan (waktu NAS) pemeriksaan pembaruan harian.
+type UpdateCheck struct {
+	DefaultHour int `yaml:"default_hour"`
 }
 
 // Notify mengatur notifikasi email: seberapa sering kondisi diperiksa, batas
@@ -485,7 +493,7 @@ type NotifyMessages struct {
 }
 
 // NotifyEvents adalah jenis kejadian yang dikenal notifier.
-var NotifyEvents = []string{"pool_health", "pool_full", "disk_smart", "backup_failed"}
+var NotifyEvents = []string{"pool_health", "pool_full", "disk_smart", "backup_failed", "updates_available"}
 
 func (n Notify) validate() error {
 	if n.CheckMinutes < 1 || n.SMARTMinutes < n.CheckMinutes || n.MaxRecipients < 1 || n.MaxRecipients > 20 ||
@@ -656,6 +664,7 @@ func Default() Config {
 			DeniedNetworks: []string{"172.17.0.0/16", "10.88.0.0/16"}, // bridge Docker dan Podman bawaan
 			AuditMaxMB:     10,
 			Notify:         Notify{CheckMinutes: 5, SMARTMinutes: 60, MaxRecipients: 5, DefaultCapacityPct: 90},
+			UpdateCheck:    UpdateCheck{DefaultHour: 4},
 			TLS: TLS{
 				Enabled:         true,
 				Listen:          ":5001",
@@ -781,6 +790,9 @@ func (c Config) Validate() error {
 		return errors.New("auth.setup_totp_expiry_minutes harus lebih dari 0")
 	case c.Auth.Argon2.MemoryKiB < 8*1024 || c.Auth.Argon2.Iterations < 1 || c.Auth.Argon2.Parallelism < 1:
 		return errors.New("auth.argon2: memory_kib minimal 8192, iterations dan parallelism minimal 1")
+	}
+	if c.API.UpdateCheck.DefaultHour < 0 || c.API.UpdateCheck.DefaultHour > 23 {
+		return errors.New("api.update_check.default_hour harus 0–23")
 	}
 	if err := c.API.Notify.validate(); err != nil {
 		return err
