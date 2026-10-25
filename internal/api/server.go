@@ -63,6 +63,8 @@ type HTTPSInfo struct {
 
 // Server adalah handler HTTP sapo-api.
 type Server struct {
+	// notify: notifikasi email (ADR 0018).
+	notify   *notifier
 	cfg      config.Config
 	agent    AgentCaller
 	store    *auth.Store
@@ -158,6 +160,10 @@ func New(o Options) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	notify, err := openNotifier(cfg.API.DataDir)
+	if err != nil {
+		return nil, err
+	}
 	argon := auth.Argon2Params{MemoryKiB: cfg.Auth.Argon2.MemoryKiB, Iterations: cfg.Auth.Argon2.Iterations, Parallelism: cfg.Auth.Argon2.Parallelism}
 	dummy, err := auth.HashPassword("sapo-dummy-password", argon)
 	if err != nil {
@@ -182,6 +188,7 @@ func New(o Options) (*Server, error) {
 		reenroll: pendingTOTP{entries: map[string]pendingEntry{}},
 		shares:   shares,
 		settings: settings,
+		notify:   notify,
 		davLocks: newDAVLockTable(),
 
 		resyncDelay: 30 * time.Second,
@@ -268,6 +275,9 @@ func New(o Options) (*Server, error) {
 	s.mux.Handle("GET /api/v1/storage/external", s.requireAdmin(http.HandlerFunc(s.handleExternalList)))
 	s.mux.Handle("POST /api/v1/storage/external/mount", s.requireAdmin(http.HandlerFunc(s.handleExternalMount)))
 	s.mux.Handle("POST /api/v1/storage/external/{name}/unmount", s.requireAdmin(http.HandlerFunc(s.handleExternalUnmount)))
+	s.mux.Handle("GET /api/v1/notify", s.requireAdmin(http.HandlerFunc(s.handleNotify)))
+	s.mux.Handle("POST /api/v1/notify", s.requireAdmin(http.HandlerFunc(s.handleNotifySet)))
+	s.mux.Handle("POST /api/v1/notify/test", s.requireAdmin(http.HandlerFunc(s.handleNotifyTest)))
 	s.mux.Handle("GET /api/v1/backups", s.requireAdmin(http.HandlerFunc(s.handleBackups)))
 	s.mux.Handle("POST /api/v1/backups", s.requireAdmin(http.HandlerFunc(s.handleBackupSet)))
 	s.mux.Handle("POST /api/v1/backups/{id}/run", s.requireAdmin(http.HandlerFunc(s.handleBackupRun)))

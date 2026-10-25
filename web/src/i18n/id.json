@@ -348,7 +348,13 @@
     "install_not_live": "Installer hanya tersedia saat Sapo berjalan dari ISO.",
     "install_disk_small": "Disk terlalu kecil untuk sistem Sapo.",
     "backup_diverged": "Salinan di tujuan tidak lagi cocok dengan folder asal. Hapus tugas beserta salinannya, lalu buat ulang.",
-    "backup_same_pool": "Pool tujuan harus berbeda dari pool folder."
+    "backup_same_pool": "Pool tujuan harus berbeda dari pool folder.",
+    "email_invalid": "Alamat email tidak valid.",
+    "email_recipients": "Isi 1 sampai {max} alamat penerima.",
+    "smtp_invalid": "Pengaturan server SMTP tidak valid.",
+    "smtp_password_required": "Isi password SMTP: server atau username berubah.",
+    "notify_failed": "Email gagal dikirim. Periksa pengaturan server di bawah ini.",
+    "notify_not_configured": "Notifikasi email belum diatur."
   },
   "pool": {
     "title": "Pool penyimpanan",
@@ -935,5 +941,32 @@
     "deleted": "Tugas backup dihapus.",
     "restores": "Pemulihan terakhir",
     "restoreRow": "{name} (mulai {when})"
+  },
+  "notify": {
+    "title": "Notifikasi email",
+    "help": "Sapo mengirim email saat pool atau disk bermasalah, pool hampir penuh, atau backup gagal, dan lagi saat masalahnya pulih. Masalah yang sama tidak dikirim berulang.",
+    "setup": "Atur notifikasi email",
+    "change": "Ubah server",
+    "saved": "Pengaturan notifikasi disimpan. Kirim email uji untuk memastikan.",
+    "test": "Kirim email uji",
+    "testSent": "Email uji dikirim ke {to}. Periksa kotak masuk (dan folder spam).",
+    "to": "Dikirim ke {to}",
+    "lastSent": "Email terakhir terkirim: {when}",
+    "lastError": "Gagal mengirim ({when})",
+    "active": "Masalah yang sedang berlangsung",
+    "enabled": "Kirim notifikasi email",
+    "eventsTitle": "Kirim email untuk",
+    "capacity": "Pool dianggap hampir penuh mulai (%)",
+    "security": {
+      "starttls": "STARTTLS",
+      "tls": "TLS",
+      "none": "tanpa enkripsi"
+    },
+    "events": {
+      "pool_health": "Pool tidak sehat (disk rusak atau hilang)",
+      "pool_full": "Pool hampir penuh",
+      "disk_smart": "Disk melaporkan masalah (SMART)",
+      "backup_failed": "Backup gagal"
+    }
   }
 }

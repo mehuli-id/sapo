@@ -456,6 +456,53 @@ type API struct {
 	TLS        TLS `yaml:"tls"`
 	// SnapshotPresets: pilihan jadwal snapshot siap pakai di panel (ADR 0014).
 	SnapshotPresets []SnapshotPreset `yaml:"snapshot_presets"`
+	// Notify: notifikasi email (ADR 0018).
+	Notify Notify `yaml:"notify"`
+}
+
+// Notify mengatur notifikasi email: seberapa sering kondisi diperiksa, batas
+// penerima, ambang bawaan, dan teks email per bahasa.
+type Notify struct {
+	CheckMinutes       int `yaml:"check_minutes"`
+	SMARTMinutes       int `yaml:"smart_minutes"`
+	MaxRecipients      int `yaml:"max_recipients"`
+	DefaultCapacityPct int `yaml:"default_capacity_pct"`
+	// Messages: bahasa → teks email. Tempat isian: {host}, {n}, {name},
+	// {detail}.
+	Messages map[string]NotifyMessages `yaml:"messages"`
+}
+
+// NotifyMessages adalah teks email dalam satu bahasa.
+type NotifyMessages struct {
+	SubjectAlert    string            `yaml:"subject_alert"`
+	SubjectResolved string            `yaml:"subject_resolved"`
+	SubjectTest     string            `yaml:"subject_test"`
+	Intro           string            `yaml:"intro"`
+	ResolvedHeader  string            `yaml:"resolved_header"`
+	Test            string            `yaml:"test"`
+	Footer          string            `yaml:"footer"`
+	Events          map[string]string `yaml:"events"`
+}
+
+// NotifyEvents adalah jenis kejadian yang dikenal notifier.
+var NotifyEvents = []string{"pool_health", "pool_full", "disk_smart", "backup_failed"}
+
+func (n Notify) validate() error {
+	if n.CheckMinutes < 1 || n.SMARTMinutes < n.CheckMinutes || n.MaxRecipients < 1 || n.MaxRecipients > 20 ||
+		n.DefaultCapacityPct < 1 || n.DefaultCapacityPct > 99 {
+		return errors.New("api.notify: check_minutes ≥ 1, smart_minutes ≥ check_minutes, max_recipients 1–20, default_capacity_pct 1–99")
+	}
+	for lang, m := range n.Messages {
+		if m.SubjectAlert == "" || m.SubjectResolved == "" || m.SubjectTest == "" || m.Intro == "" || m.ResolvedHeader == "" || m.Test == "" {
+			return fmt.Errorf("api.notify.messages.%s: teks email belum lengkap", lang)
+		}
+		for _, e := range NotifyEvents {
+			if m.Events[e] == "" {
+				return fmt.Errorf("api.notify.messages.%s.events.%s kosong", lang, e)
+			}
+		}
+	}
+	return nil
 }
 
 // SnapshotPreset adalah satu templat jadwal snapshot: jumlah snapshot per
@@ -608,6 +655,7 @@ func Default() Config {
 			},
 			DeniedNetworks: []string{"172.17.0.0/16", "10.88.0.0/16"}, // bridge Docker dan Podman bawaan
 			AuditMaxMB:     10,
+			Notify:         Notify{CheckMinutes: 5, SMARTMinutes: 60, MaxRecipients: 5, DefaultCapacityPct: 90},
 			TLS: TLS{
 				Enabled:         true,
 				Listen:          ":5001",
@@ -733,6 +781,9 @@ func (c Config) Validate() error {
 		return errors.New("auth.setup_totp_expiry_minutes harus lebih dari 0")
 	case c.Auth.Argon2.MemoryKiB < 8*1024 || c.Auth.Argon2.Iterations < 1 || c.Auth.Argon2.Parallelism < 1:
 		return errors.New("auth.argon2: memory_kib minimal 8192, iterations dan parallelism minimal 1")
+	}
+	if err := c.API.Notify.validate(); err != nil {
+		return err
 	}
 	for _, p := range c.API.SnapshotPresets {
 		pol := proto.SnapshotPolicy{Hourly: p.Hourly, Daily: p.Daily, Weekly: p.Weekly, Hour: p.Hour}

@@ -21,3 +21,4 @@ Setiap keputusan arsitektur penting dicatat di sini sebagai file bernomor (`NNNN
 | [0015](0015-external-storage.md) | Penyimpanan eksternal USB (exFAT/FAT/NTFS, izin per grup saat dipasang, disk USB tidak untuk pool kecuali diizinkan) | Diterima |
 | [0016](0016-installer.md) | Installer ke disk dari panel (salin squashfs ISO, root ext4, GRUB BIOS+UEFI, pengaturan sesi ikut) | Diterima |
 | [0017](0017-backup.md) | Backup shared folder ke pool lain (zfs send/receive harian, salinan tidak dibagikan, pemulihan ke folder baru) | Diterima |
+| [0018](0018-email-notifications.md) | Notifikasi email dari sapo-api (SMTP STARTTLS/TLS, satu email per masalah baru, email pulih, password SMTP tidak pernah dikembalikan) | Diterima |

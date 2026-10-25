@@ -25,6 +25,7 @@ NFS_PORT="${NFS_PORT:-12049}"      # port NFS di host, diteruskan ke 2049 di VM
 APP_PORT="${APP_PORT:-18090}"      # port aplikasi uji (Homer) di host, diteruskan ke 8090 di VM
 RPCBIND_PORT="${RPCBIND_PORT:-10111}" # diteruskan ke 111 (rpcbind) di VM, harus tertutup
 MOUNTD_PORT="${MOUNTD_PORT:-20048}"   # diteruskan ke 20048 (mountd) di VM, harus tertutup
+SMTP_PORT="${SMTP_PORT:-12525}"     # server SMTP uji di host (VM: 10.0.2.2), notifikasi email
 TIMEOUT_S="${TIMEOUT_S:-600}"      # batas waktu boot sampai panel siap
 VM_RAM_MB="${VM_RAM_MB:-2048}"
 LOG="${LOG:-$(dirname "$ISO")/smoke-test-console.log}"
@@ -839,6 +840,99 @@ res="$(api POST "/api/v1/backups/$bk_id/delete" "{\"delete_data\":true,\"confirm
 res="$(api POST /api/v1/storage/pools/cadangan/destroy "{\"confirm_name\":\"cadangan\",\"password\":\"$PASS\"}")"
 [[ "$res" == *' 200' ]] || fail "hapus pool cadangan setelah tugas dihapus: $res"
 echo "Backup: folder tetap ke pool cadangan (penuh $full_bytes byte, lalu inkremental), pool dan folder yang dipakai tidak bisa dihapus, salinan pertama dipulihkan sebagai folder pulih dan terbaca lewat SMB"
+
+# --- Notifikasi email (ADR 0018) -----------------------------------------------------
+# Server SMTP kecil di host (VM melihatnya di 10.0.2.2) menyimpan setiap email
+# (subjek dan isi yang sudah didekode). Email uji, lalu ambang pool penuh
+# diturunkan ke 1% (pool tetap terisi) → email masalah, dinaikkan lagi →
+# email pulih.
+mkdir -p "$WORK/mail"
+cat >"$WORK/smtp-sink.py" <<'PYEOF'
+import email, email.policy, socketserver, sys
+out = sys.argv[2]
+class H(socketserver.StreamRequestHandler):
+    def handle(self):
+        say = lambda s: (self.wfile.write((s + "\r\n").encode()), self.wfile.flush())
+        say("220 uji")
+        while True:
+            line = self.rfile.readline()
+            if not line:
+                return
+            cmd = line.decode(errors="replace").strip().split(" ")[0].upper()
+            if cmd in ("EHLO", "HELO"):
+                say("250 uji")
+            elif cmd in ("MAIL", "RCPT", "RSET", "NOOP"):
+                say("250 OK")
+            elif cmd == "DATA":
+                say("354 lanjut")
+                data = b""
+                while True:
+                    l = self.rfile.readline()
+                    if not l or l == b".\r\n":
+                        break
+                    data += l[1:] if l.startswith(b"..") else l
+                m = email.message_from_bytes(data, policy=email.policy.default)
+                import os, time
+                n = len(os.listdir(out))
+                with open(f"{out}/{n:03d}.txt", "w") as f:
+                    f.write("Subject: " + str(m["subject"]) + "\nTo: " + str(m["to"]) + "\n\n" + m.get_content())
+                say("250 diterima")
+            elif cmd == "QUIT":
+                say("221 bye")
+                return
+            else:
+                say("502 ?")
+socketserver.ThreadingTCPServer.allow_reuse_address = True
+socketserver.ThreadingTCPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
+PYEOF
+python3 "$WORK/smtp-sink.py" "$SMTP_PORT" "$WORK/mail" &
+smtp_sink=$!
+wait_mail() { # wait_mail POLA → isi email terbaru yang memuat POLA
+  local f
+  for _ in $(seq 1 30); do
+    f="$(grep -l -- "$1" "$WORK"/mail/*.txt 2>/dev/null | tail -1 || true)"
+    [[ -n "$f" ]] && { cat "$f"; return 0; }
+    sleep 2
+  done
+  fail "email \"$1\" tidak datang: $(cat "$WORK"/mail/*.txt 2>/dev/null)"
+}
+notify_set() { # notify_set AMBANG
+  api POST /api/v1/notify '{"enabled":true,"host":"10.0.2.2","port":'"$SMTP_PORT"',"security":"none","from":"sapo@uji.local","to":["admin@uji.local"],"capacity_pct":'"$1"',"admin_password":"'"$PASS"'"}'
+}
+res="$(api POST /api/v1/notify '{"enabled":true,"host":"10.0.2.2","port":'"$SMTP_PORT"',"security":"none","username":"admin","password":"x","from":"sapo@uji.local","to":["admin@uji.local"],"admin_password":"'"$PASS"'"}')"
+[[ "$res" == *'"smtp_invalid"'* ]] || fail "login SMTP tanpa enkripsi harus ditolak: $res"
+res="$(notify_set 90)"
+[[ "$res" == *' 200' ]] || fail "atur notifikasi: $res"
+res="$(api GET /api/v1/notify)"
+json 'assert v["settings"]["enabled"] and v["settings"]["to"]==["admin@uji.local"] and not v["has_password"], v' <<<"$res" || fail "pengaturan notifikasi: $res"
+res="$(api POST /api/v1/notify/test '{}')"
+[[ "$res" == *' 200' ]] || fail "email uji: $res"
+mail_txt="$(wait_mail "Email uji dari Sapo")"
+[[ "$mail_txt" == *"To: admin@uji.local"* && "$mail_txt" == *"notifikasi email sudah bekerja"* ]] || fail "isi email uji: $mail_txt"
+# Pool tetap (2 GB) diisi file acak 60 MB agar terisi minimal 1%.
+head -c $((60 * 1024 * 1024)) /dev/urandom > "$WORK/besar.bin"
+out="$(smbclient //127.0.0.1/tetap -p "$SMB_PORT" -m SMB3 -U "budi%$UPASS" -c "put $WORK/besar.bin besar.bin" 2>&1 || true)"
+[[ "$out" != *NT_STATUS* ]] || fail "tulis besar.bin: $out"
+for _ in $(seq 1 20); do
+  pools="$(api GET /api/v1/storage/pools)"
+  json 'import sys; sys.exit(0 if [p for p in v["pools"] if p["name"]=="tetap"][0]["capacity_pct"]>=1 else 1)' <<<"$pools" && break
+  sleep 2
+done
+res="$(notify_set 1)"
+[[ "$res" == *' 200' ]] || fail "ambang 1%: $res"
+mail_txt="$(wait_mail "masalah perlu perhatian")"
+[[ "$mail_txt" == *"Pool tetap sudah terisi"* ]] || fail "email pool hampir penuh: $mail_txt"
+res="$(api GET /api/v1/notify)"
+json 'assert any(a["event"]=="pool_full" and a["name"]=="tetap" for a in v["alerts"]), v' <<<"$res" || fail "masalah aktif di panel: $res"
+res="$(notify_set 90)"
+[[ "$res" == *' 200' ]] || fail "ambang 90%: $res"
+mail_txt="$(wait_mail "Masalah sudah pulih")"
+[[ "$mail_txt" == *"Sudah pulih"*"Pool tetap"* ]] || fail "email pulih: $mail_txt"
+res="$(api POST /api/v1/notify '{"enabled":false,"host":"10.0.2.2","port":'"$SMTP_PORT"',"security":"none","from":"sapo@uji.local","to":["admin@uji.local"],"admin_password":"'"$PASS"'"}')"
+[[ "$res" == *' 200' ]] || fail "matikan notifikasi: $res"
+kill "$smtp_sink" 2>/dev/null || true
+smbclient //127.0.0.1/tetap -p "$SMB_PORT" -m SMB3 -U "budi%$UPASS" -c "del besar.bin" >/dev/null 2>&1 || true
+echo "Notifikasi email: email uji, pool hampir penuh, lalu pulih diterima server SMTP di host ($(ls "$WORK"/mail | wc -l | tr -d ' ') email); login tanpa enkripsi ditolak"
 res="$(api GET /api/v1/system/install)"
 json 'assert v["live"] and not v["running"], v' <<<"$res" || fail "installer harus tersedia di ISO: $res"
 sysref="$(json "
@@ -951,5 +1045,5 @@ for _ in $(seq 1 20); do
   sleep 3
 done
 cmp -s "$WORK/tetap.txt" "$WORK/salinan.txt" || fail "file di folder tetap tidak terbaca lewat SMB setelah boot dari disk"
-echo "boot dari disk: panel, sertifikat, akun admin dan 2FA, pool tetap, dan SMB budi sama dengan sebelum dipasang"
+echo "boot dari disk: panel menjawab, sertifikat memuat nama host sapo-uji, akun admin dan 2FA, pool tetap, dan SMB budi sama dengan sebelum dipasang"
 echo "Uji asap lulus."

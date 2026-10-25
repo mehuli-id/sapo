@@ -659,6 +659,9 @@ export const api = {
   mountExternal: (req: { uuid: string; name: string; read_only: boolean; group: string; smb: boolean; admin_password: string }) =>
     post<{ ok: boolean }>("/api/v1/storage/external/mount", req),
   unmountExternal: (name: string) => post<{ ok: boolean }>(`/api/v1/storage/external/${encodeURIComponent(name)}/unmount`),
+  notify: () => get<NotifyInfo>("/api/v1/notify"),
+  setNotify: (req: NotifySettings & { password?: string; admin_password: string }) => post<{ ok: boolean }>("/api/v1/notify", req),
+  testNotify: () => post<{ ok: boolean }>("/api/v1/notify/test"),
   backups: () => get<BackupsList>("/api/v1/backups"),
   setBackup: (req: { id?: string; share: string; dest_pool: string; hour: number; keep: number; enabled: boolean; admin_password: string }) =>
     post<BackupJob>("/api/v1/backups", req),
@@ -741,6 +744,30 @@ export const api = {
 
 // Data yang dibutuhkan isian wizard tertentu (misalnya daftar disk untuk
 // disk-select), disiapkan aplikasi yang membuka wizard.
+// Notifikasi email (ADR 0018). Password SMTP tidak pernah dikirim balik.
+export interface NotifySettings {
+  enabled: boolean
+  host: string
+  port: number
+  security: "starttls" | "tls" | "none" | string
+  username?: string
+  from: string
+  to: string[]
+  capacity_pct?: number
+  events_off?: string[]
+}
+export interface NotifyInfo {
+  settings: NotifySettings
+  has_password: boolean
+  events: string[]
+  default_capacity_pct: number
+  max_recipients: number
+  last_sent?: string
+  last_error?: string
+  last_error_at?: string
+  alerts: { event: string; name: string; detail: string; since: string }[]
+}
+
 // Tugas backup (ADR 0017).
 export interface BackupJob {
   id: string
@@ -864,6 +891,20 @@ export const wizardActions: Record<string, (values: Record<string, string>, ctx:
       pool: v.pool ?? "",
       description: v.description ?? "",
       permissions: parsePermissions(v.permissions),
+      admin_password: v.admin_password ?? "",
+    }),
+  "notify.setup": (v) =>
+    api.setNotify({
+      enabled: true,
+      host: v.host ?? "",
+      port: Number(v.port),
+      security: v.security ?? "starttls",
+      username: v.username ?? "",
+      password: v.password ?? "",
+      from: v.from ?? "",
+      to: splitList(v.to),
+      capacity_pct: 0,
+      events_off: [],
       admin_password: v.admin_password ?? "",
     }),
   "backups.create": (v) =>
