@@ -204,6 +204,18 @@ func main() {
 	reg.Register(proto.OpBackupsRun, backups.RunOp())
 	reg.Register(proto.OpBackupsRestore, backups.RestoreOp())
 	reg.Register(proto.OpBackupsClaim, backups.ClaimOp())
+	cc := cfg.Agent.Cloud
+	cloud := agent.NewCloud(agent.CloudTools{Restic: cc.Restic, SystemdRun: cfg.Agent.Updates.SystemdRun, Systemctl: cfg.Agent.Shares.Systemctl,
+		StateFile: cc.StateFile, SecretsDir: cc.SecretsDir, CacheDir: cc.CacheDir, MaxRun: time.Duration(cc.MaxRunHours) * time.Hour}, backups)
+	go cloud.Run(context.Background())
+	reg.Register(proto.OpCloudList, cloud.ListOp())
+	reg.Register(proto.OpCloudRepoAdd, cloud.RepoAddOp())
+	reg.Register(proto.OpCloudRepoDelete, cloud.RepoDeleteOp())
+	reg.Register(proto.OpCloudSnapshots, cloud.SnapshotsOp())
+	reg.Register(proto.OpCloudJobSet, cloud.JobSetOp())
+	reg.Register(proto.OpCloudJobDelete, cloud.JobDeleteOp())
+	reg.Register(proto.OpCloudRun, cloud.RunOp())
+	reg.Register(proto.OpCloudRestore, cloud.RestoreOp())
 	remote := agent.NewRemoteBackups(backups)
 	reg.Register(proto.OpRBackupRecvOpen, remote.RecvOpenOp())
 	reg.Register(proto.OpRBackupRecvFinish, remote.RecvFinishOp())

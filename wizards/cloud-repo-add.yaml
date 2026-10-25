@@ -1,0 +1,106 @@
+# Wizard repo backup cloud baru (ADR 0020): penyimpanan S3 (Backblaze B2,
+# Wasabi, Cloudflare R2, AWS, MinIO, …). sapod membuat repo restic
+# terenkripsi dengan password acak yang ditampilkan SEKALI.
+id: cloud-repo-add
+action: cloud.repo_add
+admin_only: true
+title:
+  id: Tambah penyimpanan cloud
+  en: Add cloud storage
+finish_label:
+  id: Buat repo
+  en: Create repository
+
+steps:
+  - id: server
+    title: { id: Penyimpanan S3, en: S3 storage }
+    description:
+      id: >-
+        Backup cloud menyimpan salinan terenkripsi di penyimpanan S3 di luar
+        rumah atau kantor, aman dari kebakaran, pencurian, dan banjir.
+        Penyedia hanya melihat data acak.
+      en: >-
+        Cloud backup keeps encrypted copies in S3 storage outside your home
+        or office, safe from fire, theft, and flood. The provider only sees
+        random data.
+    help:
+      id: >-
+        Buat bucket dan kunci akses (access key) di halaman penyedia.
+        Contoh server: s3.us-west-002.backblazeb2.com (Backblaze B2),
+        s3.wasabisys.com (Wasabi), <akun>.r2.cloudflarestorage.com (R2).
+        Sebaiknya kunci akses hanya untuk bucket ini.
+      en: >-
+        Create a bucket and an access key on the provider's site. Server
+        examples: s3.us-west-002.backblazeb2.com (Backblaze B2),
+        s3.wasabisys.com (Wasabi), <account>.r2.cloudflarestorage.com (R2).
+        Preferably use an access key limited to this bucket.
+    fields:
+      - key: name
+        type: text
+        required: true
+        autocomplete: "off"
+        label: { id: Nama, en: Name }
+        placeholder: { id: Backblaze rumah, en: Home Backblaze }
+      - key: endpoint
+        type: text
+        required: true
+        autocomplete: "off"
+        label: { id: Server S3, en: S3 server }
+        placeholder: { id: s3.us-west-002.backblazeb2.com, en: s3.us-west-002.backblazeb2.com }
+      - key: bucket
+        type: text
+        required: true
+        autocomplete: "off"
+        pattern: "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
+        label: { id: Bucket, en: Bucket }
+      - key: prefix
+        type: text
+        autocomplete: "off"
+        label: { id: "Folder di bucket (boleh kosong)", en: "Folder in the bucket (optional)" }
+      - key: region
+        type: text
+        autocomplete: "off"
+        pattern: "^[a-z0-9-]{0,32}$"
+        label: { id: "Region (boleh kosong)", en: "Region (optional)" }
+      - key: insecure_http
+        type: toggle
+        default: "no"
+        label: { id: "Tanpa HTTPS (hanya server di jaringan lokal)", en: "Without HTTPS (local network servers only)" }
+
+  - id: keys
+    title: { id: Kunci akses, en: Access key }
+    help:
+      id: Kunci ini disimpan hanya di NAS dan tidak pernah ditampilkan lagi.
+      en: This key is stored only on the NAS and never shown again.
+    fields:
+      - key: access_key
+        type: text
+        required: true
+        autocomplete: "off"
+        label: { id: Access key ID, en: Access key ID }
+      - key: secret_key
+        type: current-password
+        required: true
+        secret: true
+        autocomplete: "off"
+        label: { id: Secret access key, en: Secret access key }
+
+  - id: summary
+    type: review
+    title: { id: Ringkasan, en: Summary }
+    description:
+      id: >-
+        Setelah ini NAS membuat password enkripsi acak dan menampilkannya
+        SEKALI. Tanpa password itu, backup cloud tidak bisa dibuka oleh
+        siapa pun bila NAS ini rusak.
+      en: >-
+        After this the NAS creates a random encryption password and shows it
+        ONCE. Without it, nobody can open the cloud backup if this NAS is
+        lost.
+    fields:
+      - key: admin_password
+        type: current-password
+        required: true
+        secret: true
+        autocomplete: current-password
+        label: { id: Password Anda, en: Your password }

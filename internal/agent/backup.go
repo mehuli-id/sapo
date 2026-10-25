@@ -744,6 +744,24 @@ func (b *Backups) RestoreOp() Handler {
 // izin folder asal di sapo-api), "remote:…" untuk salinan dari NAS lain.
 func (b *Backups) startRestore(ctx context.Context, jobID, srcDS, copyName, pool, name string) error {
 	target := pool + "/" + name
+	return b.runRestore(ctx, jobID, copyName, pool, name, func(ctx context.Context) error {
+		_, err := b.pipe(ctx, []string{"send", "-L", "-c", "--", srcDS + "@" + copyName},
+			[]string{"receive", "-u", "-o", sharePropName + "=" + name, "-o", "devices=off", "-o", "setuid=off", "--", target})
+		if err == nil {
+			// Snapshot salinan yang ikut terbawa tidak diperlukan folder baru.
+			_, _ = b.zfs(ctx, []string{"destroy"}, target+"@"+copyName)
+			_, err = b.zfs(ctx, []string{"mount"}, target)
+		}
+		return err
+	})
+}
+
+// runRestore: kerangka bersama semua pemulihan ke shared folder BARU
+// pool/name. Memeriksa nama belum dipakai, mencatat pemulihan (untuk
+// backups.list/claim di sapo-api), lalu menjalankan work di latar belakang
+// dengan kunci runMu.
+func (b *Backups) runRestore(ctx context.Context, jobID, copyName, pool, name string, work func(ctx context.Context) error) error {
+	target := pool + "/" + name
 	if _, err := b.propsFn(ctx, target, "type"); !errors.Is(err, errNoDataset) {
 		return &OpError{Code: proto.ErrConflict, Message: "folder " + name + " sudah ada; pilih nama lain"}
 	}
@@ -771,13 +789,7 @@ func (b *Backups) startRestore(ctx context.Context, jobID, srcDS, copyName, pool
 		defer b.runMu.Unlock()
 		ctx, cancel := context.WithTimeout(context.Background(), b.t.MaxRun)
 		defer cancel()
-		_, err := b.pipe(ctx, []string{"send", "-L", "-c", "--", srcDS + "@" + copyName},
-			[]string{"receive", "-u", "-o", sharePropName + "=" + name, "-o", "devices=off", "-o", "setuid=off", "--", target})
-		if err == nil {
-			// Snapshot salinan yang ikut terbawa tidak diperlukan folder baru.
-			_, _ = b.zfs(ctx, []string{"destroy"}, target+"@"+copyName)
-			_, err = b.zfs(ctx, []string{"mount"}, target)
-		}
+		err := work(ctx)
 		_ = b.update(func(st *backupState) error {
 			for i := range st.Restores {
 				r := &st.Restores[i]

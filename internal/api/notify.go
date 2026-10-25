@@ -169,6 +169,18 @@ func (s *Server) notifyHost(ctx context.Context) string {
 	return "sapo"
 }
 
+// notifySource: sumber yang menentukan apakah masalah k boleh dianggap
+// pulih (masalah backup cloud hanya pulih bila daftar cloud terbaca, dst.).
+func notifySource(k, event string) string {
+	switch {
+	case strings.HasPrefix(k, "backup_failed:cloud:"):
+		return "backup_failed/cloud"
+	case strings.HasPrefix(k, "backup_failed:remote:"):
+		return "backup_failed/remote"
+	}
+	return event
+}
+
 func fill(tmpl string, kv ...string) string { return strings.NewReplacer(kv...).Replace(tmpl) }
 
 // NotifyLoop memeriksa kondisi setiap check_minutes, dan segera setelah
@@ -258,12 +270,27 @@ func (s *Server) notifyCollect(ctx context.Context, st NotifySettings, active ma
 		}
 	}
 	// Backup ke NAS lain (ADR 0019): dicatat sapo-api sendiri, selalu terbaca.
+	ok["backup_failed/remote"] = true
 	rf := s.remote.get()
 	for _, j := range rf.Jobs {
 		if !j.LastOK && j.LastError != "" {
 			t, _ := rf.target(j.Target)
 			add("backup_failed", "remote:"+j.ID, j.Share+" → "+t.Name, j.LastError)
 		}
+	}
+	// Backup cloud (ADR 0020).
+	var cl proto.CloudListResult
+	if err := s.agent.Call(ctx, proto.OpCloudList, nil, &cl); err == nil {
+		repos := map[string]string{}
+		for _, r := range cl.Repos {
+			repos[r.ID] = r.Name
+		}
+		for _, j := range cl.Jobs {
+			if !j.LastOK && j.LastError != "" {
+				add("backup_failed", "cloud:"+j.ID, j.Share+" → "+repos[j.Repo], j.LastError)
+			}
+		}
+		ok["backup_failed/cloud"] = true
 	}
 	// Pembaruan: hasil pemeriksaan terakhir (terjadwal atau manual).
 	if f := s.updates.get(); f.Last != nil {
@@ -309,7 +336,7 @@ func (s *Server) notifyCheck(ctx context.Context) {
 				delete(f.Alerts, k)
 				continue
 			}
-			if _, still := cur[k]; !still && ok[a.Event] && (a.Event != "disk_smart" || cleared[k]) {
+			if _, still := cur[k]; !still && ok[notifySource(k, a.Event)] && (a.Event != "disk_smart" || cleared[k]) {
 				// Pembaruan yang sudah dipasang tidak perlu email "pulih".
 				if !a.Notified || a.Event == "updates_available" {
 					delete(f.Alerts, k)

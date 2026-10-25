@@ -81,6 +81,7 @@ type Agent struct {
 	External       External  `yaml:"external"`
 	Install        Install   `yaml:"install"`
 	Backup         Backup    `yaml:"backup"`
+	Cloud          Cloud     `yaml:"cloud"`
 }
 
 // Accounts mengatur akun sistem untuk berbagi file. sapod hanya menyentuh
@@ -182,6 +183,27 @@ type Files struct {
 	// file yang ditimpa; {time} = waktu snapshot / waktu pemulihan.
 	RestoreLabel  string `yaml:"restore_label"`
 	ReplacedLabel string `yaml:"replaced_label"`
+}
+
+// Cloud mengatur backup ke S3/cloud dengan restic (ADR 0020).
+type Cloud struct {
+	Restic      string `yaml:"restic"`
+	StateFile   string `yaml:"state_file"`
+	SecretsDir  string `yaml:"secrets_dir"`
+	CacheDir    string `yaml:"cache_dir"`
+	MaxRunHours int    `yaml:"max_run_hours"`
+}
+
+func (c Cloud) validate() error {
+	for _, p := range []string{c.Restic, c.StateFile, c.SecretsDir, c.CacheDir} {
+		if !filepath.IsAbs(p) {
+			return errors.New("agent.cloud: restic, state_file, secrets_dir, cache_dir harus path absolut")
+		}
+	}
+	if c.MaxRunHours < 1 || c.MaxRunHours > 168 {
+		return errors.New("agent.cloud.max_run_hours 1–168")
+	}
+	return nil
 }
 
 // Backup mengatur backup shared folder ke pool lain (ADR 0017).
@@ -608,6 +630,8 @@ func Default() Config {
 			Snapshots: Snapshots{MaxPoolCapacityPercent: 90, CallTimeoutSeconds: 30},
 			External:  External{Mount: "/usr/bin/mount", Umount: "/usr/bin/umount", MountBase: "/srv/sapo-external", StateFile: "/var/lib/sapod/external.json"},
 			Backup:    Backup{StateFile: "/var/lib/sapod/backup.json", MaxRunHours: 24},
+			Cloud: Cloud{Restic: "/usr/bin/restic", StateFile: "/var/lib/sapod/cloud.json", SecretsDir: "/var/lib/sapod/cloud",
+				CacheDir: "/var/cache/sapo-restic", MaxRunHours: 24},
 			Install: Install{LiveMarker: "/run/live/medium", SquashfsRoot: "/run/live/rootfs/filesystem.squashfs", MinDiskGB: 16,
 				Unit: "sapo-install.service", ParamsFile: "/var/lib/sapod/install-params.json", LogFile: "/var/lib/sapod/install.log",
 				ResultFile: "/var/lib/sapod/install-result.json", TimeoutSeconds: 3600, Target: "/mnt/sapo-install",
@@ -845,6 +869,9 @@ func (c Config) Validate() error {
 		return errors.New("agent.time.timedatectl harus path absolut")
 	}
 	if err := c.Agent.Files.validate(); err != nil {
+		return err
+	}
+	if err := c.Agent.Cloud.validate(); err != nil {
 		return err
 	}
 	if err := c.Agent.Backup.validate(); err != nil {

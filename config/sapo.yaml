@@ -165,6 +165,16 @@ agent:
     state_file: /var/lib/sapod/backup.json
     max_run_hours: 24
 
+  # Backup ke S3/cloud dengan restic (ADR 0020). Password repo dan kunci S3
+  # disimpan di secrets_dir (0600, hanya root); restic berjalan di unit
+  # systemd terkunci, paling lama max_run_hours.
+  cloud:
+    restic: /usr/bin/restic
+    state_file: /var/lib/sapod/cloud.json
+    secrets_dir: /var/lib/sapod/cloud
+    cache_dir: /var/cache/sapo-restic
+    max_run_hours: 24
+
   # Installer ke disk (ADR 0016): hanya saat berjalan dari ISO (live_marker
   # ada). Sistem disalin dari squashfs ISO ke disk sistem (partisi BIOS boot,
   # EFI, root ext4), lalu pengaturan sesi live di copy_paths disalin, berkas

@@ -1,0 +1,11 @@
+id: cloud-backup
+name: { id: Backup cloud (S3), en: Cloud backup (S3) }
+group: backup
+# restic: backup terenkripsi ke S3 (ADR 0020), dijalankan sapod di unit
+# systemd terkunci.
+packages: [restic]
+services: []
+requires: [core]
+# always: selalu terpasang · setup: dipilih saat instalasi · optional: diaktifkan dari panel
+activation: optional
+removable: true

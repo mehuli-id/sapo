@@ -1,0 +1,63 @@
+# Wizard tugas backup cloud (ADR 0020): satu shared folder ke satu repo
+# cloud, setiap hari.
+id: cloud-job-create
+action: cloud.job_create
+admin_only: true
+title:
+  id: Backup ke cloud
+  en: Back up to the cloud
+finish_label:
+  id: Buat tugas
+  en: Create task
+
+steps:
+  - id: source
+    title: { id: Folder dan tujuan, en: Folder and destination }
+    description:
+      id: >-
+        Backup pertama mengunggah semua isi folder; berikutnya hanya bagian
+        yang berubah. File yang sama di beberapa folder hanya disimpan sekali.
+      en: >-
+        The first backup uploads the whole folder; later ones only what
+        changed. Identical files across folders are stored only once.
+    fields:
+      - key: share
+        type: share-select
+        required: true
+        label: { id: Shared folder, en: Shared folder }
+      - key: repo
+        type: target-select
+        required: true
+        label: { id: Penyimpanan cloud, en: Cloud storage }
+
+  - id: schedule
+    title: { id: Jadwal, en: Schedule }
+    fields:
+      - key: hour
+        type: text
+        required: true
+        default: "2"
+        pattern: "^([01]?[0-9]|2[0-3])$"
+        autocomplete: "off"
+        label: { id: "Jam backup setiap hari (0–23, waktu NAS)", en: "Daily backup hour (0–23, NAS time)" }
+      - key: keep_days
+        type: text
+        required: true
+        default: "90"
+        pattern: "^[1-9][0-9]{0,3}$"
+        autocomplete: "off"
+        label: { id: "Simpan salinan selama (hari)", en: "Keep copies for (days)" }
+        help:
+          id: Salinan lebih lama dari ini dihapus dari cloud; yang terbaru selalu disimpan.
+          en: Copies older than this are removed from the cloud; the newest is always kept.
+
+  - id: summary
+    type: review
+    title: { id: Ringkasan, en: Summary }
+    fields:
+      - key: admin_password
+        type: current-password
+        required: true
+        secret: true
+        autocomplete: current-password
+        label: { id: Password Anda, en: Your password }

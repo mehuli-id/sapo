@@ -114,7 +114,8 @@
       "storage": "Storage",
       "file-sharing": "File sharing",
       "vpn": "VPN",
-      "apps": "Apps"
+      "apps": "Apps",
+      "backup": "Backup"
     },
     "activation": {
       "always": "Always on",
@@ -359,7 +360,11 @@
     "pairing_failed": "The destination NAS could not be paired.",
     "target_exists": "This destination NAS is already paired.",
     "target_used": "The destination NAS is still used by a backup task.",
-    "rbackup_failed": "Sending the backup failed."
+    "rbackup_failed": "Sending the backup failed.",
+    "cloud_bad_password": "Wrong encryption password.",
+    "cloud_repo_exists": "A cloud backup already exists here. Use \"Connect existing cloud backup\" with its encryption password.",
+    "cloud_denied": "The S3 server rejected the access key.",
+    "cloud_failed": "Cloud backup failed."
   },
   "pool": {
     "title": "Storage pools",
@@ -1012,5 +1017,28 @@
     "partnerDeleted": "Sending NAS removed.",
     "quota": "limit {gb} GB",
     "revoked": "Code revoked"
+  },
+  "cloud": {
+    "title": "To the cloud (S3)",
+    "help": "Copy shared folders every day to off-site S3 storage (Backblaze B2, Wasabi, Cloudflare R2, AWS, MinIO). Data is encrypted on the NAS before upload; the provider only sees random data.",
+    "unavailable": "Cloud backup isn't active: the restic package isn't installed. Turn on the Cloud backup feature in the Features app.",
+    "addRepo": "Add cloud storage",
+    "connectRepo": "Connect existing cloud backup",
+    "addJob": "Task to the cloud",
+    "connected": "Existing cloud backup connected. Its copies can be restored from here.",
+    "passwordTitle": "Cloud backup encryption password (shown only once)",
+    "passwordHelp": "Write this password down somewhere safe outside the NAS (for example a password manager or paper in a safe). If this NAS is lost, this password is the only way to open the cloud backup. Without it, nobody (including Sapo and the cloud provider) can restore your data.",
+    "passwordSaved": "I've written this password down outside the NAS",
+    "deleteRepo": "Forget storage",
+    "deleteRepoHelp": "This NAS forgets the storage and its keys. Data in the cloud is NOT deleted and can be connected again with its encryption password.",
+    "repoDeleted": "Storage forgotten. Data in the cloud remains.",
+    "noSnapshots": "No Sapo copies in this storage yet.",
+    "restoreHelp": "The copy is restored as a new shared folder on the chosen pool. If its original folder exists on this NAS, permissions are taken from it; otherwise grant permissions in Shared Folders afterwards. Copies from an old NAS are listed here too.",
+    "pool": "To pool",
+    "schedule": "Every day at {hour}:00, copies from the last {days} days are kept",
+    "sizes": "{added} newly uploaded of {total}",
+    "keepDays": "Keep copies for (days)",
+    "keepWarning": "Copies older than this will be removed from the cloud at the next backup.",
+    "deleteJobHelp": "The task is deleted. Copies already in the cloud are kept and can be restored."
   }
 }
