@@ -133,6 +133,17 @@ const (
 	OpRBackupSendFinish = "rbackup.send_finish"
 	OpRBackupSendClean  = "rbackup.send_cleanup"
 
+	// Backup ke S3/cloud (ADR 0020): restic di unit systemd terkunci,
+	// dijalankan sapod; kredensial hanya disimpan sapod.
+	OpCloudList       = "cloud.list"
+	OpCloudRepoAdd    = "cloud.repo_add"
+	OpCloudRepoDelete = "cloud.repo_delete"
+	OpCloudSnapshots  = "cloud.snapshots"
+	OpCloudJobSet     = "cloud.job_set"
+	OpCloudJobDelete  = "cloud.job_delete"
+	OpCloudRun        = "cloud.run"
+	OpCloudRestore    = "cloud.restore"
+
 	// Installer ke disk (ADR 0016).
 	OpInstallStatus = "install.status"
 	OpInstallStart  = "install.start"
@@ -1211,4 +1222,92 @@ type RBackupSendFinish struct {
 	Session   string `json:"session"`
 	OK        bool   `json:"ok"`
 	RemoteHas bool   `json:"remote_has"`
+}
+
+// CloudRepoParams menambah repo restic di S3. Existing: menyambung ke repo
+// yang sudah ada (Password wajib, misalnya NAS pengganti); selain itu repo
+// baru dibuat dan password acak dikembalikan sekali.
+type CloudRepoParams struct {
+	Name         string `json:"name"`
+	Endpoint     string `json:"endpoint"` // host[:port]
+	Bucket       string `json:"bucket"`
+	Prefix       string `json:"prefix,omitempty"`
+	Region       string `json:"region,omitempty"`
+	InsecureHTTP bool   `json:"insecure_http,omitempty"`
+	AccessKey    string `json:"access_key"`
+	SecretKey    string `json:"secret_key"`
+	Existing     bool   `json:"existing,omitempty"`
+	Password     string `json:"password,omitempty"`
+}
+
+// CloudRepo: repo tanpa rahasia (untuk panel).
+type CloudRepo struct {
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	Endpoint     string    `json:"endpoint"`
+	Bucket       string    `json:"bucket"`
+	Prefix       string    `json:"prefix,omitempty"`
+	Region       string    `json:"region,omitempty"`
+	InsecureHTTP bool      `json:"insecure_http,omitempty"`
+	Created      time.Time `json:"created"`
+}
+
+// CloudRepoAdded: hasil cloud.repo_add. Password hanya untuk repo baru.
+type CloudRepoAdded struct {
+	ID       string `json:"id"`
+	Password string `json:"password,omitempty"`
+}
+
+// CloudJob: satu shared folder ke satu repo, harian; salinan KeepDays hari
+// terakhir disimpan (selalu paling sedikit satu).
+type CloudJob struct {
+	ID       string `json:"id"`
+	Repo     string `json:"repo"`
+	Pool     string `json:"pool"`
+	Share    string `json:"share"`
+	Hour     int    `json:"hour"`
+	KeepDays int    `json:"keep_days"`
+	Enabled  bool   `json:"enabled"`
+}
+
+// CloudJobStatus: tugas dan hasil terakhirnya.
+type CloudJobStatus struct {
+	CloudJob
+	Running   bool      `json:"running"`
+	LastRun   time.Time `json:"last_run,omitempty"`
+	LastOK    bool      `json:"last_ok"`
+	LastError string    `json:"last_error,omitempty"`
+	LastAdded uint64    `json:"last_added_bytes,omitempty"`
+	LastTotal uint64    `json:"last_total_bytes,omitempty"`
+}
+
+// CloudListResult: repo, tugas, dan apakah restic terpasang.
+type CloudListResult struct {
+	Available bool             `json:"available"`
+	Repos     []CloudRepo      `json:"repos"`
+	Jobs      []CloudJobStatus `json:"jobs"`
+}
+
+// CloudSnapshot: satu salinan restic di repo (termasuk dari NAS lain/lama).
+type CloudSnapshot struct {
+	ID       string    `json:"id"`
+	Time     time.Time `json:"time"`
+	Hostname string    `json:"hostname"`
+	Share    string    `json:"share,omitempty"`
+	Job      string    `json:"job,omitempty"`
+	Path     string    `json:"path"`
+}
+
+// CloudRestoreParams memulihkan salinan Snapshot dari Repo menjadi shared
+// folder baru Pool/Name.
+type CloudRestoreParams struct {
+	Repo     string `json:"repo"`
+	Snapshot string `json:"snapshot"`
+	Pool     string `json:"pool"`
+	Name     string `json:"name"`
+}
+
+// CloudIDParams: satu repo atau tugas.
+type CloudIDParams struct {
+	ID string `json:"id"`
 }

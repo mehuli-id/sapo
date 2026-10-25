@@ -300,6 +300,15 @@ func New(o Options) (*Server, error) {
 	s.mux.Handle("POST /api/v1/notify/test", s.requireAdmin(http.HandlerFunc(s.handleNotifyTest)))
 	// Backup ke NAS lain (ADR 0019): admin pengirim dan penerima, lalu API
 	// partner (token NAS pengirim, tanpa sesi).
+	// Backup ke S3/cloud (ADR 0020).
+	s.mux.Handle("GET /api/v1/cloud", s.requireAdmin(http.HandlerFunc(s.handleCloud)))
+	s.mux.Handle("POST /api/v1/cloud/repos", s.requireAdmin(http.HandlerFunc(s.handleCloudRepoAdd)))
+	s.mux.Handle("POST /api/v1/cloud/repos/{id}/delete", s.requireAdmin(http.HandlerFunc(s.handleCloudRepoDelete)))
+	s.mux.Handle("GET /api/v1/cloud/repos/{id}/snapshots", s.requireAdmin(http.HandlerFunc(s.handleCloudSnapshots)))
+	s.mux.Handle("POST /api/v1/cloud/repos/{id}/restore", s.requireAdmin(http.HandlerFunc(s.handleCloudRestore)))
+	s.mux.Handle("POST /api/v1/cloud/jobs", s.requireAdmin(http.HandlerFunc(s.handleCloudJobSet)))
+	s.mux.Handle("POST /api/v1/cloud/jobs/{id}/run", s.requireAdmin(http.HandlerFunc(s.handleCloudJobRun)))
+	s.mux.Handle("POST /api/v1/cloud/jobs/{id}/delete", s.requireAdmin(http.HandlerFunc(s.handleCloudJobDelete)))
 	s.mux.Handle("GET /api/v1/remote-backups", s.requireAdmin(http.HandlerFunc(s.handleRemoteBackups)))
 	s.mux.Handle("POST /api/v1/remote-backups/targets", s.requireAdmin(http.HandlerFunc(s.handleTargetAdd)))
 	s.mux.Handle("POST /api/v1/remote-backups/targets/{id}/delete", s.requireAdmin(http.HandlerFunc(s.handleTargetDelete)))
@@ -656,7 +665,7 @@ func (s *Server) agentError(w http.ResponseWriter, op string, err error) {
 			status = http.StatusServiceUnavailable
 		case proto.ErrDiskChanged, proto.ErrDiskInUse, proto.ErrDiskHasData, proto.ErrDiskRemovable, proto.ErrDiskUSB, proto.ErrDiskIdentity, proto.ErrPoolExists, proto.ErrPoolBusy:
 			status = http.StatusConflict
-		case proto.ErrConflict, "backup_diverged":
+		case proto.ErrConflict, "backup_diverged", "cloud_repo_exists":
 			status = http.StatusConflict
 		case "pool_create_failed", "pool_scrub_failed", "pool_replace_failed", "pool_destroy_failed", "share_delete_failed", "updates_failed":
 			status = http.StatusUnprocessableEntity

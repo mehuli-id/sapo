@@ -667,6 +667,16 @@ export const api = {
   testNotify: () => post<{ ok: boolean }>("/api/v1/notify/test"),
   backups: () => get<BackupsList>("/api/v1/backups"),
   remoteBackups: () => get<RemoteBackups>("/api/v1/remote-backups"),
+  cloud: () => get<CloudList>("/api/v1/cloud"),
+  addCloudRepo: (req: CloudRepoRequest) => post<{ id: string; password?: string }>("/api/v1/cloud/repos", req),
+  deleteCloudRepo: (id: string, admin_password: string) => post<{ ok: boolean }>(`/api/v1/cloud/repos/${encodeURIComponent(id)}/delete`, { admin_password }),
+  cloudSnapshots: (id: string) => get<CloudSnapshot[]>(`/api/v1/cloud/repos/${encodeURIComponent(id)}/snapshots`),
+  restoreCloud: (id: string, req: { snapshot: string; pool: string; name: string; admin_password: string }) =>
+    post<{ ok: boolean }>(`/api/v1/cloud/repos/${encodeURIComponent(id)}/restore`, req),
+  setCloudJob: (req: { id?: string; repo: string; share: string; hour: number; keep_days: number; enabled: boolean; admin_password: string }) =>
+    post<{ id: string }>("/api/v1/cloud/jobs", req),
+  runCloudJob: (id: string) => post<{ ok: boolean }>(`/api/v1/cloud/jobs/${encodeURIComponent(id)}/run`),
+  deleteCloudJob: (id: string, admin_password: string) => post<{ ok: boolean }>(`/api/v1/cloud/jobs/${encodeURIComponent(id)}/delete`, { admin_password }),
   addTarget: (req: { name: string; address: string; code: string; admin_password: string }) => post<BackupTargetInfo>("/api/v1/remote-backups/targets", req),
   deleteTarget: (id: string) => post<{ ok: boolean }>(`/api/v1/remote-backups/targets/${encodeURIComponent(id)}/delete`),
   setRemoteJob: (req: { id?: string; share: string; target: string; hour: number; enabled: boolean; admin_password: string }) =>
@@ -791,6 +801,74 @@ export interface NotifyInfo {
   last_error?: string
   last_error_at?: string
   alerts: { event: string; name: string; detail: string; since: string }[]
+}
+
+// Backup ke S3/cloud (ADR 0020). Rahasia tidak pernah dikirim balik.
+export interface CloudRepo {
+  id: string
+  name: string
+  endpoint: string
+  bucket: string
+  prefix?: string
+  region?: string
+  insecure_http?: boolean
+  created: string
+}
+export interface CloudJob {
+  id: string
+  repo: string
+  pool: string
+  share: string
+  hour: number
+  keep_days: number
+  enabled: boolean
+  running: boolean
+  last_run?: string
+  last_ok: boolean
+  last_error?: string
+  last_added_bytes?: number
+  last_total_bytes?: number
+}
+export interface CloudList {
+  available: boolean
+  repos: CloudRepo[]
+  jobs: CloudJob[]
+}
+export interface CloudSnapshot {
+  id: string
+  time: string
+  hostname: string
+  share?: string
+  job?: string
+  path: string
+}
+export interface CloudRepoRequest {
+  name: string
+  endpoint: string
+  bucket: string
+  prefix: string
+  region: string
+  insecure_http: boolean
+  access_key: string
+  secret_key: string
+  existing: boolean
+  password: string
+  admin_password: string
+}
+function cloudRepoReq(v: Record<string, string>, existing: boolean): CloudRepoRequest {
+  return {
+    name: v.name ?? "",
+    endpoint: v.endpoint ?? "",
+    bucket: v.bucket ?? "",
+    prefix: v.prefix ?? "",
+    region: v.region ?? "",
+    insecure_http: v.insecure_http === "yes",
+    access_key: v.access_key ?? "",
+    secret_key: v.secret_key ?? "",
+    existing,
+    password: existing ? (v.password ?? "") : "",
+    admin_password: v.admin_password ?? "",
+  }
 }
 
 // Backup ke NAS lain (ADR 0019).
@@ -975,6 +1053,10 @@ export const wizardActions: Record<string, (values: Record<string, string>, ctx:
       events_off: [],
       admin_password: v.admin_password ?? "",
     }),
+  "cloud.repo_add": (v) => api.addCloudRepo(cloudRepoReq(v, false)),
+  "cloud.repo_connect": (v) => api.addCloudRepo(cloudRepoReq(v, true)),
+  "cloud.job_create": (v) =>
+    api.setCloudJob({ repo: v.repo ?? "", share: v.share ?? "", hour: Number(v.hour), keep_days: Number(v.keep_days), enabled: true, admin_password: v.admin_password ?? "" }),
   "rbackup.partner_create": (v) =>
     api.createPartner({ name: v.name ?? "", pool: v.pool ?? "", keep: Number(v.keep), quota_gb: Number(v.quota_gb || 0), admin_password: v.admin_password ?? "" }),
   "rbackup.target_add": (v) => api.addTarget({ name: v.name ?? "", address: v.address ?? "", code: (v.code ?? "").trim(), admin_password: v.admin_password ?? "" }),

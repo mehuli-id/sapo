@@ -1,0 +1,266 @@
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/mehuli-id/sapo/internal/proto"
+)
+
+type fakeRestic struct {
+	mu    sync.Mutex
+	calls [][]string
+	// fail: galat untuk subperintah restic tertentu (init, backup, …).
+	fail map[string]error
+	out  map[string]string
+}
+
+func (f *fakeRestic) exec(_ context.Context, unit string, argv []string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, argv)
+	i := 0
+	for i < len(argv) && argv[i] != "--" {
+		i++
+	}
+	// Subperintah restic: setelah --repo X --password-file Y [-o …].
+	rest := argv[i+1:]
+	sub := ""
+	for j := 1; j < len(rest); j++ {
+		if rest[j] == "--repo" || rest[j] == "--password-file" || rest[j] == "-o" {
+			j++
+			continue
+		}
+		sub = rest[j]
+		if sub == "cat" {
+			sub = "cat"
+		}
+		break
+	}
+	if err := f.fail[sub]; err != nil {
+		return nil, err
+	}
+	return []byte(f.out[sub]), nil
+}
+
+func (f *fakeRestic) find(sub string) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, c := range f.calls {
+		if hasSub(c, sub) {
+			return c
+		}
+	}
+	return nil
+}
+
+func hasSub(argv []string, sub string) bool {
+	for i, a := range argv {
+		if a == "--" {
+			for _, b := range argv[i+1:] {
+				if b == sub {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func testCloud(t *testing.T) (*Cloud, *fakeRestic, *fakeZFS, *Backups) {
+	t.Helper()
+	b, f := testBackups(t)
+	dir := t.TempDir()
+	restic := filepath.Join(dir, "restic")
+	_ = os.WriteFile(restic, []byte("#!/bin/sh\n"), 0o755)
+	c := NewCloud(CloudTools{Restic: restic, SystemdRun: "/usr/bin/systemd-run", Systemctl: "/usr/bin/systemctl",
+		StateFile: filepath.Join(dir, "cloud.json"), SecretsDir: filepath.Join(dir, "rahasia"), CacheDir: filepath.Join(dir, "cache")}, b)
+	fr := &fakeRestic{fail: map[string]error{}, out: map[string]string{}}
+	c.exec = fr.exec
+	// Snapshot ZFS sementara harus bisa "dibuka".
+	b.shares.t.MountBase = filepath.Join(dir, "srv")
+	_ = os.MkdirAll(filepath.Join(dir, "srv/tank/keluarga/.zfs/snapshot", cloudSnapName("keluarga-cabcdef")), 0o755)
+	return c, fr, f, b
+}
+
+func cloudCall(t *testing.T, h Handler, p any) (any, error) {
+	t.Helper()
+	raw, _ := json.Marshal(p)
+	return h(context.Background(), raw)
+}
+
+func TestCloudRepoAndBackup(t *testing.T) {
+	c, fr, f, b := testCloud(t)
+	var oe *OpError
+	repo := proto.CloudRepoParams{Name: "Backblaze", Endpoint: "s3.us-west-002.backblazeb2.com", Bucket: "sapo-rumah", Prefix: "nas1",
+		Region: "us-west-002", AccessKey: "KUNCI-AKSES", SecretKey: "rahasia/sekali+"}
+	for name, bad := range map[string]proto.CloudRepoParams{
+		"bucket":        {Name: "x", Endpoint: "s3.example.com", Bucket: "A_B", AccessKey: "a", SecretKey: "b"},
+		"endpoint":      {Name: "x", Endpoint: "s3.example.com/../x", Bucket: "abc", AccessKey: "a", SecretKey: "b"},
+		"prefix":        {Name: "x", Endpoint: "s3.example.com", Bucket: "abc", Prefix: "../etc", AccessKey: "a", SecretKey: "b"},
+		"kunci":         {Name: "x", Endpoint: "s3.example.com", Bucket: "abc", AccessKey: "a b", SecretKey: "b"},
+		"kunci newline": {Name: "x", Endpoint: "s3.example.com", Bucket: "abc", AccessKey: "a", SecretKey: "b\naws_session_token = x"},
+	} {
+		if _, err := cloudCall(t, c.RepoAddOp(), bad); !errors.As(err, &oe) || oe.Code != proto.ErrInvalidParams {
+			t.Errorf("%s harus ditolak: %v", name, err)
+		}
+	}
+	res, err := cloudCall(t, c.RepoAddOp(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	added := res.(proto.CloudRepoAdded)
+	if len(added.Password) < 30 || !strings.Contains(added.Password, "-") {
+		t.Fatalf("password = %q", added.Password)
+	}
+	// Rahasia hanya di file 0600, masuk unit lewat LoadCredential.
+	for _, p := range []string{c.pwFile(added.ID), c.s3File(added.ID)} {
+		st, err := os.Stat(p)
+		if err != nil || st.Mode().Perm() != 0o600 {
+			t.Fatalf("%s: %v %v", p, st, err)
+		}
+	}
+	init := fr.find("init")
+	all := strings.Join(init, " ")
+	for _, want := range []string{"--property=ProtectSystem=strict", "--property=NoNewPrivileges=yes", "--property=CapabilityBoundingSet= ",
+		"--property=LoadCredential=restic-pw:" + c.pwFile(added.ID), "--repo s3:https://s3.us-west-002.backblazeb2.com/sapo-rumah/nas1",
+		"-o s3.region=us-west-002", "--property=RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX"} {
+		if !strings.Contains(all+" ", want) {
+			t.Errorf("init tidak memuat %q:\n%s", want, all)
+		}
+	}
+	if strings.Contains(all, "rahasia/sekali") || strings.Contains(all, added.Password) || strings.Contains(all, "KUNCI-AKSES") {
+		t.Fatalf("rahasia bocor ke argumen/lingkungan unit:\n%s", all)
+	}
+	res, _ = c.ListOp()(context.Background(), nil)
+	if raw, _ := json.Marshal(res); strings.Contains(string(raw), "rahasia") || strings.Contains(string(raw), added.Password) {
+		t.Fatalf("cloud.list membocorkan rahasia: %s", raw)
+	}
+	// Repo yang sudah ada di tempat itu.
+	fr.fail["init"] = errors.New("Fatal: create key in repository at s3:... failed: repository master key and config already initialized")
+	if _, err := cloudCall(t, c.RepoAddOp(), repo); !errors.As(err, &oe) || oe.Code != "cloud_repo_exists" {
+		t.Fatalf("repo sudah ada: %v", err)
+	}
+	delete(fr.fail, "init")
+	// Sambung repo yang ada: password salah.
+	ex := repo
+	ex.Existing, ex.Password = true, "password-salah"
+	fr.fail["cat"] = errors.New("Fatal: wrong password or no key found")
+	if _, err := cloudCall(t, c.RepoAddOp(), ex); !errors.As(err, &oe) || oe.Code != "cloud_bad_password" {
+		t.Fatalf("password salah: %v", err)
+	}
+	if ents, _ := os.ReadDir(c.t.SecretsDir); len(ents) != 2 {
+		t.Fatalf("rahasia repo yang gagal harus dibuang: %v", ents)
+	}
+
+	// Tugas dan backup.
+	res, err = cloudCall(t, c.JobSetOp(), proto.CloudJob{Repo: added.ID, Pool: "tank", Share: "keluarga", Hour: 3, KeepDays: 30, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := res.(map[string]string)["id"]
+	if id != "keluarga-c"+added.ID[:6] {
+		t.Fatalf("id = %q", id)
+	}
+	_ = os.MkdirAll(filepath.Join(b.shares.t.MountBase, "tank/keluarga/.zfs/snapshot", cloudSnapName(id)), 0o755)
+	fr.out["backup"] = `{"message_type":"summary","data_added":1234,"total_bytes_processed":5678}`
+	if err := c.execute(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	bk := strings.Join(fr.find("backup"), " ")
+	for _, want := range []string{"--property=CapabilityBoundingSet=CAP_DAC_READ_SEARCH", "--tag job:" + id, "--tag share:keluarga",
+		"-- " + filepath.Join(b.shares.t.MountBase, "tank/keluarga/.zfs/snapshot", cloudSnapName(id))} {
+		if !strings.Contains(bk, want) {
+			t.Errorf("backup tidak memuat %q:\n%s", want, bk)
+		}
+	}
+	if fg := strings.Join(fr.find("forget"), " "); !strings.Contains(fg, "--keep-within 30d --keep-last 1 --prune") || !strings.Contains(fg, "--tag job:"+id) {
+		t.Fatalf("forget: %s", fg)
+	}
+	if _, ok := f.snaps["tank/keluarga@"+cloudSnapName(id)]; ok {
+		t.Fatal("snapshot sementara harus dibuang")
+	}
+	res, _ = c.ListOp()(context.Background(), nil)
+	if j := res.(proto.CloudListResult).Jobs[0]; !j.LastOK || j.LastAdded != 1234 {
+		t.Fatalf("hasil tugas = %+v", j)
+	}
+	// Folder yang di-backup ke cloud tidak bisa dihapus; repo yang dipakai juga.
+	if id := c.usingShare("tank", "keluarga"); id == "" {
+		t.Fatal("usingShare")
+	}
+	if _, err := cloudCall(t, c.RepoDeleteOp(), proto.CloudIDParams{ID: added.ID}); !errors.As(err, &oe) || oe.Code != proto.ErrConflict {
+		t.Fatalf("hapus repo yang dipakai: %v", err)
+	}
+	// Gagal: tercatat.
+	fr.fail["backup"] = errors.New("Fatal: unable to open repository: Access Denied")
+	if err := c.execute(context.Background(), id); !errors.As(err, &oe) || oe.Code != "cloud_denied" {
+		t.Fatalf("backup ditolak S3: %v", err)
+	}
+}
+
+func TestCloudRestore(t *testing.T) {
+	c, fr, f, b := testCloud(t)
+	res, err := cloudCall(t, c.RepoAddOp(), proto.CloudRepoParams{Name: "MinIO", Endpoint: "10.0.2.2:9000", Bucket: "uji", InsecureHTTP: true, AccessKey: "a", SecretKey: "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := res.(proto.CloudRepoAdded).ID
+	if init := strings.Join(fr.find("init"), " "); !strings.Contains(init, "--repo s3:http://10.0.2.2:9000/uji") {
+		t.Fatalf("http: %s", init)
+	}
+	fr.out["snapshots"] = `[{"id":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","time":"2026-10-28T03:00:00Z","hostname":"nas-lama","paths":["/srv/sapo/tank/keluarga/.zfs/snapshot/sapo-cloud-x"],"tags":["sapo","job:x","share:keluarga"]},
+	{"id":"zz","paths":["/x"]}]`
+	var oe *OpError
+	if _, err := cloudCall(t, c.RestoreOp(), proto.CloudRestoreParams{Repo: repo, Snapshot: "0123456789abcdef", Pool: "tank", Name: "keluarga"}); !errors.As(err, &oe) || oe.Code != proto.ErrConflict {
+		t.Fatalf("folder yang ada: %v", err)
+	}
+	if _, err := cloudCall(t, c.RestoreOp(), proto.CloudRestoreParams{Repo: repo, Snapshot: "--target=/etc", Pool: "tank", Name: "pulih"}); !errors.As(err, &oe) {
+		t.Fatalf("id salinan aneh: %v", err)
+	}
+	// Dataset baru "terpasang" di tempatnya.
+	mp := filepath.Join(b.shares.t.MountBase, "tank/pulih")
+	orig := b.propsFn
+	b.propsFn = func(ctx context.Context, ds string, names ...string) (map[string]string, error) {
+		if ds == "tank/pulih" {
+			if _, ok := f.ds[ds]; ok {
+				return map[string]string{"mounted": "yes", "mountpoint": mp, "type": "filesystem", sharePropName: "pulih"}, nil
+			}
+		}
+		return orig(ctx, ds, names...)
+	}
+	if _, err := cloudCall(t, c.RestoreOp(), proto.CloudRestoreParams{Repo: repo, Snapshot: "0123456789abcdef", Pool: "tank", Name: "pulih"}); err != nil {
+		t.Fatal(err)
+	}
+	b.runMu.Lock()
+	b.runMu.Unlock()
+	rs := strings.Join(fr.find("restore"), " ")
+	for _, want := range []string{"--property=ReadWritePaths=" + c.t.CacheDir + " " + mp, "CAP_CHOWN",
+		"restore 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef:/srv/sapo/tank/keluarga/.zfs/snapshot/sapo-cloud-x --target " + mp} {
+		if !strings.Contains(rs, want) {
+			t.Errorf("restore tidak memuat %q:\n%s", want, rs)
+		}
+	}
+	if p := f.ds["tank/pulih"]; p == nil || p[sharePropName] != "pulih" {
+		t.Fatalf("folder baru = %+v", p)
+	}
+	st, _ := b.loadLocked()
+	if r := st.Restores[len(st.Restores)-1]; !r.OK || r.Name != "pulih" || r.JobID != "cloud:"+repo {
+		t.Fatalf("catatan pemulihan = %+v", r)
+	}
+	// Gagal: folder baru buatan pemulihan dibuang lagi.
+	fr.fail["restore"] = errors.New("Fatal: network")
+	if _, err := cloudCall(t, c.RestoreOp(), proto.CloudRestoreParams{Repo: repo, Snapshot: "0123456789abcdef", Pool: "tank", Name: "pulih2"}); err != nil {
+		t.Fatal(err)
+	}
+	b.runMu.Lock()
+	b.runMu.Unlock()
+	if !strings.Contains(strings.Join(f.calls, "\n"), "destroy -r tank/pulih2") {
+		t.Fatalf("folder gagal harus dibuang:\n%s", strings.Join(f.calls, "\n"))
+	}
+}

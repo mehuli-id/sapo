@@ -114,7 +114,8 @@
       "storage": "Storage",
       "file-sharing": "Berbagi file",
       "vpn": "VPN",
-      "apps": "Aplikasi"
+      "apps": "Aplikasi",
+      "backup": "Backup"
     },
     "activation": {
       "always": "Selalu aktif",
@@ -359,7 +360,11 @@
     "pairing_failed": "NAS tujuan tidak bisa dipasangkan.",
     "target_exists": "NAS tujuan ini sudah dipasangkan.",
     "target_used": "NAS tujuan masih dipakai tugas backup.",
-    "rbackup_failed": "Pengiriman backup gagal."
+    "rbackup_failed": "Pengiriman backup gagal.",
+    "cloud_bad_password": "Password enkripsi salah.",
+    "cloud_repo_exists": "Sudah ada backup cloud di tempat ini. Pakai \"Sambungkan backup cloud yang ada\" dengan password enkripsinya.",
+    "cloud_denied": "Server S3 menolak kunci akses.",
+    "cloud_failed": "Backup cloud gagal."
   },
   "pool": {
     "title": "Pool penyimpanan",
@@ -1012,5 +1017,28 @@
     "partnerDeleted": "NAS pengirim dihapus.",
     "quota": "batas {gb} GB",
     "revoked": "Kode dicabut"
+  },
+  "cloud": {
+    "title": "Ke cloud (S3)",
+    "help": "Salin shared folder setiap hari ke penyimpanan S3 di luar lokasi (Backblaze B2, Wasabi, Cloudflare R2, AWS, MinIO). Data dienkripsi di NAS sebelum diunggah; penyedia hanya melihat data acak.",
+    "unavailable": "Backup cloud belum aktif: paket restic belum terpasang. Aktifkan fitur Backup cloud di aplikasi Fitur.",
+    "addRepo": "Tambah penyimpanan cloud",
+    "connectRepo": "Sambungkan backup cloud yang ada",
+    "addJob": "Tugas ke cloud",
+    "connected": "Backup cloud yang ada tersambung. Salinannya bisa dipulihkan dari sini.",
+    "passwordTitle": "Password enkripsi backup cloud (hanya tampil sekali)",
+    "passwordHelp": "Catat password ini di tempat aman di luar NAS (misalnya pengelola password atau kertas di brankas). Bila NAS ini rusak, password ini satu-satunya cara membuka backup cloud. Tanpa password ini, siapa pun (termasuk Sapo dan penyedia cloud) tidak bisa memulihkan data Anda.",
+    "passwordSaved": "Saya sudah mencatat password ini di luar NAS",
+    "deleteRepo": "Lupakan penyimpanan",
+    "deleteRepoHelp": "NAS ini melupakan penyimpanan dan kuncinya. Data di cloud TIDAK dihapus dan bisa disambungkan lagi dengan password enkripsinya.",
+    "repoDeleted": "Penyimpanan dilupakan. Data di cloud tetap ada.",
+    "noSnapshots": "Belum ada salinan Sapo di penyimpanan ini.",
+    "restoreHelp": "Salinan dipulihkan sebagai shared folder baru di pool yang dipilih. Bila folder asalnya ada di NAS ini, izinnya diambil dari folder asal; bila tidak, beri izin di Shared Folder setelahnya. Salinan dari NAS lama juga tampil di sini.",
+    "pool": "Ke pool",
+    "schedule": "Setiap hari pukul {hour}.00, salinan {days} hari terakhir disimpan",
+    "sizes": "{added} baru diunggah dari {total}",
+    "keepDays": "Simpan salinan selama (hari)",
+    "keepWarning": "Salinan yang lebih lama dari ini akan dihapus dari cloud saat backup berikutnya.",
+    "deleteJobHelp": "Tugas dihapus. Salinan yang sudah ada di cloud tetap disimpan dan bisa dipulihkan."
   }
 }

@@ -26,6 +26,7 @@ APP_PORT="${APP_PORT:-18090}"      # port aplikasi uji (Homer) di host, diterusk
 RPCBIND_PORT="${RPCBIND_PORT:-10111}" # diteruskan ke 111 (rpcbind) di VM, harus tertutup
 MOUNTD_PORT="${MOUNTD_PORT:-20048}"   # diteruskan ke 20048 (mountd) di VM, harus tertutup
 SMTP_PORT="${SMTP_PORT:-12525}"     # server SMTP uji di host (VM: 10.0.2.2), notifikasi email
+S3_PORT="${S3_PORT:-19000}"         # MinIO (S3) uji di host (VM: 10.0.2.2), backup cloud
 TIMEOUT_S="${TIMEOUT_S:-600}"      # batas waktu boot sampai panel siap
 VM_RAM_MB="${VM_RAM_MB:-2048}"
 LOG="${LOG:-$(dirname "$ISO")/smoke-test-console.log}"
@@ -929,6 +930,92 @@ res="$(api POST "/api/v1/remote-backups/targets/$partner/delete" '{}')"
 res="$(api POST /api/v1/backup-partners/$partner/delete '{"delete_data":true,"confirm_name":"NAS uji","admin_password":"'"$PASS"'"}')"
 [[ "$res" == *' 200' ]] || fail "hapus partner beserta salinan: $res"
 echo "Backup ke NAS lain: dipasangkan dengan kode (sidik jari lain ditolak), penuh lalu inkremental lewat HTTPS ($(json 'print(v["jobs"][0]["last_bytes"])' <<<"$rb") byte terakhir), stream gabungan dan token salah ditolak, salinan dipulihkan di penerima dan terbaca lewat SMB, pool penerima tidak bisa dihapus selama ada salinan"
+# --- Backup ke S3/cloud (ADR 0020) ---------------------------------------------------
+# MinIO di host sebagai server S3. Repo baru (password enkripsi sekali
+# tampil), backup penuh lalu inkremental, isi file tidak terbaca di server
+# S3, lalu pemulihan bencana: NAS melupakan repo, menyambung lagi HANYA
+# dengan password enkripsi, dan memulihkan salinan pertama ke folder baru.
+if command -v docker >/dev/null; then
+mkdir -p "$WORK/s3"
+docker run -d --rm --name sapo-uji-minio -p "127.0.0.1:$S3_PORT:9000" -v "$WORK/s3:/data" \
+  -e MINIO_ROOT_USER=sapouji -e MINIO_ROOT_PASSWORD=sapouji-rahasia minio/minio:latest server /data >/dev/null \
+  || fail "MinIO tidak bisa dijalankan"
+for _ in $(seq 1 30); do curl -fsS "http://127.0.0.1:$S3_PORT/minio/health/live" >/dev/null 2>&1 && break; sleep 2; done
+s3repo() { # s3repo EXISTING PASSWORD
+  api POST /api/v1/cloud/repos '{"name":"MinIO uji","endpoint":"10.0.2.2:'"$S3_PORT"'","bucket":"sapo-uji","insecure_http":true,"access_key":"sapouji","secret_key":"sapouji-rahasia","existing":'"$1"',"password":"'"$2"'","admin_password":"'"$PASS"'"}'
+}
+res="$(api GET /api/v1/cloud)"
+json 'assert v["available"], v' <<<"$res" || fail "restic harus terpasang di ISO: $res"
+res="$(s3repo false "")"
+[[ "$res" == *' 200' ]] || fail "repo cloud baru: $res"
+crepo="$(json 'print(v["id"])' <<<"$res")"
+cpass="$(json 'print(v["password"])' <<<"$res")"
+res="$(api GET /api/v1/cloud)"
+[[ "$res" != *"$cpass"* && "$res" != *sapouji-rahasia* ]] || fail "rahasia cloud bocor ke panel: $res"
+res="$(s3repo false "")"
+[[ "$res" == *'"cloud_repo_exists"'* ]] || fail "repo kedua di tempat yang sama harus ditolak: $res"
+res="$(s3repo true "password-yang-salah")"
+[[ "$res" == *'"cloud_bad_password"'* ]] || fail "password enkripsi salah harus ditolak: $res"
+res="$(api POST /api/v1/cloud/jobs '{"repo":"'"$crepo"'","share":"tetap","hour":3,"keep_days":30,"enabled":false,"admin_password":"'"$PASS"'"}')"
+[[ "$res" == *' 200' ]] || fail "tugas cloud: $res"
+cjob="$(json 'print(v["id"])' <<<"$res")"
+cloud_now() {
+  local res
+  res="$(api POST "/api/v1/cloud/jobs/$cjob/run" '{}')"
+  [[ "$res" == *' 200' ]] || fail "backup cloud sekarang: $res"
+  sleep 3
+  for _ in $(seq 1 90); do
+    cl="$(api GET /api/v1/cloud)"
+    json 'import sys; j=v["jobs"][0]; sys.exit(0 if not j["running"] else 1)' <<<"$cl" && break
+    sleep 2
+  done
+  json 'j=v["jobs"][0]; assert j["last_ok"] and j["last_total_bytes"]>0, j' <<<"$cl" || fail "backup cloud: $cl"
+}
+cloud_now
+echo "di awan" > "$WORK/awan.txt"
+out="$(smbclient //127.0.0.1/tetap -p "$SMB_PORT" -m SMB3 -U "budi%$UPASS" -c "put $WORK/awan.txt awan.txt" 2>&1 || true)"
+[[ "$out" != *NT_STATUS* ]] || fail "tulis awan.txt: $out"
+cloud_now
+! sudo grep -rqs "tersimpan di disk" "$WORK/s3" || fail "isi file terbaca di server S3 (tidak terenkripsi)"
+res="$(api POST /api/v1/shares/tetap/delete "{\"confirm_name\":\"tetap\",\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 409' ]] || fail "folder yang di-backup ke cloud tidak boleh dihapus: $res"
+# Pemulihan bencana: lupakan tugas dan repo, sambung lagi dengan password.
+res="$(api POST "/api/v1/cloud/jobs/$cjob/delete" '{"admin_password":"'"$PASS"'"}')"
+[[ "$res" == *' 200' ]] || fail "hapus tugas cloud: $res"
+res="$(api POST "/api/v1/cloud/repos/$crepo/delete" '{"admin_password":"'"$PASS"'"}')"
+[[ "$res" == *' 200' ]] || fail "lupakan repo cloud: $res"
+res="$(s3repo true "$cpass")"
+[[ "$res" == *' 200' ]] || fail "sambung repo cloud dengan password: $res"
+crepo="$(json 'print(v["id"])' <<<"$res")"
+res="$(curl -ksS -b "$JAR" -w ' %{http_code}' --max-time 300 "$HTTPS/api/v1/cloud/repos/$crepo/snapshots")"
+json 'assert len(v)==2 and all(s["share"]=="tetap" for s in v), v' <<<"$res" || fail "salinan di cloud: $res"
+cfirst="$(json 'print(v[0]["id"])' <<<"$res")"
+res="$(api POST "/api/v1/cloud/repos/$crepo/restore" '{"snapshot":"'"$cfirst"'","pool":"tetap","name":"dari-cloud","admin_password":"'"$PASS"'"}')"
+[[ "$res" == *' 200' ]] || fail "pulihkan dari cloud: $res"
+for _ in $(seq 1 90); do
+  bk="$(api GET /api/v1/backups)"
+  json 'import sys; r=v["restores"][-1]; sys.exit(0 if r["name"]=="dari-cloud" and not r["running"] else 1)' <<<"$bk" && break
+  sleep 2
+done
+json 'r=v["restores"][-1]; assert r["ok"] and r["present"], r' <<<"$bk" || fail "pemulihan dari cloud: $bk"
+res="$(api POST /api/v1/shares/dari-cloud "{\"permissions\":{\"user:budi\":\"read\"},\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "izin folder dari cloud: $res"
+for _ in $(seq 1 10); do
+  out="$(smbclient //127.0.0.1/dari-cloud -p "$SMB_PORT" -m SMB3 -U "budi%$UPASS" -c "get catatan.txt $WORK/dari-cloud.txt; ls" 2>&1 || true)"
+  [[ "$out" == *catatan.txt* ]] && break
+  sleep 2
+done
+cmp -s "$WORK/dari-cloud.txt" "$WORK/tetap.txt" || fail "isi folder dari cloud lewat SMB: $out"
+[[ "$out" != *awan.txt* ]] || fail "salinan pertama tidak boleh berisi file sesudahnya: $out"
+res="$(api POST /api/v1/shares/dari-cloud/delete "{\"confirm_name\":\"dari-cloud\",\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "hapus folder dari-cloud: $res"
+res="$(api POST "/api/v1/cloud/repos/$crepo/delete" '{"admin_password":"'"$PASS"'"}')"
+[[ "$res" == *' 200' ]] || fail "lupakan repo cloud: $res"
+docker rm -f sapo-uji-minio >/dev/null 2>&1 || true
+echo "Backup cloud: repo restic terenkripsi di S3 (MinIO), penuh lalu inkremental, isi tidak terbaca di server S3, repo dan password salah ditolak, pemulihan bencana dengan password saja ke folder baru terbaca lewat SMB"
+else
+echo "Backup cloud: dilewati (docker tidak ada untuk MinIO)"
+fi
 res="$(api POST "/api/v1/backups/$bk_id/delete" "{\"delete_data\":true,\"confirm_name\":\"$bk_id\",\"admin_password\":\"$PASS\"}")"
 [[ "$res" == *' 200' ]] || fail "hapus tugas backup: $res"
 res="$(api POST /api/v1/storage/pools/cadangan/destroy "{\"confirm_name\":\"cadangan\",\"password\":\"$PASS\"}")"
