@@ -674,7 +674,7 @@ export const api = {
   runRemoteJob: (id: string) => post<{ ok: boolean }>(`/api/v1/remote-backups/jobs/${encodeURIComponent(id)}/run`),
   deleteRemoteJob: (id: string, admin_password: string) => post<{ ok: boolean }>(`/api/v1/remote-backups/jobs/${encodeURIComponent(id)}/delete`, { admin_password }),
   partners: () => get<BackupPartner[]>("/api/v1/backup-partners"),
-  createPartner: (req: { name: string; pool: string; keep: number; admin_password: string }) => post<{ id: string; code: string }>("/api/v1/backup-partners", req),
+  createPartner: (req: { name: string; pool: string; keep: number; quota_gb: number; admin_password: string }) => post<{ id: string; code: string }>("/api/v1/backup-partners", req),
   deletePartner: (id: string, req: { delete_data: boolean; confirm_name: string; admin_password: string }) =>
     post<{ ok: boolean }>(`/api/v1/backup-partners/${encodeURIComponent(id)}/delete`, req),
   restorePartnerCopy: (id: string, job: string, req: { copy: string; name: string; admin_password: string }) =>
@@ -827,6 +827,8 @@ export interface BackupPartner {
   name: string
   pool: string
   keep: number
+  quota_gb?: number
+  revoked?: boolean
   created: string
   last_seen?: string
   jobs: { job: string; copies: { name: string; created: string }[]; used_bytes: number }[]
@@ -973,7 +975,8 @@ export const wizardActions: Record<string, (values: Record<string, string>, ctx:
       events_off: [],
       admin_password: v.admin_password ?? "",
     }),
-  "rbackup.partner_create": (v) => api.createPartner({ name: v.name ?? "", pool: v.pool ?? "", keep: Number(v.keep), admin_password: v.admin_password ?? "" }),
+  "rbackup.partner_create": (v) =>
+    api.createPartner({ name: v.name ?? "", pool: v.pool ?? "", keep: Number(v.keep), quota_gb: Number(v.quota_gb || 0), admin_password: v.admin_password ?? "" }),
   "rbackup.target_add": (v) => api.addTarget({ name: v.name ?? "", address: v.address ?? "", code: (v.code ?? "").trim(), admin_password: v.admin_password ?? "" }),
   "rbackup.job_create": (v) =>
     api.setRemoteJob({ share: v.share ?? "", target: v.target ?? "", hour: Number(v.hour), enabled: true, admin_password: v.admin_password ?? "" }),

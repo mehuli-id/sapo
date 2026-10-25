@@ -1001,7 +1001,7 @@
     "codeHelp": "Masukkan kode ini di NAS pengirim: Backup → Ke NAS lain → Tambah NAS tujuan. Siapa pun yang memegang kode ini bisa mengirim backup ke NAS ini.",
     "copy": "Salin kode",
     "copied": "Tersalin",
-    "partnerInfo": "Disimpan di pool {pool}, {keep} salinan per folder",
+    "partnerInfo": "Disimpan di pool {pool}, salinan {keep} hari terakhir tidak pernah dibuang",
     "lastSeen": "terakhir terhubung {when}",
     "noCopiesYet": "Belum ada salinan yang diterima.",
     "restoreHelp": "Salinan dipulihkan sebagai shared folder baru di pool {pool} di NAS ini, tanpa izin pengguna. Beri izin di Shared Folder setelahnya.",
@@ -1009,6 +1009,8 @@
     "deletePartner": "Hapus NAS pengirim",
     "deletePartnerHelp": "Kode pemasangan dicabut: NAS itu tidak bisa mengirim backup lagi. Salinan yang sudah diterima tetap disimpan kecuali Anda memilih untuk menghapusnya.",
     "deletePartnerData": "Hapus juga semua salinannya di pool {pool}",
-    "partnerDeleted": "NAS pengirim dihapus."
+    "partnerDeleted": "NAS pengirim dihapus.",
+    "quota": "batas {gb} GB",
+    "revoked": "Kode dicabut"
   }
 }

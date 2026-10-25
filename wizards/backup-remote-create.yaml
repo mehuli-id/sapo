@@ -41,7 +41,7 @@ steps:
         default: "1"
         pattern: "^([01]?[0-9]|2[0-3])$"
         autocomplete: "off"
-        label: { id: Jam backup setiap hari (0–23, waktu NAS), en: Daily backup hour (0–23, NAS time) }
+        label: { id: "Jam backup setiap hari (0–23, waktu NAS)", en: "Daily backup hour (0–23, NAS time)" }
 
   - id: summary
     type: review

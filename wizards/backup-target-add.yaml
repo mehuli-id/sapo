@@ -47,7 +47,7 @@ steps:
         type: text
         required: true
         autocomplete: "off"
-        pattern: "^SAPO1-[a-z0-9]{8,32}-[A-Za-z0-9_-]{20,64}-[0-9a-f]{32}$"
+        pattern: "^SAPO1-[a-z0-9]{8,32}-[0-9a-f]{40,64}-[0-9a-f]{32}$"
         label: { id: Kode pemasangan, en: Pairing code }
 
   - id: summary

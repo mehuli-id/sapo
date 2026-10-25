@@ -53,7 +53,7 @@ func TestRemoteBackupAPI(t *testing.T) {
 	ts := httptest.NewTLSServer(h.s)
 	defer ts.Close()
 	h.s.https = &HTTPSInfo{Port: "5001", Fingerprint: func() string { return "" }, Certificate: func() []byte { return ts.Certificate().Raw }}
-	rec := h.do(http.MethodPost, "/api/v1/backup-partners", map[string]any{"name": "NAS kantor", "pool": "usb", "keep": 14, "admin_password": adminPassword}, overTLS)
+	rec := h.do(http.MethodPost, "/api/v1/backup-partners", map[string]any{"name": "NAS kantor", "pool": "usb", "keep": 14, "quota_gb": 2, "admin_password": adminPassword}, overTLS)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("partner: %d %s", rec.Code, rec.Body)
 	}
@@ -98,10 +98,10 @@ func TestRemoteBackupAPI(t *testing.T) {
 	if got, _ := os.ReadFile(recvFile); string(got) != "ALIRAN-ZFS" {
 		t.Fatalf("data di penerima = %q", got)
 	}
-	if p, _ := agent.param(proto.OpRBackupRecvOpen).(proto.RBackupRecvParams); p.Pool != "usb" || p.Partner != created.ID || p.Job != job.ID || p.Snap != snap {
+	if p, _ := agent.param(proto.OpRBackupRecvOpen).(proto.RBackupRecvParams); p.Pool != "usb" || p.Partner != created.ID || p.Job != job.ID || p.Snap != snap || p.QuotaBytes != 2<<30 {
 		t.Fatalf("recv_open = %+v", p)
 	}
-	if p, _ := agent.param(proto.OpRBackupRecvFinish).(proto.RBackupRecvFinish); !p.OK || p.Keep != 14 {
+	if p, _ := agent.param(proto.OpRBackupRecvFinish).(proto.RBackupRecvFinish); !p.OK || p.KeepDays != 14 {
 		t.Fatalf("recv_finish = %+v (jumlah simpan dari penerima)", p)
 	}
 	if p, _ := agent.param(proto.OpRBackupSendFinish).(proto.RBackupSendFinish); !p.OK || !p.RemoteHas {
@@ -139,6 +139,10 @@ func TestRemoteBackupAPI(t *testing.T) {
 	})
 	if err := h.s.runRemoteJob(context.Background(), job.ID); err == nil || !strings.Contains(err.Error(), "unauthorized") && !strings.Contains(err.Error(), "partner") {
 		t.Fatalf("partner dicabut: %v", err)
+	}
+	// Partner yang dicabut tetap tampil (salinannya bisa dipulihkan/dihapus).
+	if rec := h.do(http.MethodGet, "/api/v1/backup-partners", nil); !strings.Contains(rec.Body.String(), `"revoked":true`) {
+		t.Fatalf("partner dicabut harus tetap tampil: %s", rec.Body)
 	}
 }
 
@@ -207,5 +211,27 @@ func TestRemoteBackupFailureNotifies(t *testing.T) {
 	h.s.notifyCheck(context.Background())
 	if sent.count() != 1 || !strings.Contains(sent.last().Body, "Backup kel → Kantor gagal: NAS tujuan tidak bisa dihubungi") {
 		t.Fatalf("email: %d %+v", sent.count(), sent.last())
+	}
+}
+
+// Label wizard tidak boleh terpotong (koma di flow mapping YAML tanpa
+// tanda kutip memotong teks diam-diam).
+func TestWizardLabelsComplete(t *testing.T) {
+	ents, _ := os.ReadDir("../../wizards")
+	for _, e := range ents {
+		id := strings.TrimSuffix(e.Name(), ".yaml")
+		wz, err := LoadWizard("../../wizards", id)
+		if err != nil {
+			t.Fatalf("%s: %v", id, err)
+		}
+		for _, st := range wz.Steps {
+			for _, f := range st.Fields {
+				for lang, v := range f.Label {
+					if strings.Count(v, "(") != strings.Count(v, ")") || (lang != "id" && lang != "en") {
+						t.Errorf("%s.%s: label %s terpotong: %q (%v)", id, f.Key, lang, v, f.Label)
+					}
+				}
+			}
+		}
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"regexp"
@@ -30,7 +31,17 @@ import (
 
 var partnerIDPattern = regexp.MustCompile(`^[a-z0-9]{8,32}$`)
 
-const maxRBackupSessions = 4
+const (
+	// Sesi kirim dan terima dihitung terpisah: partner yang lambat tidak
+	// menahan backup keluar NAS ini.
+	maxRecvSessions = 4
+	maxSendSessions = 2
+	// maxReceivesPerDay: salinan per tugas per 24 jam (jam penerima).
+	maxReceivesPerDay = 4
+	// maxPartnerJobs: tugas (dataset) per partner.
+	maxPartnerJobs = 50
+	receivedProp   = "sapo:received"
+)
 
 // RemoteBackups melayani rbackup.*.
 type RemoteBackups struct {
@@ -127,14 +138,8 @@ func (r *RemoteBackups) open(args []string, in bool, sess *pipeSession) (string,
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := r.b.now()
-	for id, s := range r.sessions {
-		if now.After(s.expires) {
-			s.cancel()
-			delete(r.sessions, id)
-		}
-	}
-	if len(r.sessions) >= maxRBackupSessions {
-		return "", nil, &OpError{Code: proto.ErrBusy, Message: "terlalu banyak backup jarak jauh yang berjalan"}
+	if err := r.reapLocked(now, sess.recv); err != nil {
+		return "", nil, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), r.b.t.MaxRun)
 	f, wait, err := r.spawn(ctx, args, in)
@@ -152,6 +157,83 @@ func (r *RemoteBackups) open(args []string, in bool, sess *pipeSession) (string,
 	}()
 	r.sessions[id] = sess
 	return id, f, nil
+}
+
+// reapLocked menghentikan sesi kedaluwarsa (snapshot kirimnya dibuang) dan
+// memeriksa batas sesi jenis itu.
+func (r *RemoteBackups) reapLocked(now time.Time, recv bool) error {
+	n := 0
+	for id, s := range r.sessions {
+		if now.After(s.expires) {
+			s.cancel()
+			delete(r.sessions, id)
+			if !s.recv {
+				go r.b.discardSnap(context.Background(), s.ds+"@"+s.snap)
+			}
+			continue
+		}
+		if s.recv == recv {
+			n++
+		}
+	}
+	limit := maxSendSessions
+	if recv {
+		limit = maxRecvSessions
+	}
+	if n >= limit {
+		return &OpError{Code: proto.ErrBusy, Message: "terlalu banyak backup jarak jauh yang berjalan"}
+	}
+	return nil
+}
+
+// openRecv membuka sesi penerima: sapo-api menulis ke pipa perantara;
+// header stream diperiksa (checkStreamHeader) SEBELUM zfs receive
+// dijalankan, lalu sisanya diteruskan.
+func (r *RemoteBackups) openRecv(args []string, incremental bool, sess *pipeSession) (string, *os.File, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := r.b.now()
+	if err := r.reapLocked(now, true); err != nil {
+		return "", nil, err
+	}
+	ar, aw, err := os.Pipe()
+	if err != nil {
+		return "", nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), r.b.t.MaxRun)
+	sess.cancel, sess.done, sess.expires = cancel, make(chan struct{}), now.Add(r.b.t.MaxRun)
+	go func() {
+		defer close(sess.done)
+		defer ar.Close()
+		// Ditutup saat dibatalkan agar pembacaan header tidak menggantung.
+		stop := context.AfterFunc(ctx, func() { ar.Close() })
+		defer stop()
+		hdr, err := checkStreamHeader(ar, incremental)
+		if err != nil {
+			sess.err = err
+			return
+		}
+		zw, wait, err := r.spawn(ctx, args, true)
+		if err != nil {
+			sess.err = err
+			return
+		}
+		_, werr := zw.Write(hdr)
+		if werr == nil {
+			_, werr = io.Copy(zw, ar)
+		}
+		zw.Close()
+		if err := wait(); err != nil {
+			sess.err = err
+		} else if werr != nil {
+			sess.err = werr
+		}
+	}()
+	raw := make([]byte, 16)
+	_, _ = rand.Read(raw)
+	id := hex.EncodeToString(raw)
+	r.sessions[id] = sess
+	return id, aw, nil
 }
 
 func (r *RemoteBackups) take(id string) (*pipeSession, error) {
@@ -179,9 +261,14 @@ func (s *pipeSession) finish(ok bool) error {
 }
 
 func (r *RemoteBackups) refusePool(ctx context.Context, pool string) error {
+	if _, err := r.b.propsFn(ctx, pool+"/sapo-backup-remote", "type"); errors.Is(err, errNoDataset) {
+		return nil // tidak ada salinan dari NAS lain
+	} else if err != nil {
+		return err // gagal-tertutup
+	}
 	out, err := r.b.zfs(ctx, []string{"list", "-H", "-o", "name", "-r", "-d", "2"}, pool+"/sapo-backup-remote")
 	if err != nil {
-		return nil // tidak ada salinan dari NAS lain
+		return err
 	}
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 		if strings.Count(line, "/") >= 2 {
@@ -193,11 +280,20 @@ func (r *RemoteBackups) refusePool(ctx context.Context, pool string) error {
 
 // ensureRemoteParents: <pool>/sapo-backup-remote dan .../<partner>
 // (penanda @induk, tidak dipasang).
-func (r *RemoteBackups) ensureRemoteParents(ctx context.Context, t proto.RBackupTarget) error {
-	for _, ds := range []string{t.Pool + "/sapo-backup-remote", t.Pool + "/sapo-backup-remote/" + t.Partner} {
+func (r *RemoteBackups) ensureRemoteParents(ctx context.Context, t proto.RBackupTarget, quota uint64) error {
+	partnerDS := t.Pool + "/sapo-backup-remote/" + t.Partner
+	defer func() {
+		// Kuota partner (0 = tanpa batas): partner tidak bisa memenuhi pool.
+		q := "none"
+		if quota > 0 {
+			q = strconv.FormatUint(quota, 10)
+		}
+		_, _ = r.b.zfs(ctx, []string{"set", "quota=" + q}, partnerDS)
+	}()
+	for _, ds := range []string{t.Pool + "/sapo-backup-remote", partnerDS} {
 		props, err := r.b.propsFn(ctx, ds, backupPropName, sharePropName)
 		if errors.Is(err, errNoDataset) {
-			if _, err := r.b.zfs(ctx, []string{"create", "-o", backupPropName + "=" + parentMarker, "-o", "canmount=off", "-o", "devices=off", "-o", "setuid=off"}, ds); err != nil {
+			if _, err := r.b.zfs(ctx, []string{"create", "-o", backupPropName + "=" + parentMarker, "-o", "canmount=off", "-o", "devices=off", "-o", "setuid=off", "-o", "exec=off"}, ds); err != nil {
 				return err
 			}
 			continue
@@ -227,6 +323,38 @@ func (r *RemoteBackups) remoteState(ctx context.Context, t proto.RBackupTarget) 
 	return true, nil
 }
 
+// receivedTimes: salinan (prefix) di ds → waktu diterima (sapo:received;
+// salinan tanpa catatan dianggap lama).
+func (r *RemoteBackups) receivedTimes(ctx context.Context, ds, prefix string) (map[string]time.Time, error) {
+	out, err := r.b.zfs(ctx, []string{"list", "-H", "-p", "-t", "snapshot", "-d", "1", "-o", "name," + receivedProp}, ds)
+	if err != nil {
+		return nil, err
+	}
+	m := map[string]time.Time{}
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		f := strings.Split(line, "\t")
+		if len(f) != 2 {
+			continue
+		}
+		_, name, ok := strings.Cut(f[0], "@")
+		if !ok || !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		sec, _ := strconv.ParseInt(f[1], 10, 64)
+		m[name] = time.Unix(sec, 0)
+	}
+	return m, nil
+}
+
+// partnerJobs: jumlah tugas (dataset) partner di penerima.
+func (r *RemoteBackups) partnerJobs(ctx context.Context, t proto.RBackupTarget) (int, error) {
+	out, err := r.b.zfs(ctx, []string{"list", "-H", "-o", "name", "-d", "1", "-t", "filesystem"}, t.Pool+"/sapo-backup-remote/"+t.Partner)
+	if err != nil {
+		return 0, err
+	}
+	return max(len(strings.Split(strings.TrimSpace(out), "\n"))-1, 0), nil
+}
+
 // --- Penerima ------------------------------------------------------------------
 
 // RecvOpenOp: rbackup.recv_open.
@@ -249,7 +377,7 @@ func (r *RemoteBackups) RecvOpenOp() Handler {
 		if !pools[p.Pool] {
 			return nil, &OpError{Code: proto.ErrNotFound, Message: "pool penerima tidak ditemukan"}
 		}
-		if err := r.ensureRemoteParents(ctx, p.RBackupTarget); err != nil {
+		if err := r.ensureRemoteParents(ctx, p.RBackupTarget, p.QuotaBytes); err != nil {
 			return nil, err
 		}
 		exists, err := r.remoteState(ctx, p.RBackupTarget)
@@ -257,12 +385,21 @@ func (r *RemoteBackups) RecvOpenOp() Handler {
 			return nil, err
 		}
 		ds := remoteDS(p.RBackupTarget)
-		var args []string
+		// Properti berbahaya dipaksa di setiap penerimaan (lapis kedua; stream
+		// gabungan yang bisa membawa properti sudah ditolak checkStreamHeader).
+		guard := []string{"-o", "canmount=noauto", "-o", "readonly=on",
+			"-x", "mountpoint", "-x", "sharenfs", "-x", "sharesmb", "-x", "setuid", "-x", "exec", "-x", "devices"}
+		args := append([]string{"receive", "-u"}, guard...)
 		switch {
 		case p.Base == "" && exists:
 			return nil, &OpError{Code: "backup_diverged", Message: "salinan tugas ini sudah ada di penerima; kirim inkremental dari salinan terbarunya"}
 		case p.Base == "":
-			args = []string{"receive", "-u", "-o", "canmount=noauto", "-o", "readonly=on", "-o", backupPropName + "=" + remoteMarker(p.RBackupTarget), "--", ds}
+			if n, err := r.partnerJobs(ctx, p.RBackupTarget); err != nil {
+				return nil, err
+			} else if n >= maxPartnerJobs {
+				return nil, &OpError{Code: proto.ErrConflict, Message: "batas jumlah folder per NAS pengirim tercapai"}
+			}
+			args = append(args, "-o", backupPropName+"="+remoteMarker(p.RBackupTarget))
 		case !exists:
 			return nil, &OpError{Code: "backup_diverged", Message: "salinan dasar tidak ada di penerima"}
 		default:
@@ -273,9 +410,24 @@ func (r *RemoteBackups) RecvOpenOp() Handler {
 			if len(have) == 0 || have[len(have)-1].Name != p.Base {
 				return nil, &OpError{Code: "backup_diverged", Message: "dasar inkremental bukan salinan terbaru di penerima"}
 			}
-			args = []string{"receive", "-u", "--", ds}
+			// Batas penerimaan harian (jam penerima).
+			recv, err := r.receivedTimes(ctx, ds, rbackupPrefix(p.Job))
+			if err != nil {
+				return nil, err
+			}
+			today := 0
+			for _, at := range recv {
+				if r.b.now().Sub(at) < 24*time.Hour {
+					today++
+				}
+			}
+			if today >= maxReceivesPerDay {
+				return nil, &OpError{Code: proto.ErrBusy, Message: "batas salinan per hari untuk folder ini tercapai"}
+			}
 		}
-		id, f, err := r.open(args, true, &pipeSession{recv: true, ds: ds, snap: p.Snap, prefix: rbackupPrefix(p.Job)})
+		// Target ds@snap: nama snapshot ditentukan penerima, bukan stream.
+		args = append(args, "--", ds+"@"+p.Snap)
+		id, f, err := r.openRecv(args, p.Base != "", &pipeSession{recv: true, ds: ds, snap: p.Snap, prefix: rbackupPrefix(p.Job)})
 		if err != nil {
 			return nil, err
 		}
@@ -302,16 +454,28 @@ func (r *RemoteBackups) RecvFinishOp() Handler {
 		if err := s.finish(p.OK); err != nil {
 			return nil, &OpError{Code: "rbackup_failed", Message: clipTo(err.Error(), maxErrorText)}
 		}
-		keep := min(max(p.Keep, 1), 366)
+		// Waktu terima menurut jam NAS ini (stream bisa memalsukan waktu
+		// pembuatan snapshot).
+		now := r.b.now()
+		_, _ = r.b.zfs(ctx, []string{"set", receivedProp + "=" + strconv.FormatInt(now.Unix(), 10)}, s.ds+"@"+s.snap)
+		days := min(max(p.KeepDays, 1), 366)
 		_ = r.b.locked(ctx, func() error {
-			have, err := r.b.snapshots(ctx, s.ds, s.prefix)
-			if err != nil || len(have) <= keep {
+			recv, err := r.receivedTimes(ctx, s.ds, s.prefix)
+			if err != nil {
 				return err
 			}
 			var names []string
-			for _, c := range have[:len(have)-keep] {
-				names = append(names, c.Name)
+			for name, at := range recv {
+				// Yang terbaru selalu disimpan; yang lain dibuang hanya bila
+				// diterima lebih dari `days` hari lalu.
+				if name != s.snap && now.Sub(at) > time.Duration(days)*24*time.Hour {
+					names = append(names, name)
+				}
 			}
+			if len(names) == 0 {
+				return nil
+			}
+			slices.Sort(names)
 			_, err = r.b.zfs(ctx, []string{"destroy"}, s.ds+"@"+strings.Join(names, ","))
 			return err
 		})

@@ -6,6 +6,7 @@
 import { onMounted, reactive, ref } from "vue"
 import { useI18n } from "vue-i18n"
 import { ArchiveRestore, CircleCheck, Copy, Inbox, LoaderCircle, Plus, Trash2, TriangleAlert } from "@lucide/vue"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -128,9 +129,11 @@ const remove = (p: BackupPartner) =>
         <li v-for="p in partners ?? []" :key="p.id" class="space-y-2 rounded-xl border p-3">
           <div class="flex flex-wrap items-start justify-between gap-2">
             <div class="min-w-0 space-y-0.5">
-              <p class="text-sm font-medium">{{ p.name }}</p>
+              <p class="flex items-center gap-1.5 text-sm font-medium">
+                {{ p.name }}<Badge v-if="p.revoked" variant="outline">{{ t("rbackup.revoked") }}</Badge>
+              </p>
               <p class="text-xs text-muted-foreground">
-                {{ t("rbackup.partnerInfo", { pool: p.pool, keep: p.keep }) }}<template v-if="when(p.last_seen)"> · {{ t("rbackup.lastSeen", { when: when(p.last_seen) }) }}</template>
+                {{ t("rbackup.partnerInfo", { pool: p.pool, keep: p.keep }) }}<template v-if="p.quota_gb"> · {{ t("rbackup.quota", { gb: p.quota_gb }) }}</template><template v-if="when(p.last_seen)"> · {{ t("rbackup.lastSeen", { when: when(p.last_seen) }) }}</template>
               </p>
             </div>
             <Button v-if="!mode.startsWith(`delete:${p.id}`)" size="sm" variant="ghost" :aria-label="t('rbackup.deletePartner')" @click="start('delete', p)"><Trash2 /></Button>

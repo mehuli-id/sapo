@@ -1149,6 +1149,9 @@ type RBackupRecvParams struct {
 	RBackupTarget
 	Base string `json:"base"`
 	Snap string `json:"snap"`
+	// QuotaBytes: batas ruang semua salinan partner (0 = tanpa batas);
+	// diatur admin penerima.
+	QuotaBytes uint64 `json:"quota_bytes,omitempty"`
 }
 
 // RBackupSession: aliran yang sedang terbuka (file descriptor-nya dikirim
@@ -1160,11 +1163,14 @@ type RBackupSession struct {
 }
 
 // RBackupRecvFinish menutup aliran penerima. OK: data dari pengirim sampai
-// utuh (bila tidak, zfs receive dihentikan). Keep: jumlah salinan disimpan.
+// utuh (bila tidak, zfs receive dihentikan). KeepDays: salinan yang
+// DITERIMA kurang dari sekian hari lalu (jam penerima) tidak pernah dibuang,
+// jadi NAS pengirim yang dibobol tidak bisa menggusur salinan lama dengan
+// mengirim berulang-ulang.
 type RBackupRecvFinish struct {
-	Session string `json:"session"`
-	OK      bool   `json:"ok"`
-	Keep    int    `json:"keep"`
+	Session  string `json:"session"`
+	OK       bool   `json:"ok"`
+	KeepDays int    `json:"keep_days"`
 }
 
 // RBackupList: salinan di penerima. Untuk Job kosong: Jobs berisi semua

@@ -31,7 +31,7 @@ import (
 // setiap hari: sapod menjalankan zfs send, sapo-api mengalirkannya lewat
 // HTTPS ke NAS tujuan.
 
-var pairingCodeRe = regexp.MustCompile(`^SAPO1-([a-z0-9]{8,32})-([A-Za-z0-9_-]{20,64})-([0-9a-f]{32})$`)
+var pairingCodeRe = regexp.MustCompile(`^SAPO1-([a-z0-9]{8,32})-([0-9a-f]{40,64})-([0-9a-f]{32})$`)
 
 type backupTarget struct {
 	ID          string    `json:"id"`
@@ -171,11 +171,15 @@ func pinnedClient(fp string, prefix bool, seen *string) *http.Client {
 		Transport: &http.Transport{
 			// Sertifikat Sapo self-signed: kepercayaan lewat sidik jari yang
 			// dikunci (VerifyConnection), bukan lewat CA.
-			TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true, VerifyConnection: verify},
-			DialContext:           (&net.Dialer{Timeout: 15 * time.Second}).DialContext,
-			TLSHandshakeTimeout:   15 * time.Second,
-			ResponseHeaderTimeout: 0,
-			Proxy:                 nil,
+			TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true, VerifyConnection: verify},
+			DialContext:         (&net.Dialer{Timeout: 15 * time.Second}).DialContext,
+			TLSHandshakeTimeout: 15 * time.Second,
+			// Jawaban setelah unggahan selesai: penerima hanya menunggu zfs
+			// receive selesai.
+			ResponseHeaderTimeout: 10 * time.Minute,
+			// Klien baru per tugas: tanpa koneksi menganggur yang tertinggal.
+			DisableKeepAlives: true,
+			Proxy:             nil,
 		},
 		// Tidak mengikuti pengalihan ke tempat lain.
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
@@ -219,6 +223,8 @@ func (s *Server) partnerRequest(ctx context.Context, c *http.Client, t backupTar
 }
 
 func (s *Server) remoteCopies(ctx context.Context, c *http.Client, t backupTarget, job string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
 	var l proto.RBackupList
 	if err := s.partnerRequest(ctx, c, t, http.MethodGet, "/api/v1/rbackup/jobs/"+job+"/copies", nil, nil, &l); err != nil {
 		return nil, err

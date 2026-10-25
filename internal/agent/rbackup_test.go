@@ -2,10 +2,12 @@ package agent
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -28,13 +30,13 @@ func fakeSpawn(f *fakeZFS) func(ctx context.Context, args []string, in bool) (*o
 			go func() {
 				data, _ := io.ReadAll(pr)
 				pr.Close()
-				src := string(data)
-				if src == "" {
+				if len(data) <= drrBeginLen {
 					done <- errors.New("aliran kosong")
 					return
 				}
-				_, snap, _ := strings.Cut(src, "@")
-				dst := args[len(args)-1]
+				src := string(data[drrBeginLen:])
+				// Target ds@snap: nama snapshot dari penerima.
+				dst, snap, _ := strings.Cut(args[len(args)-1], "@")
 				f.mu.Lock()
 				if _, ok := f.ds[dst]; !ok {
 					props := map[string]string{"type": "filesystem"}
@@ -52,8 +54,9 @@ func fakeSpawn(f *fakeZFS) func(ctx context.Context, args []string, in bool) (*o
 			}()
 			return pw, func() error { return <-done }, nil
 		}
+		incremental := slices.Contains(args, "-i")
 		go func() {
-			_, err := pw.Write([]byte(args[len(args)-1]))
+			_, err := pw.Write(append(fakeHeader(incremental, dmuSubstream, 0, 0), args[len(args)-1]...))
 			pw.Close()
 			done <- err
 		}()
@@ -89,7 +92,7 @@ func transfer(t *testing.T, r *RemoteBackups, remote []string, keep int) (string
 	rfr.File.Close()
 	sfr.File.Close()
 	rs := rfr.Result.(proto.RBackupSession)
-	_, recvErr := rbCall(t, r.RecvFinishOp(), proto.RBackupRecvFinish{Session: rs.Session, OK: copyErr == nil, Keep: keep})
+	_, recvErr := rbCall(t, r.RecvFinishOp(), proto.RBackupRecvFinish{Session: rs.Session, OK: copyErr == nil, KeepDays: keep})
 	if _, err := rbCall(t, r.SendFinishOp(), proto.RBackupSendFinish{Session: ss.Session, OK: copyErr == nil, RemoteHas: recvErr == nil}); err != nil {
 		return "", err
 	}
@@ -144,9 +147,13 @@ func TestRemoteBackupRoundTrip(t *testing.T) {
 			t.Fatalf("inkremental %d: %v", i, err)
 		}
 	}
+	// Salinan yang diterima kurang dari `keep` hari lalu tidak dibuang.
 	have := remoteCopies(t, r)
-	if len(have) != 2 || have[0] == first {
+	if len(have) != 3 || have[0] != first {
 		t.Fatalf("salinan di penerima: %v", have)
+	}
+	if !strings.Contains(strings.Join(f.calls, "\n"), "-x mountpoint -x sharenfs -x sharesmb -x setuid -x exec -x devices -- usb/sapo-backup-remote/abcdef0123/kel@"+rbackupPrefix("kel")) {
+		t.Fatalf("receive tanpa pelindung properti:\n%s", strings.Join(f.calls, "\n"))
 	}
 	all := strings.Join(f.calls, "\n")
 	if strings.Count(all, "send -L -c -i @"+rbackupPrefix("kel")) != 2 || strings.Contains(all, "receive -u -F") {
@@ -192,5 +199,83 @@ func TestRemoteBackupRoundTrip(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(f.calls, "\n"), "destroy -r usb/sapo-backup-remote/abcdef0123") {
 		t.Fatalf("hapus partner:\n%s", strings.Join(f.calls, "\n"))
+	}
+}
+
+// fakeHeader: rekaman DRR_BEGIN (little endian).
+func fakeHeader(incremental bool, hdrType, features uint64, flags uint32) []byte {
+	h := make([]byte, drrBeginLen)
+	le := binary.LittleEndian
+	le.PutUint64(h[8:], dmuBackupMagic)
+	le.PutUint64(h[16:], features<<2|hdrType)
+	le.PutUint32(h[32:], dmuOstZFS)
+	le.PutUint32(h[36:], flags)
+	le.PutUint64(h[40:], 7)
+	if incremental {
+		le.PutUint64(h[48:], 9)
+	}
+	return h
+}
+
+func TestCheckStreamHeader(t *testing.T) {
+	ok := fakeHeader(false, dmuSubstream, 0, 0)
+	if _, err := checkStreamHeader(strings.NewReader(string(ok)), false); err != nil {
+		t.Fatal(err)
+	}
+	big := make([]byte, drrBeginLen)
+	copy(big, ok)
+	be := binary.BigEndian
+	be.PutUint64(big[8:], dmuBackupMagic)
+	be.PutUint64(big[16:], dmuSubstream)
+	be.PutUint32(big[32:], dmuOstZFS)
+	be.PutUint32(big[36:], 0)
+	be.PutUint64(big[48:], 0)
+	if _, err := checkStreamHeader(strings.NewReader(string(big)), false); err != nil {
+		t.Fatalf("big endian: %v", err)
+	}
+	zvol := fakeHeader(false, dmuSubstream, 0, 0)
+	binary.LittleEndian.PutUint32(zvol[32:], 3)
+	for name, c := range map[string]struct {
+		h    []byte
+		incr bool
+	}{
+		"gabungan (-R/-p)": {fakeHeader(false, 2, 0, 0), false},
+		"raw":              {fakeHeader(false, dmuSubstream, backupFeatureRaw, 0), false},
+		"clone":            {fakeHeader(false, dmuSubstream, 0, drrFlagClone), false},
+		"zvol":             {zvol, false},
+		"inkremental":      {fakeHeader(true, dmuSubstream, 0, 0), false},
+		"bukan penuh":      {fakeHeader(false, dmuSubstream, 0, 0), true},
+		"pendek":           {ok[:100], false},
+		"sampah":           {make([]byte, drrBeginLen), false},
+	} {
+		if _, err := checkStreamHeader(strings.NewReader(string(c.h)), c.incr); err == nil {
+			t.Errorf("%s harus ditolak", name)
+		}
+	}
+}
+
+// Stream gabungan dari partner jahat: zfs receive tidak pernah dijalankan.
+func TestRemoteBackupRejectsCompoundStream(t *testing.T) {
+	b, f := testBackups(t)
+	r := NewRemoteBackups(b)
+	r.spawn = fakeSpawn(f)
+	tgt := proto.RBackupTarget{Pool: "usb", Partner: "abcdef0123", Job: "kel"}
+	res, err := rbCall(t, r.RecvOpenOp(), proto.RBackupRecvParams{RBackupTarget: tgt, Snap: rbackupPrefix("kel") + "2026.10.28-01.00.00"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fr := res.(FileResult)
+	_, _ = fr.File.Write(append(fakeHeader(false, 2, 0, 0), "usb/jahat@x"...))
+	fr.File.Close()
+	if _, err := rbCall(t, r.RecvFinishOp(), proto.RBackupRecvFinish{Session: fr.Result.(proto.RBackupSession).Session, OK: true, KeepDays: 3}); err == nil {
+		t.Fatal("stream gabungan harus gagal")
+	}
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "receive") {
+			t.Fatalf("zfs receive tidak boleh dijalankan: %v", f.calls)
+		}
+	}
+	if _, ok := f.ds["usb/sapo-backup-remote/abcdef0123/kel"]; ok {
+		t.Fatal("dataset tidak boleh dibuat")
 	}
 }

@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -39,10 +38,16 @@ const partnerAuthScheme = "Sapo-Backup "
 var partnerNameRe = regexp.MustCompile(`^[\p{L}\p{N} ._-]{1,40}$`)
 
 type backupPartner struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Pool      string    `json:"pool"`
-	Keep      int       `json:"keep"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Pool string `json:"pool"`
+	// Keep: salinan yang diterima kurang dari sekian hari lalu tidak pernah
+	// dibuang.
+	Keep int `json:"keep"`
+	// QuotaGB: batas ruang semua salinan partner (0 = tanpa batas).
+	QuotaGB int64 `json:"quota_gb,omitempty"`
+	// Revoked: kode dicabut; salinan tetap ada sampai admin menghapusnya.
+	Revoked   bool      `json:"revoked,omitempty"`
 	TokenHash string    `json:"token_hash"`
 	Created   time.Time `json:"created"`
 	LastSeen  time.Time `json:"last_seen,omitempty"`
@@ -52,6 +57,8 @@ type partnerStore struct {
 	path string
 	mu   sync.Mutex
 	list []backupPartner
+	// receiving: satu penerimaan per partner pada satu waktu.
+	receiving sync.Map
 }
 
 func openPartnerStore(dir string) (*partnerStore, error) {
@@ -122,7 +129,7 @@ func pairingCode(id, token, fp string) string {
 // authPartner memeriksa header Authorization dari NAS pengirim. Kegagalan
 // dibatasi per alamat IP (pembatas login).
 func (s *Server) authPartner(w http.ResponseWriter, r *http.Request) (backupPartner, bool) {
-	key := "rbackup:" + clientIP(r)
+	key := "rbackup:" + clientNet(r)
 	if rem := s.limiter.Locked(key); rem > 0 {
 		s.writeLocked(w, rem)
 		return backupPartner{}, false
@@ -145,7 +152,7 @@ func (s *Server) authPartner(w http.ResponseWriter, r *http.Request) (backupPart
 	if !found {
 		want = hashToken("sapo-tidak-ada") // waktu perbandingan sama
 	}
-	if subtle.ConstantTimeCompare([]byte(hashToken(tok)), []byte(want)) != 1 || !found {
+	if subtle.ConstantTimeCompare([]byte(hashToken(tok)), []byte(want)) != 1 || !found || p.Revoked {
 		return fail()
 	}
 	now := s.now().UTC()
@@ -196,8 +203,14 @@ func (s *Server) handlePartnerReceive(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if _, busy := s.partners.receiving.LoadOrStore(p.ID, true); busy {
+		writeError(w, http.StatusServiceUnavailable, "busy", "penerimaan lain dari NAS ini sedang berjalan")
+		return
+	}
+	defer s.partners.receiving.Delete(p.ID)
 	q := r.URL.Query()
-	params := proto.RBackupRecvParams{RBackupTarget: proto.RBackupTarget{Pool: p.Pool, Partner: p.ID, Job: r.PathValue("job")}, Base: q.Get("base"), Snap: q.Get("snap")}
+	params := proto.RBackupRecvParams{RBackupTarget: proto.RBackupTarget{Pool: p.Pool, Partner: p.ID, Job: r.PathValue("job")}, Base: q.Get("base"), Snap: q.Get("snap"),
+		QuotaBytes: uint64(max(p.QuotaGB, 0)) << 30}
 	var sess proto.RBackupSession
 	f, err := s.agent.CallFile(r.Context(), proto.OpRBackupRecvOpen, params, &sess)
 	if err != nil {
@@ -210,7 +223,7 @@ func (s *Server) handlePartnerReceive(w http.ResponseWriter, r *http.Request) {
 	closeErr := f.Close()
 	// Diselesaikan walau NAS pengirim memutus sambungan.
 	ctx := context.WithoutCancel(r.Context())
-	err = s.agent.Call(ctx, proto.OpRBackupRecvFinish, proto.RBackupRecvFinish{Session: sess.Session, OK: copyErr == nil && closeErr == nil, Keep: p.Keep}, nil)
+	err = s.agent.Call(ctx, proto.OpRBackupRecvFinish, proto.RBackupRecvFinish{Session: sess.Session, OK: copyErr == nil && closeErr == nil, KeepDays: p.Keep}, nil)
 	detail := map[string]string{"partner": p.ID, "job": auditText(params.Job), "snap": auditText(params.Snap), "bytes": strconv.FormatInt(n, 10)}
 	if err != nil {
 		detail["error"] = errorCode(err)
@@ -230,6 +243,8 @@ type partnerView struct {
 	Name     string                 `json:"name"`
 	Pool     string                 `json:"pool"`
 	Keep     int                    `json:"keep"`
+	QuotaGB  int64                  `json:"quota_gb,omitempty"`
+	Revoked  bool                   `json:"revoked,omitempty"`
 	Created  time.Time              `json:"created"`
 	LastSeen time.Time              `json:"last_seen,omitempty"`
 	Jobs     []proto.RBackupJobInfo `json:"jobs"`
@@ -238,7 +253,7 @@ type partnerView struct {
 func (s *Server) handlePartners(w http.ResponseWriter, r *http.Request) {
 	out := []partnerView{}
 	for _, p := range s.partners.all() {
-		v := partnerView{ID: p.ID, Name: p.Name, Pool: p.Pool, Keep: p.Keep, Created: p.Created, LastSeen: p.LastSeen, Jobs: []proto.RBackupJobInfo{}}
+		v := partnerView{ID: p.ID, Name: p.Name, Pool: p.Pool, Keep: p.Keep, QuotaGB: p.QuotaGB, Revoked: p.Revoked, Created: p.Created, LastSeen: p.LastSeen, Jobs: []proto.RBackupJobInfo{}}
 		var l proto.RBackupList
 		if err := s.agent.Call(r.Context(), proto.OpRBackupList, proto.RBackupTarget{Pool: p.Pool, Partner: p.ID}, &l); err == nil && l.Jobs != nil {
 			v.Jobs = l.Jobs
@@ -255,12 +270,17 @@ func (s *Server) handlePartnerCreate(w http.ResponseWriter, r *http.Request) {
 		Name          string `json:"name"`
 		Pool          string `json:"pool"`
 		Keep          int    `json:"keep"`
+		QuotaGB       int64  `json:"quota_gb"`
 		AdminPassword string `json:"admin_password"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
 	}
 	req.Name = strings.TrimSpace(req.Name)
+	if req.QuotaGB < 0 || req.QuotaGB > 1<<20 {
+		writeErrorDetail(w, http.StatusBadRequest, "bad_request", "kuota tidak valid", map[string]any{"field": "quota_gb"})
+		return
+	}
 	switch {
 	case !utf8.ValidString(req.Name) || !partnerNameRe.MatchString(req.Name):
 		writeErrorDetail(w, http.StatusBadRequest, "bad_request", "nama partner tidak valid", map[string]any{"field": "name"})
@@ -282,10 +302,10 @@ func (s *Server) handlePartnerCreate(w http.ResponseWriter, r *http.Request) {
 	idRaw, tokRaw := make([]byte, 6), make([]byte, 24)
 	_, _ = rand.Read(idRaw)
 	_, _ = rand.Read(tokRaw)
-	id, tok := hex.EncodeToString(idRaw), base64.RawURLEncoding.EncodeToString(tokRaw)
-	p := backupPartner{ID: id, Name: req.Name, Pool: req.Pool, Keep: req.Keep, TokenHash: hashToken(tok), Created: s.now().UTC()}
+	id, tok := hex.EncodeToString(idRaw), hex.EncodeToString(tokRaw)
+	p := backupPartner{ID: id, Name: req.Name, Pool: req.Pool, Keep: req.Keep, QuotaGB: req.QuotaGB, TokenHash: hashToken(tok), Created: s.now().UTC()}
 	err := s.partners.mutate(func(l []backupPartner) []backupPartner { return append(l, p) })
-	s.record(r, admin.Username, "rbackup.partner_create", err == nil, map[string]string{"partner": id, "name": auditText(req.Name), "pool": req.Pool, "keep": strconv.Itoa(req.Keep)})
+	s.record(r, admin.Username, "rbackup.partner_create", err == nil, map[string]string{"partner": id, "name": auditText(req.Name), "pool": req.Pool, "keep": strconv.Itoa(req.Keep), "quota_gb": strconv.FormatInt(req.QuotaGB, 10)})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "gagal menyimpan partner")
 		return
@@ -323,9 +343,16 @@ func (s *Server) handlePartnerDelete(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	if !req.DeleteData {
-		// Token dicabut dulu; salinan tetap (bisa dipulihkan, dihapus nanti
-		// dari Storage bila perlu).
-		remove()
+		// Kode dicabut; partner tetap tampil bersama salinannya (bisa
+		// dipulihkan, dan dihapus beserta salinan nanti).
+		_ = s.partners.mutate(func(l []backupPartner) []backupPartner {
+			for i := range l {
+				if l[i].ID == p.ID {
+					l[i].Revoked, l[i].TokenHash = true, ""
+				}
+			}
+			return l
+		})
 		s.record(r, admin.Username, "rbackup.partner_delete", true, map[string]string{"partner": p.ID, "delete_data": "false"})
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 		return
