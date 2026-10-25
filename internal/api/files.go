@@ -32,6 +32,8 @@ type fileShare struct {
 	Access string `json:"access"`
 	// Home: folder pribadi pengguna (Sapo Drive).
 	Home bool `json:"home,omitempty"`
+	// External: folder eksternal (USB, ADR 0015).
+	External bool `json:"external,omitempty"`
 }
 
 // userShares: folder yang boleh dibuka pengguna sesi ini, dengan izin
@@ -42,12 +44,14 @@ func (s *Server) userShares(r *http.Request) (string, map[string]fileShare, map[
 	if !ok || u.Disabled {
 		return sess.Username, map[string]fileShare{}, map[string]Share{}
 	}
-	out, all := s.sharesFor(u)
+	out, all := s.sharesFor(r.Context(), u)
 	return u.Username, out, all
 }
 
-// sharesFor: folder yang boleh dibuka pengguna u (File Station dan WebDAV).
-func (s *Server) sharesFor(u auth.User) (map[string]fileShare, map[string]Share) {
+// sharesFor: folder yang boleh dibuka pengguna u (File Station dan WebDAV):
+// shared folder sesuai izinnya, dan folder eksternal yang sedang terpasang
+// bila u anggota grupnya (sapo-users = semua pengguna).
+func (s *Server) sharesFor(ctx context.Context, u auth.User) (map[string]fileShare, map[string]Share) {
 	out, all := map[string]fileShare{}, map[string]Share{}
 	for _, sh := range s.shares.list() {
 		exists := map[string]bool{}
@@ -59,7 +63,31 @@ func (s *Server) sharesFor(u auth.User) (map[string]fileShare, map[string]Share)
 			all[sh.Name] = sh
 		}
 	}
+	var ext []proto.ExternalVolume
+	if err := s.agent.Call(ctx, proto.OpExternalList, proto.ExternalListParams{Cached: true}, &ext); err == nil {
+		for _, v := range ext {
+			if _, taken := out[v.Name]; taken || s.shareExists(v.Name) {
+				continue
+			}
+			if v.Group != allUsersGroup && !slices.Contains(u.Groups, v.Group) {
+				continue
+			}
+			access := "write"
+			if v.ReadOnly {
+				access = "read"
+			}
+			out[v.Name] = fileShare{Name: v.Name, Description: v.Label, Access: access, External: true}
+		}
+	}
 	return out, all
+}
+
+// allUsersGroup: grup utama semua akun Sapo (agent.accounts.primary_group).
+const allUsersGroup = "sapo-users"
+
+func (s *Server) shareExists(name string) bool {
+	_, ok := s.shares.get(name)
+	return ok
 }
 
 func (s *Server) handleFileShares(w http.ResponseWriter, r *http.Request) {
@@ -96,6 +124,9 @@ func (s *Server) fileTarget(w http.ResponseWriter, r *http.Request, share, p str
 	if write && fs.Access != "write" {
 		writeError(w, http.StatusForbidden, "permission_denied", "folder ini hanya bisa dibaca")
 		return proto.FilesTarget{}, false
+	}
+	if fs.External {
+		return proto.FilesTarget{User: user, Share: share, External: true, Path: strings.Trim(p, "/")}, true
 	}
 	return proto.FilesTarget{User: user, Pool: all[share].Pool, Share: share, Path: strings.Trim(p, "/")}, true
 }
@@ -305,6 +336,11 @@ func (s *Server) handleFileChange(op, action string) http.HandlerFunc {
 func (s *Server) handleFileSnapshots(w http.ResponseWriter, r *http.Request) {
 	t, ok := s.fileTarget(w, r, r.URL.Query().Get("share"), "", false)
 	if !ok {
+		return
+	}
+	// Folder eksternal tidak punya snapshot.
+	if t.External {
+		writeJSON(w, http.StatusOK, []any{})
 		return
 	}
 	st := proto.SnapshotTarget{Pool: t.Pool, Share: t.Share}

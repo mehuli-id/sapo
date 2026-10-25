@@ -13,7 +13,7 @@
 # HTTPS wajib (ADR 0004): HTTP hanya boleh menyajikan halaman petunjuk, dan
 # sidik jari yang diumumkan panel harus sama dengan sertifikat yang dipakai.
 # Pemakaian: packaging/iso/smoke-test.sh dist/sapo-dev_<versi>_amd64.iso
-# Kebutuhan: qemu-system-x86_64, curl, openssl, python3, mkfs.ext4, smbclient,
+# Kebutuhan: qemu-system-x86_64, curl, openssl, python3, mkfs.ext4, mkfs.exfat, smbclient,
 # klien NFS (mount.nfs4) dan sudo tanpa password. KVM dipakai bila tersedia.
 set -euo pipefail
 
@@ -38,6 +38,15 @@ mkfs.ext4 -q -L foto "$WORK/disk3.img"
 disks=()
 for i in 1 2 3; do
   disks+=(-drive "file=$WORK/disk$i.img,if=none,format=raw,id=d$i" -device "virtio-blk-pci,drive=d$i,serial=SAPOUJI$i")
+done
+# Dua drive USB exFAT di satu "dock" murah: nomor seri yang sama untuk
+# keduanya (penyimpanan eksternal, ADR 0015).
+truncate -s 256M "$WORK/usb1.img" "$WORK/usb2.img"
+mkfs.exfat -L FOTO "$WORK/usb1.img" >/dev/null
+mkfs.exfat -L ARSIP "$WORK/usb2.img" >/dev/null
+disks+=(-device qemu-xhci,id=xhci)
+for i in 1 2; do
+  disks+=(-drive "file=$WORK/usb$i.img,if=none,format=raw,id=u$i" -device "usb-storage,bus=xhci.0,drive=u$i,serial=SAPODOCK")
 done
 
 accel=(-accel tcg)
@@ -576,6 +585,67 @@ echo "Pulihkan dari snapshot: daftar versi, isi versi lama, file yang dihapus ke
 res="$(api POST /api/v1/shares/versi/delete "{\"confirm_name\":\"versi\",\"admin_password\":\"$PASS\"}")"
 [[ "$res" == *' 200' ]] || fail "hapus folder versi: $res"
 echo "Snapshot: terjadwal per jam, manual, Previous Versions lewat SMB, hapus dengan password, jadwal dimatikan tanpa menghapus snapshot"
+
+# --- Penyimpanan eksternal (USB, ADR 0015) ----------------------------------------
+# Dua drive exFAT di "dock" yang melaporkan nomor seri sama: tidak bisa dipakai
+# pool (USB, lalu identitas tidak unik). FOTO dipasang baca-tulis untuk semua
+# pengguna (budi menulis lewat SMB, isinya tetap ada setelah dilepas dan
+# dipasang lagi); ARSIP baca saja untuk grup tamu (eko boleh membaca tetapi
+# tidak menulis, budi tidak melihatnya).
+for _ in $(seq 1 20); do
+  ext="$(api GET /api/v1/storage/external)"
+  json 'import sys; sys.exit(0 if sorted(x["label"] for x in v if x["supported"])==["ARSIP","FOTO"] else 1)' <<<"$ext" && break
+  sleep 3
+done
+json 'assert sorted(x["label"] for x in v if x["supported"])==["ARSIP","FOTO"], v' <<<"$ext" || fail "drive USB tidak terbaca: $ext"
+uuid_of() { json "print([x['uuid'] for x in v if x['label']=='$1'][0])" <<<"$ext"; }
+disks_json="$(api GET /api/v1/storage/disks)"
+usbref="$(json "
+d=[x for x in v if x['serial']=='SAPODOCK'][0]
+import json as j; print(j.dumps([dict(name=d['name'],serial=d['serial'],wwn=d['wwn'],size_bytes=d['size_bytes'],usage=d['usage'],erase=True)]))" <<<"$disks_json")"
+res="$(api POST /api/v1/storage/pools "{\"name\":\"usb\",\"layout\":\"single\",\"disks\":$usbref,\"confirm_name\":\"usb\",\"password\":\"$PASS\"}")"
+[[ "$res" == *'"disk_usb"'* ]] || fail "disk USB tanpa izin harus ditolak untuk pool: $res"
+res="$(api POST /api/v1/storage/pools "{\"name\":\"usb\",\"layout\":\"single\",\"disks\":$usbref,\"confirm_name\":\"usb\",\"password\":\"$PASS\",\"allow_usb\":true}")"
+[[ "$res" == *'"disk_identity"'* ]] || fail "disk dengan nomor seri kembar harus ditolak: $res"
+res="$(api POST /api/v1/storage/external/mount "{\"uuid\":\"$(uuid_of FOTO)\",\"name\":\"usb-foto\",\"group\":\"sapo-users\",\"read_only\":false,\"smb\":true,\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "pasang FOTO: $res"
+res="$(api POST /api/v1/groups '{"name":"tamu"}')"
+[[ "$res" == *' 200' ]] || fail "buat grup tamu: $res"
+res="$(api POST /api/v1/groups/tamu "{\"members\":[\"eko\"],\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "anggota grup tamu: $res"
+res="$(api POST /api/v1/storage/external/mount "{\"uuid\":\"$(uuid_of ARSIP)\",\"name\":\"usb-arsip\",\"group\":\"tamu\",\"read_only\":true,\"smb\":true,\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "pasang ARSIP: $res"
+echo "di flashdisk" > "$WORK/usb.txt"
+out="$(smbclient //127.0.0.1/usb-foto -p "$SMB_PORT" -m SMB3 -U "budi%$UPASS" -c "put $WORK/usb.txt catatan.txt; ls" 2>&1 || true)"
+[[ "$out" == *catatan.txt* ]] || fail "budi menulis ke drive USB lewat SMB: $out"
+login_as budi
+res="$(api GET /api/v1/files/shares)"
+json 'n=[s["name"] for s in v]; assert "usb-foto" in n and "usb-arsip" not in n, v' <<<"$res" || fail "folder eksternal budi: $res"
+res="$(api GET '/api/v1/files/list?share=usb-foto&path=')"
+json 'assert "catatan.txt" in [e["name"] for e in v["entries"]], v' <<<"$res" || fail "File Station, drive USB: $res"
+login_as eko
+res="$(api GET '/api/v1/files/list?share=usb-arsip&path=')"
+[[ "$res" == *' 200' ]] || fail "eko membaca ARSIP: $res"
+out="$(smbclient //127.0.0.1/usb-arsip -p "$SMB_PORT" -m SMB3 -U "eko%$UPASS" -c "put $WORK/usb.txt coba.txt" 2>&1 || true)"
+[[ "$out" == *NT_STATUS_ACCESS_DENIED* || "$out" == *NT_STATUS_MEDIA_WRITE_PROTECTED* ]] || fail "ARSIP baca saja tidak boleh ditulis: $out"
+JAR="$admin_jar"
+# Dilepas dengan aman, lalu dipasang lagi: isinya tetap ada.
+for n in usb-foto usb-arsip; do
+  res="$(api POST "/api/v1/storage/external/$n/unmount" '{}')"
+  [[ "$res" == *' 200' ]] || fail "lepas $n: $res"
+done
+out="$(smbclient //127.0.0.1/usb-foto -p "$SMB_PORT" -m SMB3 -U "budi%$UPASS" -c ls 2>&1 || true)"
+[[ "$out" == *NT_STATUS_BAD_NETWORK_NAME* ]] || fail "folder eksternal yang dilepas masih dibagikan: $out"
+ext="$(api GET /api/v1/storage/external)"
+res="$(api POST /api/v1/storage/external/mount "{\"uuid\":\"$(uuid_of FOTO)\",\"name\":\"usb-foto\",\"group\":\"sapo-users\",\"read_only\":true,\"smb\":false,\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "pasang FOTO lagi: $res"
+login_as budi
+res="$(api GET '/api/v1/files/list?share=usb-foto&path=')"
+json 'assert "catatan.txt" in [e["name"] for e in v["entries"]], v' <<<"$res" || fail "isi drive setelah dipasang lagi: $res"
+JAR="$admin_jar"
+res="$(api POST /api/v1/storage/external/usb-foto/unmount '{}')"
+[[ "$res" == *' 200' ]] || fail "lepas usb-foto: $res"
+echo "Penyimpanan eksternal: dua drive USB di satu dock, ditolak untuk pool (USB, nomor seri kembar), dipasang untuk semua/grup, baca-tulis dan baca saja lewat SMB dan File Station, dilepas dan dipasang lagi tanpa kehilangan isi"
 
 # Ganti disk SAPOUJI2 dengan SAPOUJI3 (berisi ext4, penghapusan dikonfirmasi).
 disks_json="$(api GET /api/v1/storage/disks)"

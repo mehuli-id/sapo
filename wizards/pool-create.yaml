@@ -36,6 +36,21 @@ steps:
         Disks marked "Has data" still contain partitions or a file system;
         their contents will be lost.
     fields:
+      - key: allow_usb
+        type: toggle
+        label: { id: Tampilkan dan izinkan disk USB, en: Show and allow USB disks }
+        help:
+          id: >-
+            Tidak disarankan untuk penyimpanan utama: satu chip USB menjadi
+            titik gagal untuk semua disk di enclosure, koneksi USB bisa
+            terputus sesaat dan membuat pool "hilang", dan banyak enclosure
+            tidak menulis data ke disk saat diminta. Cocok untuk pool cadangan.
+          en: >-
+            Not recommended for main storage: one USB chip is a single point
+            of failure for every disk in the enclosure, USB connections can
+            drop for a moment and make the pool "disappear", and many
+            enclosures don't write data to disk when asked. Fine for a backup
+            pool.
       - key: disks
         type: disk-select
         required: true

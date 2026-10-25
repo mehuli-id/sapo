@@ -263,6 +263,9 @@ func New(o Options) (*Server, error) {
 	s.mux.Handle("GET /api/v1/account/app-passwords", s.requireAuth(http.HandlerFunc(s.handleAppPasswords)))
 	s.mux.Handle("POST /api/v1/account/app-passwords", s.requireAuth(http.HandlerFunc(s.handleAppPasswordCreate)))
 	s.mux.Handle("POST /api/v1/account/app-passwords/{id}/delete", s.requireAuth(http.HandlerFunc(s.handleAppPasswordDelete)))
+	s.mux.Handle("GET /api/v1/storage/external", s.requireAdmin(http.HandlerFunc(s.handleExternalList)))
+	s.mux.Handle("POST /api/v1/storage/external/mount", s.requireAdmin(http.HandlerFunc(s.handleExternalMount)))
+	s.mux.Handle("POST /api/v1/storage/external/{name}/unmount", s.requireAdmin(http.HandlerFunc(s.handleExternalUnmount)))
 	s.mux.Handle("GET /api/v1/snapshots/presets", s.requireAdmin(http.HandlerFunc(s.handleSnapshotPresets)))
 	s.mux.Handle("GET /api/v1/snapshots", s.requireAdmin(http.HandlerFunc(s.handleSnapshotsList)))
 	s.mux.Handle("POST /api/v1/snapshots", s.requireAdmin(http.HandlerFunc(s.handleSnapshotCreate)))
@@ -597,7 +600,7 @@ func (s *Server) agentError(w http.ResponseWriter, op string, err error) {
 			status = http.StatusNotFound
 		case proto.ErrUnavailable, proto.ErrBusy:
 			status = http.StatusServiceUnavailable
-		case proto.ErrDiskChanged, proto.ErrDiskInUse, proto.ErrDiskHasData, proto.ErrDiskRemovable, proto.ErrPoolExists, proto.ErrPoolBusy:
+		case proto.ErrDiskChanged, proto.ErrDiskInUse, proto.ErrDiskHasData, proto.ErrDiskRemovable, proto.ErrDiskUSB, proto.ErrDiskIdentity, proto.ErrPoolExists, proto.ErrPoolBusy:
 			status = http.StatusConflict
 		case proto.ErrConflict:
 			status = http.StatusConflict

@@ -307,7 +307,12 @@ func TestPoolCreateRejects(t *testing.T) {
 		{"disk sistem", mirror(vdd, ref("vda", "SYS0", 21474836480, true)), proto.ErrDiskInUse},
 		{"swap", mirror(vdd, ref("vdg", "SWAP1", gib4, true)), proto.ErrDiskInUse},
 		{"LVM", mirror(vdd, ref("vdh", "LVM1", gib4, true)), proto.ErrDiskInUse},
-		{"flashdisk", mirror(vdd, ref("sdi", "USB1", 15728640000, false)), proto.ErrDiskRemovable},
+		{"disk USB tanpa izin", mirror(vdd, ref("sdi", "USB1", 15728640000, false)), proto.ErrDiskUSB},
+		{"flashdisk (USB diizinkan)", func() proto.PoolCreateParams {
+			c := mirror(vdd, ref("sdi", "USB1", 15728640000, false))
+			c.AllowUSB = true
+			return c
+		}(), proto.ErrDiskRemovable},
 		{"nomor seri lain", mirror(vdd, ref("vdf", "LAIN", 8589934592, false)), proto.ErrDiskChanged},
 		{"ukuran lain", mirror(vdd, ref("vdf", "BIG1", gib4, false)), proto.ErrDiskChanged},
 		{"disk hilang", mirror(vdd, ref("vdz", "X", gib4, false)), proto.ErrDiskChanged},
@@ -576,5 +581,20 @@ func TestPoolDestroy(t *testing.T) {
 	}
 	if _, err := destroy(zpoolFake{names: "tank\n"}, "-f"); !errors.As(err, &oe) || oe.Code != proto.ErrInvalidParams {
 		t.Fatalf("nama aneh: %v", err)
+	}
+}
+
+// Enclosure USB 2-bay murah: kedua disk melaporkan nomor seri yang sama,
+// jadi tidak bisa dipastikan untuk operasi destruktif.
+func TestCheckDisksDuplicateIdentity(t *testing.T) {
+	p, _ := newTestPools(t, zpoolFake{names: "tank\n"})
+	disks := []proto.Disk{
+		{Name: "sdb", Serial: "USB-BRIDGE-1", SizeBytes: 100, Usage: proto.DiskFree, Transport: "usb"},
+		{Name: "sdc", Serial: "USB-BRIDGE-1", SizeBytes: 100, Usage: proto.DiskFree, Transport: "usb"},
+	}
+	ref := proto.DiskRef{Name: "sdb", Serial: "USB-BRIDGE-1", SizeBytes: 100, Usage: proto.DiskFree}
+	var oe *OpError
+	if _, err := p.checkDisks([]proto.DiskRef{ref}, disks, true); !errors.As(err, &oe) || oe.Code != proto.ErrDiskIdentity {
+		t.Fatalf("nomor seri kembar: %v", err)
 	}
 }

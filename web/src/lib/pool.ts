@@ -46,8 +46,12 @@ export function recommended(layouts: PoolLayout[], disks: number): LayoutId | ""
 }
 
 // Alasan disk tidak bisa dipilih (kunci i18n), atau "" bila boleh.
-export function ineligibleReason(d: Disk, allowRemovable: boolean): string {
+// all: semua disk (nomor seri atau WWN yang sama di disk lain berarti disk
+// tidak bisa dipastikan, ADR 0015).
+export function ineligibleReason(d: Disk, allowRemovable: boolean, allowUSB = false, all: Disk[] = []): string {
   if (d.usage === "in_use") return `storage.usage.${d.usage_reason ?? "mounted"}`
+  if (d.transport === "usb" && !allowUSB) return "storage.usage.usb"
   if (d.removable && !allowRemovable) return "storage.usage.removable"
+  if (all.some((x) => x.name !== d.name && ((d.serial && x.serial === d.serial) || (d.wwn && x.wwn === d.wwn)))) return "storage.usage.identity"
   return ""
 }

@@ -451,7 +451,7 @@ func (p *Pools) PoolCreateOp() Handler {
 		if err != nil {
 			return nil, err
 		}
-		force, err := p.checkDisks(req.Disks, disks)
+		force, err := p.checkDisks(req.Disks, disks, req.AllowUSB)
 		if err != nil {
 			return nil, err
 		}
@@ -570,10 +570,20 @@ func (p *Pools) checkCreateParams(req proto.PoolCreateParams) (proto.PoolLayout,
 
 // checkDisks membandingkan disk yang dipilih dengan keadaan sekarang. force
 // bernilai true bila zpool create perlu -f.
-func (p *Pools) checkDisks(refs []proto.DiskRef, disks []proto.Disk) (force bool, err error) {
+func (p *Pools) checkDisks(refs []proto.DiskRef, disks []proto.Disk, allowUSB bool) (force bool, err error) {
 	byName := map[string]proto.Disk{}
+	// Nomor seri dan WWN yang dipakai lebih dari satu disk tidak bisa
+	// membedakan disk (enclosure USB 2-bay murah sering melaporkan nomor
+	// seri chip USB-nya untuk kedua disk).
+	serials, wwns := map[string]int{}, map[string]int{}
 	for _, d := range disks {
 		byName[d.Name] = d
+		if d.Serial != "" {
+			serials[d.Serial]++
+		}
+		if d.WWN != "" {
+			wwns[d.WWN]++
+		}
 	}
 	var size uint64
 	for i, ref := range refs {
@@ -588,6 +598,10 @@ func (p *Pools) checkDisks(refs []proto.DiskRef, disks []proto.Disk) (force bool
 			return false, &OpError{Code: proto.ErrDiskChanged, Message: "disk " + ref.Name + " sudah berbeda dari yang dipilih"}
 		}
 		switch {
+		case d.Transport == "usb" && !allowUSB:
+			return false, &OpError{Code: proto.ErrDiskUSB, Message: "disk " + ref.Name + " tersambung lewat USB; centang izin memakai disk USB bila memang sengaja"}
+		case serials[d.Serial] > 1 || wwns[d.WWN] > 1:
+			return false, &OpError{Code: proto.ErrDiskIdentity, Message: "disk " + ref.Name + " punya nomor seri atau WWN yang sama dengan disk lain, jadi tidak bisa dipastikan"}
 		case d.Usage == proto.DiskInUse:
 			return false, &OpError{Code: proto.ErrDiskInUse, Message: "disk " + ref.Name + " sedang dipakai (" + d.UsageReason + ")"}
 		case d.Usage != proto.DiskFree && d.Usage != proto.DiskHasData:
@@ -832,7 +846,7 @@ func (p *Pools) PoolReplaceOp() Handler {
 		if err != nil {
 			return nil, err
 		}
-		force, err := p.checkDisks([]proto.DiskRef{req.Disk}, disks)
+		force, err := p.checkDisks([]proto.DiskRef{req.Disk}, disks, req.AllowUSB)
 		if err != nil {
 			return nil, err
 		}

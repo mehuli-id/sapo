@@ -2,6 +2,7 @@
 import { onMounted, reactive, ref } from "vue"
 import { useI18n } from "vue-i18n"
 import { CircleCheck, HardDrive, Plus, RefreshCw, Thermometer, Timer, TriangleAlert } from "@lucide/vue"
+import ExternalStorage from "@/components/ExternalStorage.vue"
 import PoolCard from "@/components/PoolCard.vue"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -223,6 +224,8 @@ const num = (n: number) => new Intl.NumberFormat(locale.value).format(n)
       </ul>
       <Skeleton v-if="!pools && !poolsError" class="h-24 rounded-xl" />
     </section>
+
+    <ExternalStorage />
 
     <h3 class="pt-2 text-sm font-semibold">{{ t("storage.disksTitle") }}</h3>
 

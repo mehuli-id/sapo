@@ -111,13 +111,13 @@ func TestHomesDeleteRefusesExistingUser(t *testing.T) {
 
 func TestSMBConfHomes(t *testing.T) {
 	s, root, _ := testShares(t, "0")
-	conf := string(s.renderSMBConf(nil, "tank"))
+	conf := string(s.renderSMBConf(nil, "tank", nil))
 	for _, w := range []string{"[homes]\n", "   path = " + filepath.Join(root, "tank/sapo-home") + "/%S\n", "   valid users = %S\n", "   browseable = no\n"} {
 		if !strings.Contains(conf, w) {
 			t.Errorf("smb.conf tanpa %q:\n%s", w, conf)
 		}
 	}
-	if strings.Contains(string(s.renderSMBConf(nil, "")), "[homes]") {
+	if strings.Contains(string(s.renderSMBConf(nil, "", nil)), "[homes]") {
 		t.Fatal("tanpa pool folder pribadi, [homes] tidak boleh ada")
 	}
 	// SMB dimatikan: folder pribadi juga tidak dibagikan.

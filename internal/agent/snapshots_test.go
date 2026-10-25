@@ -175,7 +175,7 @@ func TestSnapshotsOps(t *testing.T) {
 
 func TestSMBConfShadowCopy(t *testing.T) {
 	s, _, _ := testShares(t, "0")
-	conf := string(s.renderSMBConf(nil, ""))
+	conf := string(s.renderSMBConf(nil, "", nil))
 	for _, w := range []string{"vfs objects = shadow_copy2", "shadow:snapdir = .zfs/snapshot", "shadow:format = _GMT-%Y.%m.%d-%H.%M.%S"} {
 		if !strings.Contains(conf, w) {
 			t.Errorf("smb.conf tanpa %q", w)
