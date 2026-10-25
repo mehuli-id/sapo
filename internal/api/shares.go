@@ -453,7 +453,7 @@ func (s *Server) scheduleResync() {
 var shareNameRe = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
 
 // sapo-apps: dataset data aplikasi App Center (ADR 0012).
-var reservedShareNames = []string{"global", "homes", "printers", "print", "ipc", "sapo-apps", "sapo-home"}
+var reservedShareNames = []string{"global", "homes", "printers", "print", "ipc", "sapo-apps", "sapo-home", "sapo-backup"}
 
 type shareView struct {
 	Share

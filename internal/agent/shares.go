@@ -127,7 +127,7 @@ const (
 var shareNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
 
 // Nama share yang punya arti khusus di Samba.
-var reservedShares = []string{"global", "homes", "printers", "print", "ipc", "sapo-apps", "sapo-home"}
+var reservedShares = []string{"global", "homes", "printers", "print", "ipc", "sapo-apps", "sapo-home", "sapo-backup"}
 
 // validShareText: keterangan folder masuk ke smb.conf (comment = …), jadi
 // hanya teks satu baris tanpa karakter kendali, format, atau tanda kurung siku.

@@ -203,6 +203,7 @@ func main() {
 	reg.Register(proto.OpBackupsDelete, backups.DeleteOp())
 	reg.Register(proto.OpBackupsRun, backups.RunOp())
 	reg.Register(proto.OpBackupsRestore, backups.RestoreOp())
+	reg.Register(proto.OpBackupsClaim, backups.ClaimOp())
 	snc := cfg.Agent.Snapshots
 	snapshots := agent.NewSnapshots(shares, agent.SnapshotTools{
 		Zpool: pc.Zpool, MaxPoolCapacity: snc.MaxPoolCapacityPercent, CallTimeout: time.Duration(snc.CallTimeoutSeconds) * time.Second,

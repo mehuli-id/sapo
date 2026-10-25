@@ -212,6 +212,18 @@ func TestBackupsFullThenIncremental(t *testing.T) {
 	if p := f.ds["tank/pulih"]; p == nil || p[sharePropName] != "pulih" {
 		t.Fatalf("folder pulihan = %+v\n%s", p, strings.Join(f.calls, "\n"))
 	}
+	// Klaim pendaftaran: sekali saja.
+	claim := func() bool {
+		raw, _ := json.Marshal(proto.BackupClaimParams{Pool: "tank", Name: "pulih"})
+		out, err := b.ClaimOp()(context.Background(), raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out.(map[string]bool)["claimed"]
+	}
+	if !claim() || claim() {
+		t.Fatal("klaim folder pulihan harus berhasil tepat sekali")
+	}
 	// Hapus tugas beserta salinan.
 	if err := bkCall(t, b.DeleteOp(), proto.BackupDeleteParams{ID: job.ID, DeleteData: true}); err != nil {
 		t.Fatal(err)
@@ -266,5 +278,54 @@ func TestBackupDue(t *testing.T) {
 	j.LastAttempt = time.Time{}
 	if b.due(j, now) {
 		t.Fatal("tugas mati")
+	}
+}
+
+// Dasar harus snapshot terbaru di tujuan; snapshot yang sudah diterima walau
+// proses melapor gagal tidak dibuang dari sumber.
+func TestBackupBaseAndFailedReport(t *testing.T) {
+	b, f := testBackups(t)
+	job := proto.BackupJob{ID: "kel", SrcPool: "tank", Share: "keluarga", DestPool: "usb", Hour: 2, Keep: 5, Enabled: true}
+	if err := bkCall(t, b.SetOp(), job); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.execute(context.Background(), job.ID); err != nil {
+		t.Fatal(err)
+	}
+	// Stream diterima, lalu "zfs send" melapor gagal.
+	pipe := b.pipe
+	b.pipe = func(ctx context.Context, send, recv []string) (uint64, error) {
+		n, _ := pipe(ctx, send, recv)
+		return n, errors.New("zfs send: gagal di akhir")
+	}
+	if err := b.execute(context.Background(), job.ID); err == nil {
+		t.Fatal("galat harus dilaporkan")
+	}
+	b.pipe = pipe
+	src := 0
+	for k := range f.snaps {
+		if strings.HasPrefix(k, "tank/keluarga@") {
+			src++
+		}
+	}
+	if src != 2 {
+		t.Fatalf("snapshot yang sudah diterima harus tetap di sumber: %v", f.snaps)
+	}
+	if err := b.execute(context.Background(), job.ID); err != nil {
+		t.Fatalf("backup berikutnya dari dasar terbaru: %v", err)
+	}
+	// Snapshot terbaru tujuan hilang dari sumber: berhenti (bukan memakai
+	// dasar lebih lama yang akan ditolak receive).
+	var newest string
+	for k := range f.snaps {
+		if strings.HasPrefix(k, "usb/sapo-backup/kel@") && k > newest {
+			newest = k
+		}
+	}
+	_, name, _ := strings.Cut(newest, "@")
+	delete(f.snaps, "tank/keluarga@"+name)
+	var oe *OpError
+	if err := b.execute(context.Background(), job.ID); !errors.As(err, &oe) || oe.Code != "backup_diverged" {
+		t.Fatalf("dasar terbaru hilang: %v", err)
 	}
 }

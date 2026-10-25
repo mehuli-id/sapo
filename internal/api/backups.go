@@ -38,20 +38,30 @@ func (s *Server) handleBackups(w http.ResponseWriter, r *http.Request) {
 }
 
 // registerRestored mendaftarkan folder pulihan yang sudah selesai dan masih
-// ada di pool (Present), dengan izin folder asalnya bila folder itu masih
-// ada. Folder yang kemudian dihapus admin tidak Present lagi, jadi tidak
-// pernah didaftarkan ulang (dan tidak pernah dibuat kosong oleh sinkron).
+// ada di pool, dengan izin folder asalnya bila folder itu masih ada. Setiap
+// folder diklaim sekali di sapod (backups.claim), jadi folder yang kemudian
+// dihapus admin tidak pernah didaftarkan ulang (dan tidak dibuat kosong oleh
+// sinkronisasi).
 func (s *Server) registerRestored(r *http.Request, out proto.BackupsListResult) {
 	jobs := map[string]proto.BackupStatus{}
 	for _, j := range out.Jobs {
 		jobs[j.ID] = j
 	}
 	var added []Share
+	sess, _, _ := s.currentSession(r)
 	for _, rs := range out.Restores {
-		if !rs.OK || !rs.Present {
+		if !rs.OK || !rs.Present || rs.Claimed {
 			continue
 		}
 		if _, ok := s.shares.get(rs.Name); ok {
+			continue
+		}
+		// Klaim sekali di sapod: dua permintaan bersamaan, atau folder yang
+		// dihapus admin setelah didaftarkan, tidak didaftarkan (ulang).
+		var claim struct {
+			Claimed bool `json:"claimed"`
+		}
+		if err := s.agent.Call(r.Context(), proto.OpBackupsClaim, proto.BackupClaimParams{Pool: rs.Pool, Name: rs.Name}, &claim); err != nil || !claim.Claimed {
 			continue
 		}
 		sh := Share{Name: rs.Name, Pool: rs.Pool, Permissions: map[string]string{}, CreatedAt: s.now().UTC()}
@@ -75,7 +85,7 @@ func (s *Server) registerRestored(r *http.Request, out proto.BackupsListResult) 
 	}
 	_, syncErr := s.syncSystem(r.Context())
 	for _, sh := range added {
-		s.record(r, "sapod", "backups.restored", syncErr == nil, map[string]string{"share": sh.Name, "pool": sh.Pool, "permissions": permText(sh.Permissions)})
+		s.record(r, sess.Username, "backups.restored", syncErr == nil, map[string]string{"share": sh.Name, "pool": sh.Pool, "permissions": permText(sh.Permissions)})
 	}
 }
 
