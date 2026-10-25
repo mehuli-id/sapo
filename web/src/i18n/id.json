@@ -644,7 +644,7 @@
     "home": "Drive saya",
     "homeHelp": "Folder pribadi Anda",
     "versions": "Versi sebelumnya",
-    "versionsHelp": "Snapshot folder ini. Pilih waktu untuk melihat isi folder saat itu.",
+    "versionsHelp": "Snapshot folder ini. Pilih waktu untuk melihat isi folder saat itu. Versi lama memakai izin saat snapshot diambil.",
     "noVersions": "Belum ada versi sebelumnya untuk folder ini.",
     "currentVersion": "Versi sekarang",
     "viewingVersion": "Melihat versi {when} (baca saja). Pilih Pulihkan untuk menyalin file atau folder kembali.",
@@ -652,7 +652,7 @@
     "restore": "Pulihkan",
     "restoreFile": "Pulihkan {name} ke folder sekarang? Bila nama itu sudah ada, hasilnya diberi nama baru.",
     "restoreFolder": "Pulihkan folder {name} beserta isinya? Bila nama itu sudah ada, hasilnya diberi nama baru; folder sekarang tidak diubah.",
-    "restoreOverwrite": "Timpa file sekarang dengan versi ini",
+    "restoreOverwrite": "Ganti file sekarang dengan versi ini (file sekarang disimpan dengan nama “sebelum dipulihkan”)",
     "restored": "Dipulihkan sebagai {name}.",
     "restoredSkipped": "Dipulihkan sebagai {name}; {n} symlink atau berkas khusus dilewati."
   },

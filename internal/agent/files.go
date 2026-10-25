@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -39,9 +40,10 @@ type FilesTools struct {
 	// Rentang ID akun dan grup Sapo (agent.accounts): hanya grup di rentang
 	// ini yang ikut menjadi grup proses pembantu.
 	IDMin, IDMax int
-	// Batas satu pemulihan dari snapshot.
-	RestoreMaxFiles int
-	RestoreMaxBytes int64
+	// Batas satu pemulihan dari snapshot dan akhiran namanya ({time}).
+	RestoreMaxFiles             int
+	RestoreMaxBytes             int64
+	RestoreLabel, ReplacedLabel string
 }
 
 // Files melayani operasi File Station.
@@ -56,7 +58,10 @@ type Files struct {
 	// slots membatasi operasi file bersamaan (agar tidak menghabiskan
 	// koneksi sapod untuk operasi lain); deleting: satu penghapusan per
 	// pengguna.
-	slots      chan struct{}
+	slots chan struct{}
+	// longSlots: penghapusan dan pemulihan (bisa beberapa menit) paling
+	// banyak sekian bersamaan, agar slot lain tetap tersedia.
+	longSlots  chan struct{}
 	deletingMu sync.Mutex
 	deleting   map[string]bool
 }
@@ -64,9 +69,15 @@ type Files struct {
 // maxFileOps: operasi file bersamaan paling banyak (dari semua pengguna).
 const maxFileOps = 8
 
+// maxLongFileOps: penghapusan dan pemulihan bersamaan paling banyak.
+const maxLongFileOps = 2
+
 // NewFiles menyiapkan File Station. managed wajib (hanya akun Sapo).
 func NewFiles(t FilesTools, shares *Shares, managed func(string) (int, int, bool)) *Files {
-	f := &Files{t: t, shares: shares, managed: managed, slots: make(chan struct{}, maxFileOps), deleting: map[string]bool{}}
+	if t.RestoreLabel == "" {
+		t.RestoreLabel, t.ReplacedLabel = "dipulihkan {time}", "sebelum dipulihkan {time}"
+	}
+	f := &Files{t: t, shares: shares, managed: managed, slots: make(chan struct{}, maxFileOps), longSlots: make(chan struct{}, maxLongFileOps), deleting: map[string]bool{}}
 	f.run = f.runHelper
 	return f
 }
@@ -90,8 +101,13 @@ type fsRequest struct {
 	// tujuan sudah ada, batas jumlah file dan byte.
 	Src      string `json:"src,omitempty"`
 	Label    string `json:"label,omitempty"`
+	Replaced string `json:"replaced,omitempty"`
 	MaxFiles int    `json:"max_files,omitempty"`
 	MaxBytes int64  `json:"max_bytes,omitempty"`
+	// Avail: ruang kosong folder tujuan (byte); Deadline: batas waktu
+	// (Unix), agar pemulihan berhenti rapi sebelum proses dihentikan.
+	Avail    int64 `json:"avail,omitempty"`
+	Deadline int64 `json:"deadline,omitempty"`
 }
 
 // fsReply adalah jawaban proses pembantu (stdout).
@@ -197,6 +213,12 @@ func (f *Files) call(ctx context.Context, t proto.FilesTarget, req fsRequest, ti
 		return nil, nil, &OpError{Code: proto.ErrBusy, Message: "terlalu banyak operasi file berjalan; coba lagi sebentar"}
 	}
 	if req.Op == "delete" || req.Op == "restore" {
+		select {
+		case f.longSlots <- struct{}{}:
+			defer func() { <-f.longSlots }()
+		default:
+			return nil, nil, &OpError{Code: proto.ErrBusy, Message: "penghapusan atau pemulihan lain sedang berjalan; coba lagi sebentar"}
+		}
 		f.deletingMu.Lock()
 		if f.deleting[t.User] {
 			f.deletingMu.Unlock()
@@ -351,8 +373,22 @@ func (f *Files) RestoreOp() Handler {
 			return nil, &OpError{Code: proto.ErrInvalidParams, Message: "snapshot atau path tidak valid"}
 		}
 		when, _ := time.ParseInLocation(snapTimeFormat, m[2], time.UTC)
-		label := "dipulihkan " + when.In(localZone()).Format("2006-01-02 15.04")
-		req := fsRequest{Op: "restore", Overwrite: p.Overwrite, Label: label, MaxFiles: f.t.RestoreMaxFiles, MaxBytes: f.t.RestoreMaxBytes}
+		zone := localZone()
+		label := strings.ReplaceAll(f.t.RestoreLabel, "{time}", when.In(zone).Format("2006-01-02 15.04"))
+		replaced := strings.ReplaceAll(f.t.ReplacedLabel, "{time}", time.Now().In(zone).Format("2006-01-02 15.04"))
+		// Ruang kosong folder tujuan (termasuk kuota Sapo Drive).
+		ds := p.Pool + "/" + p.Share
+		if p.Home {
+			ds = p.Pool + "/" + homesDataset + "/" + p.User
+		}
+		var avail int64
+		if props, err := f.shares.zfsProps(ctx, ds, "available"); err == nil {
+			avail, _ = strconv.ParseInt(props["available"], 10, 64)
+		}
+		req := fsRequest{Op: "restore", Overwrite: p.Overwrite, Label: label, Replaced: replaced,
+			MaxFiles: f.t.RestoreMaxFiles, MaxBytes: f.t.RestoreMaxBytes, Avail: avail,
+			// Berhenti rapi (dan membersihkan) sebelum proses dihentikan.
+			Deadline: time.Now().Add(f.t.DeleteTimeout - 20*time.Second).Unix()}
 		res, _, err := f.call(ctx, p.FilesTarget, req, f.t.DeleteTimeout, false)
 		if err != nil {
 			return nil, err

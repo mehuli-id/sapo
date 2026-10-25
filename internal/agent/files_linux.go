@@ -390,32 +390,84 @@ func recvFile(sock *os.File) (*os.File, error) {
 
 // restoreState menghitung batas satu pemulihan.
 type restoreState struct {
-	req     fsRequest
-	dev     uint64
-	files   int
-	bytes   int64
-	skipped int
+	req      fsRequest
+	dev      uint64
+	deadline time.Time
+	files    int
+	bytes    int64
+	skipped  int
 }
 
+// count menghitung satu entri (file, folder, atau yang dilewati) dan
+// ukurannya terhadap batas dan tenggat.
 func (r *restoreState) count(n int64) error {
 	r.files++
 	r.bytes += n
 	if r.files > r.req.MaxFiles || r.bytes > r.req.MaxBytes {
 		return &OpError{Code: "restore_too_large", Message: "terlalu besar untuk dipulihkan sekaligus; pulihkan sebagian-sebagian"}
 	}
+	return r.inTime()
+}
+
+func (r *restoreState) inTime() error {
+	if time.Now().After(r.deadline) {
+		return &OpError{Code: "timeout", Message: "pemulihan terlalu lama; pulihkan sebagian-sebagian"}
+	}
 	return nil
 }
 
+// readNames membaca isi direktori fd sedikit demi sedikit.
+func readNames(fd int, fn func(name string) error) error {
+	dup, err := unix.Dup(fd)
+	if err != nil {
+		return err
+	}
+	dir := os.NewFile(uintptr(dup), "dir")
+	defer dir.Close()
+	for {
+		names, err := dir.Readdirnames(512)
+		for _, n := range names {
+			if ferr := fn(n); ferr != nil {
+				return ferr
+			}
+		}
+		if errors.Is(err, io.EOF) || (err == nil && len(names) == 0) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	}
+}
+
+// sameIno: name di dirfd masih entri yang dibuat pemulihan ini (bukan
+// ditukar pengguna lain selama penyalinan).
+func sameIno(dirfd int, name string, dev, ino uint64) bool {
+	var st unix.Stat_t
+	return unix.Fstatat(dirfd, name, &st, unix.AT_SYMLINK_NOFOLLOW) == nil && st.Dev == dev && st.Ino == ino
+}
+
 // fsRestore menyalin req.Path dari akar snapshot src ke tempat yang sama di
-// akar folder root, sebagai pengguna (izin dari kernel). Hasilnya selalu
-// nama baru, kecuali Overwrite dan sumber serta tujuannya file biasa.
-// Folder disalin ke direktori sementara dulu dan baru diberi nama akhir
-// setelah lengkap; bila gagal, salinan setengah jadi dihapus.
+// akar folder root, sebagai pengguna (izin dari kernel).
+//   - Ukurannya dihitung dulu: yang melebihi batas, ruang kosong, atau
+//     tenggat ditolak sebelum menyalin.
+//   - Hasilnya nama baru bila nama itu sudah ada. Bila Overwrite (file
+//     biasa), file sekarang tidak hilang: diberi nama "sebelum dipulihkan"
+//     dulu.
+//   - Salinan dibuat dengan nama sementara lalu baru diberi nama akhir.
+//     Entri sementara dikenali lewat dev/ino dan dibersihkan lewat fd yang
+//     dipegang, jadi pengguna lain yang menukar namanya tidak bisa membuat
+//     pemulihan menghapus atau mengganti folder lain.
 func fsRestore(src, root int, req fsRequest) (any, error) {
 	var srcSt unix.Stat_t
 	if err := unix.Fstat(src, &srcSt); err != nil {
 		return nil, err
 	}
+	deadline := time.Now().Add(270 * time.Second)
+	if req.Deadline > 0 {
+		deadline = time.Unix(req.Deadline, 0)
+	}
+	rs := &restoreState{req: req, dev: srcSt.Dev, deadline: deadline}
 	sfd, err := openBeneath(src, req.Path, unix.O_PATH|unix.O_NOFOLLOW, 0)
 	if err != nil {
 		return nil, err
@@ -430,11 +482,29 @@ func fsRestore(src, root int, req fsRequest) (any, error) {
 	if kind != unix.S_IFDIR && kind != unix.S_IFREG {
 		return nil, &OpError{Code: proto.ErrInvalidParams, Message: "hanya file dan folder yang bisa dipulihkan"}
 	}
-	rs := &restoreState{req: req, dev: srcSt.Dev}
+	isFile := kind == unix.S_IFREG
+	// Hitung dulu (snapshot tidak berubah).
+	if isFile {
+		err = rs.count(st.Size)
+	} else {
+		var dfd int
+		if dfd, err = openBeneath(src, req.Path, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW, 0); err == nil {
+			err = rs.scan(dfd, 0)
+			unix.Close(dfd)
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	if req.Avail > 0 && rs.bytes > req.Avail {
+		return nil, &OpError{Code: "restore_no_space", Message: "ruang kosong tidak cukup untuk memulihkan"}
+	}
+	rs.files, rs.bytes, rs.skipped = 0, 0, 0
+
 	parent, name := splitParent(req.Path)
 	out := proto.FilesRestoreResult{}
 	err = withDir(root, parent, func(pfd int) error {
-		dest, overwrite, err := restoreName(pfd, name, kind == unix.S_IFREG && req.Overwrite, req.Label)
+		dest, replace, err := restoreName(pfd, name, isFile && req.Overwrite, req.Label)
 		if err != nil {
 			return err
 		}
@@ -442,40 +512,56 @@ func fsRestore(src, root int, req fsRequest) (any, error) {
 		if err != nil {
 			return err
 		}
-		if kind == unix.S_IFREG {
+		if isFile {
 			fd, err := openBeneath(src, req.Path, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_NOCTTY, 0)
 			if err != nil {
 				return err
 			}
-			err = rs.copyFile(fd, pfd, tmp)
+			dev, ino, err := rs.copyFile(fd, pfd, tmp)
 			unix.Close(fd)
+			if err == nil && !sameIno(pfd, tmp, dev, ino) {
+				err = &OpError{Code: errFileExists, Message: "file sementara berubah selama pemulihan"}
+			}
 			if err == nil {
-				flags := uint(unix.RENAME_NOREPLACE)
-				if overwrite {
-					if err = replaceableFile(pfd, dest); err == nil {
-						flags = 0
-					}
-				}
-				if err == nil {
-					err = unix.Renameat2(pfd, tmp, pfd, dest, flags)
-				}
+				err = placeFile(pfd, tmp, dest, replace, req.Replaced)
 			}
 			if err != nil {
-				_ = unix.Unlinkat(pfd, tmp, 0)
+				if sameIno(pfd, tmp, dev, ino) {
+					_ = unix.Unlinkat(pfd, tmp, 0)
+				}
 				return err
 			}
 		} else {
-			dfd, err := openBeneath(src, req.Path, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW, 0)
+			if err := unix.Mkdirat(pfd, tmp, 0o777); err != nil {
+				return err
+			}
+			dfd, err := openBeneath(pfd, tmp, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW, 0)
 			if err != nil {
 				return err
 			}
-			err = rs.copyDir(dfd, pfd, tmp, 0)
-			unix.Close(dfd)
+			defer unix.Close(dfd)
+			var dst unix.Stat_t
+			if err := unix.Fstat(dfd, &dst); err != nil {
+				return err
+			}
+			sdfd, err := openBeneath(src, req.Path, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW, 0)
+			if err == nil {
+				err = rs.copyInto(sdfd, dfd, 0)
+				unix.Close(sdfd)
+			}
+			if err == nil && !sameIno(pfd, tmp, dst.Dev, dst.Ino) {
+				err = &OpError{Code: errFileExists, Message: "folder sementara berubah selama pemulihan"}
+			}
 			if err == nil {
 				err = unix.Renameat2(pfd, tmp, pfd, dest, unix.RENAME_NOREPLACE)
 			}
 			if err != nil {
-				_ = removeAt(pfd, tmp, 0)
+				// Dibersihkan lewat fd yang dipegang; direktori kosongnya
+				// hanya dihapus bila masih entri yang sama.
+				clearDir(dfd)
+				if sameIno(pfd, tmp, dst.Dev, dst.Ino) {
+					_ = unix.Unlinkat(pfd, tmp, unix.AT_REMOVEDIR)
+				}
 				return err
 			}
 		}
@@ -486,27 +572,58 @@ func fsRestore(src, root int, req fsRequest) (any, error) {
 	return out, err
 }
 
-// restoreName memilih nama tujuan: nama asli bila belum ada (atau boleh
-// ditimpa), bila tidak "<nama> (<label>)<ekstensi>", lalu " 2", " 3", ….
-func restoreName(pfd int, name string, mayOverwrite bool, label string) (string, bool, error) {
-	exists := func(n string) (bool, uint32, error) {
-		var st unix.Stat_t
-		err := unix.Fstatat(pfd, n, &st, unix.AT_SYMLINK_NOFOLLOW)
-		if errors.Is(err, unix.ENOENT) {
-			return false, 0, nil
-		}
-		return err == nil, st.Mode & unix.S_IFMT, err
+// placeFile memberi file sementara tmp nama akhir dest. Bila replace, file
+// dest sekarang (file biasa yang boleh ditulis) diberi nama cadangan dulu
+// (label replaced), lalu dikembalikan bila langkah berikutnya gagal.
+func placeFile(pfd int, tmp, dest string, replace bool, replaced string) error {
+	if !replace {
+		return unix.Renameat2(pfd, tmp, pfd, dest, unix.RENAME_NOREPLACE)
 	}
-	ok, kind, err := exists(name)
+	if err := replaceableFile(pfd, dest); err != nil {
+		return err
+	}
+	backup, err := freeName(pfd, dest, replaced)
 	if err != nil {
-		return "", false, err
+		return err
 	}
-	if !ok {
+	if err := unix.Renameat2(pfd, dest, pfd, backup, unix.RENAME_NOREPLACE); err != nil {
+		return err
+	}
+	if err := unix.Renameat2(pfd, tmp, pfd, dest, unix.RENAME_NOREPLACE); err != nil {
+		_ = unix.Renameat2(pfd, backup, pfd, dest, unix.RENAME_NOREPLACE)
+		return err
+	}
+	return nil
+}
+
+// clearDir menghapus isi direktori fd (bukan direktorinya).
+func clearDir(fd int) {
+	var names []string
+	_ = readNames(fd, func(n string) error { names = append(names, n); return nil })
+	for _, n := range names {
+		_ = removeAt(fd, n, 1)
+	}
+}
+
+// restoreName memilih nama tujuan: nama asli bila belum ada (atau boleh
+// ditimpa: replace), bila tidak nama bebas dengan label.
+func restoreName(pfd int, name string, mayOverwrite bool, label string) (string, bool, error) {
+	var st unix.Stat_t
+	err := unix.Fstatat(pfd, name, &st, unix.AT_SYMLINK_NOFOLLOW)
+	switch {
+	case errors.Is(err, unix.ENOENT):
 		return name, false, nil
-	}
-	if mayOverwrite && kind == unix.S_IFREG {
+	case err != nil:
+		return "", false, err
+	case mayOverwrite && st.Mode&unix.S_IFMT == unix.S_IFREG:
 		return name, true, nil
 	}
+	n, err := freeName(pfd, name, label)
+	return n, false, err
+}
+
+// freeName: "<nama> (<label>)<ekstensi>", lalu " 2", " 3", … yang belum ada.
+func freeName(pfd int, name, label string) (string, error) {
 	stem, ext := name, ""
 	if i := strings.LastIndexByte(name, '.'); i > 0 {
 		stem, ext = name[:i], name[i:]
@@ -517,17 +634,18 @@ func restoreName(pfd int, name string, mayOverwrite bool, label string) (string,
 			cand = stem + " (" + label + " " + strconv.Itoa(i) + ")" + ext
 		}
 		if len(cand) > 255 {
-			return "", false, &OpError{Code: proto.ErrInvalidParams, Message: "nama terlalu panjang untuk dipulihkan"}
+			return "", &OpError{Code: proto.ErrInvalidParams, Message: "nama terlalu panjang untuk dipulihkan"}
 		}
-		ok, _, err := exists(cand)
+		var st unix.Stat_t
+		err := unix.Fstatat(pfd, cand, &st, unix.AT_SYMLINK_NOFOLLOW)
+		if errors.Is(err, unix.ENOENT) {
+			return cand, nil
+		}
 		if err != nil {
-			return "", false, err
-		}
-		if !ok {
-			return cand, false, nil
+			return "", err
 		}
 	}
-	return "", false, &OpError{Code: errFileExists, Message: "terlalu banyak hasil pemulihan bernama sama"}
+	return "", &OpError{Code: errFileExists, Message: "terlalu banyak hasil pemulihan bernama sama"}
 }
 
 func tempName() (string, error) {
@@ -538,38 +656,57 @@ func tempName() (string, error) {
 	return uploadTempPrefix + hex.EncodeToString(b), nil
 }
 
-// copyFile menyalin isi fd ke file baru name di dirfd (O_EXCL). Izin file
-// baru mengikuti ACL bawaan folder tujuan (bukan izin lama di snapshot);
-// waktu ubahnya dipertahankan.
-func (r *restoreState) copyFile(fd, dirfd int, name string) error {
+// copyFile menyalin isi fd ke file baru name di dirfd (O_EXCL), sedikit
+// demi sedikit (tenggat diperiksa). Izin file baru mengikuti ACL bawaan
+// folder tujuan (bukan izin lama di snapshot); waktu ubahnya dipertahankan.
+// Mengembalikan dev/ino file baru.
+func (r *restoreState) copyFile(fd, dirfd int, name string) (uint64, uint64, error) {
 	var st unix.Stat_t
 	if err := unix.Fstat(fd, &st); err != nil {
-		return err
+		return 0, 0, err
 	}
 	if st.Mode&unix.S_IFMT != unix.S_IFREG {
-		return &OpError{Code: proto.ErrInvalidParams, Message: "bukan file biasa"}
+		return 0, 0, &OpError{Code: proto.ErrInvalidParams, Message: "bukan file biasa"}
 	}
 	if err := r.count(st.Size); err != nil {
-		return err
+		return 0, 0, err
 	}
 	if _, err := unix.FcntlInt(uintptr(fd), unix.F_SETFL, 0); err != nil {
-		return err
+		return 0, 0, err
 	}
 	out, err := openBeneath(dirfd, name, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW, 0o666)
 	if err != nil {
-		return err
+		return 0, 0, err
+	}
+	var ost unix.Stat_t
+	if err := unix.Fstat(out, &ost); err != nil {
+		unix.Close(out)
+		return 0, 0, err
 	}
 	// fd sumber dimiliki pemanggil (tidak dibungkus os.File, yang menutup fd
 	// lewat finalizer).
 	dst := os.NewFile(uintptr(out), "dst")
-	_, err = io.Copy(onlyWriter{dst}, io.LimitReader(fdReader(fd), st.Size+1))
-	if err == nil {
+	buf := make([]byte, 1<<20)
+	in := io.LimitReader(fdReader(fd), st.Size+1)
+	for err == nil {
+		var n int
+		n, err = in.Read(buf)
+		if n > 0 {
+			if _, werr := dst.Write(buf[:n]); werr != nil {
+				err = werr
+			}
+		}
+		if err == nil {
+			err = r.inTime()
+		}
+	}
+	if errors.Is(err, io.EOF) {
 		err = unix.Futimes(out, []unix.Timeval{unix.NsecToTimeval(st.Atim.Nano()), unix.NsecToTimeval(st.Mtim.Nano())})
 	}
 	if cerr := dst.Close(); err == nil {
 		err = cerr
 	}
-	return err
+	return ost.Dev, ost.Ino, err
 }
 
 // fdReader membaca langsung dari fd (EINTR diulang).
@@ -591,73 +728,77 @@ func (f fdReader) Read(p []byte) (int, error) {
 	}
 }
 
-// onlyWriter menyembunyikan ReaderFrom os.File (salinan biasa, dalam batas
-// LimitReader).
-type onlyWriter struct{ w io.Writer }
-
-func (o onlyWriter) Write(p []byte) (int, error) { return o.w.Write(p) }
-
-// copyDir menyalin isi direktori sfd ke direktori baru name di dirfd.
-// Symlink, berkas khusus, dan sistem berkas lain di dalamnya dilewati.
-func (r *restoreState) copyDir(sfd, dirfd int, name string, depth int) error {
+// scan menghitung isi direktori snapshot sfd (tanpa menyalin).
+func (r *restoreState) scan(sfd, depth int) error {
 	if depth > 256 {
 		return &OpError{Code: proto.ErrInvalidParams, Message: "folder terlalu dalam"}
 	}
-	if err := r.count(0); err != nil {
-		return err
+	return readNames(sfd, func(n string) error {
+		var st unix.Stat_t
+		if err := unix.Fstatat(sfd, n, &st, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+			return err
+		}
+		switch {
+		case st.Dev != r.dev || (st.Mode&unix.S_IFMT != unix.S_IFDIR && st.Mode&unix.S_IFMT != unix.S_IFREG):
+			return r.count(0)
+		case st.Mode&unix.S_IFMT == unix.S_IFREG:
+			return r.count(st.Size)
+		}
+		if err := r.count(0); err != nil {
+			return err
+		}
+		cfd, err := openBeneath(sfd, n, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW, 0)
+		if err != nil {
+			return err
+		}
+		defer unix.Close(cfd)
+		return r.scan(cfd, depth+1)
+	})
+}
+
+// copyInto menyalin isi direktori snapshot sfd ke direktori dfd (milik
+// pemulihan ini). Symlink, berkas khusus, dan sistem berkas lain dilewati.
+func (r *restoreState) copyInto(sfd, dfd, depth int) error {
+	if depth > 256 {
+		return &OpError{Code: proto.ErrInvalidParams, Message: "folder terlalu dalam"}
 	}
-	if err := unix.Mkdirat(dirfd, name, 0o777); err != nil {
-		return err
-	}
-	dfd, err := openBeneath(dirfd, name, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW, 0)
-	if err != nil {
-		return err
-	}
-	defer unix.Close(dfd)
-	dup, err := unix.Dup(sfd)
-	if err != nil {
-		return err
-	}
-	dir := os.NewFile(uintptr(dup), "dir")
-	names, err := dir.Readdirnames(-1)
-	dir.Close()
-	if err != nil {
-		return err
-	}
-	for _, n := range names {
+	return readNames(sfd, func(n string) error {
 		if strings.HasPrefix(n, uploadTempPrefix) {
-			continue
+			return nil
 		}
 		var st unix.Stat_t
 		if err := unix.Fstatat(sfd, n, &st, unix.AT_SYMLINK_NOFOLLOW); err != nil {
 			return err
 		}
 		switch {
-		case st.Dev != r.dev:
+		case st.Dev != r.dev || (st.Mode&unix.S_IFMT != unix.S_IFDIR && st.Mode&unix.S_IFMT != unix.S_IFREG):
 			r.skipped++
-		case st.Mode&unix.S_IFMT == unix.S_IFDIR:
-			cfd, err := openBeneath(sfd, n, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW, 0)
-			if err != nil {
-				return err
-			}
-			err = r.copyDir(cfd, dfd, n, depth+1)
-			unix.Close(cfd)
-			if err != nil {
-				return err
-			}
+			return r.count(0)
 		case st.Mode&unix.S_IFMT == unix.S_IFREG:
 			cfd, err := openBeneath(sfd, n, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_NOCTTY, 0)
 			if err != nil {
 				return err
 			}
-			err = r.copyFile(cfd, dfd, n)
-			unix.Close(cfd)
-			if err != nil {
-				return err
-			}
-		default:
-			r.skipped++
+			defer unix.Close(cfd)
+			_, _, err = r.copyFile(cfd, dfd, n)
+			return err
 		}
-	}
-	return nil
+		if err := r.count(0); err != nil {
+			return err
+		}
+		if err := unix.Mkdirat(dfd, n, 0o777); err != nil {
+			return err
+		}
+		nd, err := openBeneath(dfd, n, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW, 0)
+		if err != nil {
+			return err
+		}
+		defer unix.Close(nd)
+		cfd, err := openBeneath(sfd, n, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW, 0)
+		if err != nil {
+			return err
+		}
+		defer unix.Close(cfd)
+		return r.copyInto(cfd, nd, depth+1)
+	})
 }

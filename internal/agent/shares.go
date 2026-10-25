@@ -645,6 +645,9 @@ func (s *Shares) renderSMBConf(shares []shareConf, homesPool string) []byte {
 		{"unix password sync", "no"},
 		{"invalid users", "root"},
 		{"hosts deny", strings.Join(s.t.DenyNetworks, " ")},
+		// File/folder sementara unggahan dan pemulihan (.sapo-upload-*)
+		// tidak terlihat dan tidak bisa diubah lewat SMB.
+		{"veto files", "/.sapo-upload-*/"},
 		// Snapshot Sapo (ADR 0014) sebagai "Previous Versions" di Windows.
 		{"vfs objects", "shadow_copy2"},
 		{"shadow:snapdir", ".zfs/snapshot"},

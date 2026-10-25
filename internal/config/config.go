@@ -174,6 +174,10 @@ type Files struct {
 	// per pemulihan (memakai batas waktu delete_timeout_seconds).
 	RestoreMaxFiles int `yaml:"restore_max_files"`
 	RestoreMaxGB    int `yaml:"restore_max_gb"`
+	// Akhiran nama hasil pemulihan bila nama sudah ada, dan nama cadangan
+	// file yang ditimpa; {time} = waktu snapshot / waktu pemulihan.
+	RestoreLabel  string `yaml:"restore_label"`
+	ReplacedLabel string `yaml:"replaced_label"`
 }
 
 // Snapshots mengatur jadwal snapshot di sapod (ADR 0014).
@@ -195,6 +199,11 @@ func (s Snapshots) validate() error {
 func (f Files) validate() error {
 	if f.RestoreMaxFiles < 1 || f.RestoreMaxGB < 1 {
 		return errors.New("agent.files: restore_max_files dan restore_max_gb minimal 1")
+	}
+	for _, l := range []string{f.RestoreLabel, f.ReplacedLabel} {
+		if l == "" || len(l) > 64 || !strings.Contains(l, "{time}") || strings.ContainsAny(l, "/\\\x00\n\r\t") {
+			return errors.New("agent.files: restore_label dan replaced_label wajib berisi {time}, satu baris, tanpa / atau \\")
+		}
 	}
 	if f.MaxEntries < 100 || f.MaxEntries > 20000 || f.TimeoutSeconds < 5 || f.DeleteTimeoutSeconds < f.TimeoutSeconds || f.DeleteTimeoutSeconds > 280 {
 		return errors.New("agent.files: max_entries 100-20000, timeout_seconds minimal 5, delete_timeout_seconds antara timeout_seconds dan 280")
@@ -444,7 +453,8 @@ func Default() Config {
 			Updates: Updates{AptGet: "/usr/bin/apt-get", Dpkg: "/usr/bin/dpkg", SystemdRun: "/usr/bin/systemd-run", Unit: "sapo-updates.service",
 				LogFile: "/var/lib/sapod/updates.log", ResultFile: "/var/lib/sapod/updates-result.json", CheckTimeoutSeconds: 240,
 				InstallTimeoutSeconds: 3 * 3600},
-			Files:     Files{MaxEntries: 5000, TimeoutSeconds: 30, DeleteTimeoutSeconds: 270, RestoreMaxFiles: 20000, RestoreMaxGB: 20},
+			Files: Files{MaxEntries: 5000, TimeoutSeconds: 30, DeleteTimeoutSeconds: 270, RestoreMaxFiles: 20000, RestoreMaxGB: 20,
+				RestoreLabel: "dipulihkan {time}", ReplacedLabel: "sebelum dipulihkan {time}"},
 			Snapshots: Snapshots{MaxPoolCapacityPercent: 90, CallTimeoutSeconds: 30},
 			Network: Network{
 				IP: "/usr/sbin/ip", Systemctl: "/usr/bin/systemctl", Hostnamectl: "/usr/bin/hostnamectl",

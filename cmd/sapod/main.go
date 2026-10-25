@@ -126,6 +126,7 @@ func main() {
 		Helper: self, MountBase: pc.MountBase, GroupFile: ac.GroupFile, MaxEntries: fc.MaxEntries,
 		Timeout: time.Duration(fc.TimeoutSeconds) * time.Second, DeleteTimeout: time.Duration(fc.DeleteTimeoutSeconds) * time.Second,
 		RestoreMaxFiles: fc.RestoreMaxFiles, RestoreMaxBytes: int64(fc.RestoreMaxGB) << 30,
+		RestoreLabel: fc.RestoreLabel, ReplacedLabel: fc.ReplacedLabel,
 		IDMin: ac.IDMin, IDMax: ac.IDMax,
 	}, shares, accounts.Managed)
 	apc := cfg.Agent.Apps
