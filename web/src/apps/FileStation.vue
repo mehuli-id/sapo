@@ -28,6 +28,8 @@ import { cn } from "@/lib/utils"
 const { t, locale } = useI18n()
 
 const shares = ref<FileShare[] | null>(null)
+// Folder pribadi (Sapo Drive) tampil sebagai "Drive saya".
+const label = (s: FileShare) => (s.home ? t("files.home") : s.name)
 const share = ref<FileShare | null>(null)
 const path = ref("")
 const entries = ref<FileEntry[] | null>(null)
@@ -162,8 +164,8 @@ function onDrop(e: DragEvent) {
           <button type="button" class="flex w-full items-start gap-3 rounded-xl border p-3 text-left hover:bg-accent" @click="open(s, '')">
             <FolderLock class="mt-0.5 size-5 shrink-0 text-muted-foreground" />
             <span class="min-w-0">
-              <span class="block font-medium">{{ s.name }}</span>
-              <span class="block text-xs text-muted-foreground">{{ s.description || t(`files.access.${s.access}`) }}</span>
+              <span class="block font-medium">{{ label(s) }}</span>
+              <span class="block text-xs text-muted-foreground">{{ s.home ? t("files.homeHelp") : s.description || t(`files.access.${s.access}`) }}</span>
             </span>
           </button>
         </li>
@@ -177,7 +179,7 @@ function onDrop(e: DragEvent) {
         <nav class="flex min-w-0 flex-wrap items-center gap-1 text-sm" :aria-label="t('files.location')">
           <button v-if="(shares?.length ?? 0) > 1" type="button" class="text-muted-foreground hover:text-foreground" @click="share = null">{{ t("files.allShares") }}</button>
           <ChevronRight v-if="(shares?.length ?? 0) > 1" class="size-3.5 text-muted-foreground" />
-          <button type="button" class="font-medium hover:underline" @click="open(share, '')">{{ share.name }}</button>
+          <button type="button" class="font-medium hover:underline" @click="open(share, '')">{{ label(share) }}</button>
           <template v-for="c in crumbs" :key="c.path">
             <ChevronRight class="size-3.5 text-muted-foreground" />
             <button type="button" class="max-w-40 truncate hover:underline" @click="open(share, c.path)">{{ c.name }}</button>

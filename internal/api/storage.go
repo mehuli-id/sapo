@@ -164,7 +164,14 @@ func (s *Server) handlePoolDestroy(w http.ResponseWriter, r *http.Request) {
 	}
 	s.destructive(w, r, user, "storage.pool_destroy", map[string]string{"pool": auditText(name)}, proto.OpStoragePoolDestroy,
 		// Folder di pool yang dihapus tidak lagi dibagikan (Samba dan NFS).
-		proto.PoolDestroyParams{Name: name}, func() { s.syncAfterChange(r) })
+		proto.PoolDestroyParams{Name: name}, func() {
+			// Folder pribadi (Sapo Drive) ikut terhapus bersama pool: Sapo
+			// Drive dimatikan agar bisa dinyalakan lagi di pool lain.
+			if s.settings.get().HomesPool == name {
+				_, _ = s.settings.update(func(v *Settings) { v.HomesPool = "" })
+			}
+			s.syncAfterChange(r)
+		})
 }
 
 // auditText memotong nilai dari pengguna sebelum dicatat.

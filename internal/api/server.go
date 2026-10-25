@@ -251,6 +251,11 @@ func New(o Options) (*Server, error) {
 	s.mux.Handle("POST /api/v1/files/rename", s.requireAuth(s.handleFileChange(proto.OpFilesRename, "files.rename")))
 	s.mux.Handle("POST /api/v1/files/delete", s.requireAuth(s.handleFileChange(proto.OpFilesDelete, "files.delete")))
 	// Control Panel.
+	s.mux.Handle("GET /api/v1/drive", s.requireAuth(http.HandlerFunc(s.handleDrive)))
+	s.mux.Handle("GET /api/v1/drive/admin", s.requireAdmin(http.HandlerFunc(s.handleDriveAdmin)))
+	s.mux.Handle("POST /api/v1/drive/settings", s.requireAdmin(http.HandlerFunc(s.handleDriveSettings)))
+	s.mux.Handle("POST /api/v1/drive/users/{name}/quota", s.requireAdmin(http.HandlerFunc(s.handleDriveQuota)))
+	s.mux.Handle("POST /api/v1/drive/homes/{pool}/{name}/delete", s.requireAdmin(http.HandlerFunc(s.handleHomeDelete)))
 	s.mux.Handle("GET /api/v1/settings/services", s.requireAdmin(http.HandlerFunc(s.handleServices)))
 	s.mux.Handle("POST /api/v1/settings/services", s.requireAdmin(http.HandlerFunc(s.handleServicesUpdate)))
 	s.mux.Handle("GET /api/v1/settings/time", s.requireAdmin(s.proxyRead(proto.OpTimeStatus)))

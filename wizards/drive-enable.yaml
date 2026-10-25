@@ -1,0 +1,56 @@
+# Wizard menyalakan Sapo Drive (ADR 0013): setiap pengguna mendapat folder
+# pribadi di pool yang dipilih. sapod memeriksa ulang pool dan nama pengguna.
+id: drive-enable
+action: drive.enable
+admin_only: true
+title:
+  id: Nyalakan Sapo Drive
+  en: Turn on Sapo Drive
+finish_label:
+  id: Nyalakan
+  en: Turn on
+
+steps:
+  - id: pool
+    title: { id: Tempat folder pribadi, en: Where personal folders live }
+    description:
+      id: >-
+        Setiap pengguna mendapat folder pribadi yang hanya bisa dibuka olehnya
+        sendiri, dari File Station atau dari komputer lain lewat jaringan.
+        Administrator juga tidak bisa membuka folder pribadi pengguna lain.
+      en: >-
+        Every user gets a personal folder that only they can open, from File
+        Station or from other computers over the network. Administrators
+        can't open other users' personal folders either.
+    help:
+      id: >-
+        Pool tidak bisa diganti selama masih ada folder pribadi di pool ini.
+        Folder pengguna yang dihapus disimpan sampai Anda menghapusnya di
+        Sapo Drive.
+      en: >-
+        The pool can't be changed while personal folders exist on it. Folders
+        of deleted users are kept until you delete them in Sapo Drive.
+    fields:
+      - key: pool
+        type: pool-select
+        required: true
+        label: { id: Disimpan di pool, en: Stored on pool }
+      - key: quota_gb
+        type: text
+        pattern: "^[0-9]{0,9}$"
+        autocomplete: "off"
+        label: { id: Batas ukuran per pengguna (GB, kosong = tanpa batas), en: Size limit per user (GB, empty = no limit) }
+        help:
+          id: Batas ini bisa diubah per pengguna nanti.
+          en: You can change this limit per user later.
+
+  - id: summary
+    type: review
+    title: { id: Ringkasan, en: Summary }
+    fields:
+      - key: admin_password
+        type: current-password
+        required: true
+        secret: true
+        autocomplete: current-password
+        label: { id: Password Anda, en: Your password }

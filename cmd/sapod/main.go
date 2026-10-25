@@ -164,6 +164,10 @@ func main() {
 	reg.Register(proto.OpSharesApply, shares.ApplyOp())
 	reg.Register(proto.OpSharesDelete, shares.DeleteOp())
 	reg.Register(proto.OpSharesUsage, shares.UsageOp())
+	homes := agent.NewHomes(shares, accounts.Managed)
+	reg.Register(proto.OpHomesApply, homes.ApplyOp())
+	reg.Register(proto.OpHomesStatus, homes.StatusOp())
+	reg.Register(proto.OpHomesDelete, homes.DeleteOp())
 	nc := cfg.Agent.Network
 	network := agent.NewNetwork(agent.NetworkTools{
 		IP: nc.IP, Systemctl: nc.Systemctl, Hostnamectl: nc.Hostnamectl,

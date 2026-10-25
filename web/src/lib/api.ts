@@ -318,6 +318,34 @@ export interface FileShare {
   name: string
   description?: string
   access: ShareAccess
+  // Folder pribadi pengguna (Sapo Drive), bernama "@home".
+  home?: boolean
+}
+
+export interface HomeStatus {
+  pool: string
+  user: string
+  used_bytes: number
+  available_bytes: number
+  // 0 = tanpa batas.
+  quota_bytes: number
+}
+
+export interface DriveInfo {
+  enabled: boolean
+  pool: string
+  smb: boolean
+  user: string
+  home?: HomeStatus
+}
+
+export interface DriveAdmin {
+  pool: string
+  quota_gb: number
+  // quota_gb: kuota khusus (-1 = tanpa batas); tidak ada = bawaan.
+  users: { user: string; exists: boolean; quota_gb?: number; home?: HomeStatus }[]
+  // Folder pengguna yang sudah dihapus, atau di pool lain.
+  orphans: HomeStatus[]
 }
 
 export interface FileEntry {
@@ -540,6 +568,13 @@ export const api = {
   timezones: () => get<{ zones: string[] }>("/api/v1/settings/timezones"),
   setTime: (timezone: string, ntp: boolean) => post<{ ok: boolean }>("/api/v1/settings/time", { timezone, ntp }),
   fileShares: () => get<FileShare[]>("/api/v1/files/shares"),
+  drive: () => get<DriveInfo>("/api/v1/drive"),
+  driveAdmin: () => get<DriveAdmin>("/api/v1/drive/admin"),
+  setDrive: (req: { pool: string; quota_gb: number; admin_password: string }) => post<{ ok: boolean; warning?: string }>("/api/v1/drive/settings", req),
+  setDriveQuota: (user: string, req: { quota_gb: number | null; admin_password: string }) =>
+    post<{ ok: boolean; warning?: string }>(`/api/v1/drive/users/${encodeURIComponent(user)}/quota`, req),
+  deleteHome: (pool: string, user: string, req: { confirm_name: string; admin_password: string }) =>
+    post<{ ok: boolean }>(`/api/v1/drive/homes/${encodeURIComponent(pool)}/${encodeURIComponent(user)}/delete`, req),
   listFiles: (share: string, path: string) => get<FileList>(`/api/v1/files/list?${fileQuery(share, path)}`),
   mkdir: (share: string, path: string) => post<{ ok: boolean }>("/api/v1/files/mkdir", { share, path }),
   renameFile: (share: string, path: string, to: string) => post<{ ok: boolean }>("/api/v1/files/rename", { share, path, to }),
@@ -676,6 +711,11 @@ export const wizardActions: Record<string, (values: Record<string, string>, ctx:
       permissions: parsePermissions(v.permissions),
       admin_password: v.admin_password ?? "",
     }),
+  "drive.enable": async (v) => {
+    const res = await api.setDrive({ pool: v.pool ?? "", quota_gb: Number(v.quota_gb || 0), admin_password: v.admin_password ?? "" })
+    if (res.warning) throw new ApiError(200, res.warning, "")
+    return res
+  },
   "storage.pool_destroy": (v, ctx) => {
     if (!ctx.pool) throw new ApiError(404, "not_found", "")
     return api.destroyPool(ctx.pool.name, { confirm_name: v.confirm_name ?? "", password: v.password ?? "" })

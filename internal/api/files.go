@@ -29,6 +29,8 @@ type fileShare struct {
 	Description string `json:"description,omitempty"`
 	// Access: "read" atau "write".
 	Access string `json:"access"`
+	// Home: folder pribadi pengguna (Sapo Drive).
+	Home bool `json:"home,omitempty"`
 }
 
 // userShares: folder yang boleh dibuka pengguna sesi ini, dengan izin
@@ -56,6 +58,9 @@ func (s *Server) userShares(r *http.Request) (string, map[string]fileShare, map[
 func (s *Server) handleFileShares(w http.ResponseWriter, r *http.Request) {
 	_, shares, _ := s.userShares(r)
 	out := []fileShare{}
+	if _, ok := s.homeTarget(r); ok {
+		out = append(out, fileShare{Name: homeShare, Access: "write", Home: true})
+	}
 	for _, sh := range shares {
 		out = append(out, sh)
 	}
@@ -66,6 +71,15 @@ func (s *Server) handleFileShares(w http.ResponseWriter, r *http.Request) {
 // fileTarget menyusun target sapod untuk share dan path dari permintaan.
 // write: folder harus berizin tulis.
 func (s *Server) fileTarget(w http.ResponseWriter, r *http.Request, share, p string, write bool) (proto.FilesTarget, bool) {
+	if share == homeShare {
+		t, ok := s.homeTarget(r)
+		if !ok {
+			writeError(w, http.StatusNotFound, "not_found", "folder pribadi tidak tersedia")
+			return proto.FilesTarget{}, false
+		}
+		t.Path = strings.Trim(p, "/")
+		return t, true
+	}
 	user, shares, all := s.userShares(r)
 	fs, ok := shares[share]
 	if !ok {
@@ -77,6 +91,18 @@ func (s *Server) fileTarget(w http.ResponseWriter, r *http.Request, share, p str
 		return proto.FilesTarget{}, false
 	}
 	return proto.FilesTarget{User: user, Pool: all[share].Pool, Share: share, Path: strings.Trim(p, "/")}, true
+}
+
+// homeTarget: folder pribadi pengguna sesi ini, bila Sapo Drive menyala dan
+// akunnya aktif.
+func (s *Server) homeTarget(r *http.Request) (proto.FilesTarget, bool) {
+	pool := s.settings.get().HomesPool
+	sess, _, _ := s.currentSession(r)
+	u, ok := s.store.Get(sess.Username)
+	if pool == "" || !ok || u.Disabled {
+		return proto.FilesTarget{}, false
+	}
+	return proto.FilesTarget{User: u.Username, Pool: pool, Home: true}, true
 }
 
 func (s *Server) fileError(w http.ResponseWriter, op string, err error) {

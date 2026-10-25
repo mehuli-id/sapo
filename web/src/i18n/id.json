@@ -52,7 +52,7 @@
     },
     "sapo-drive": {
       "title": "Sapo Drive",
-      "description": "Drive pribadi ala Google Drive"
+      "description": "Folder pribadi setiap pengguna"
     },
     "app-center": {
       "title": "App Center",
@@ -327,7 +327,11 @@
     "nfs_invalid": "Pengaturan NFS tidak valid: pilih pengguna dan isi alamat IP atau jaringan klien (misalnya 192.168.1.0/24). Nama komputer dan jaringan yang terlalu luas tidak diterima.",
     "invalid_params": "Isian tidak valid: {message}",
     "updates_failed": "Pembaruan gagal: {message}",
-    "share_used_by_app": "Folder ini masih dipakai aplikasi. Lepas dulu dari aplikasi itu di App Center."
+    "share_used_by_app": "Folder ini masih dipakai aplikasi. Lepas dulu dari aplikasi itu di App Center.",
+    "home_exists": "Masih ada folder pribadi pengguna lama bernama sama. Hapus dulu di Sapo Drive (Folder sisa), atau pakai nama lain.",
+    "drive_pool_in_use": "Masih ada folder pribadi di pool lain. Folder pribadi tidak dipindah otomatis.",
+    "home_user_exists": "Pengguna ini masih ada; folder pribadinya tidak bisa dihapus.",
+    "home_delete_failed": "Folder pribadi gagal dihapus: {message}"
   },
   "pool": {
     "title": "Pool penyimpanan",
@@ -632,7 +636,9 @@
       "timeout": "Operasi terlalu lama (folder sangat besar). Sebagian mungkin sudah dihapus; coba lagi.",
       "invalid_params": "Nama atau lokasi tidak valid.",
       "network_error": "Koneksi ke NAS terputus."
-    }
+    },
+    "home": "Drive saya",
+    "homeHelp": "Folder pribadi Anda"
   },
   "controlPanel": {
     "settings": "Pengaturan",
@@ -711,5 +717,40 @@
     },
     "save": "Simpan",
     "foldersExposure": "Siapa pun yang bisa membuka aplikasi ini (dari jaringan, termasuk aplikasi lain di NAS) bisa melihat folder ini sesuai pengaturan login aplikasinya. Siapkan akun admin aplikasi segera setelah dipasang."
+  },
+  "drive": {
+    "intro": "Folder pribadi untuk setiap pengguna: hanya Anda yang bisa membukanya, dari File Station atau dari komputer lain lewat jaringan.",
+    "off": "Sapo Drive belum dinyalakan. Minta administrator menyalakannya.",
+    "offAdmin": "Sapo Drive belum dinyalakan. Setelah dinyalakan, setiap pengguna mendapat folder pribadi di pool yang Anda pilih.",
+    "enable": "Nyalakan Sapo Drive",
+    "enabled": "Sapo Drive dinyalakan. Folder pribadi setiap pengguna sedang disiapkan.",
+    "disabled": "Sapo Drive dimatikan. Folder pribadi disimpan dan muncul lagi bila dinyalakan di pool yang sama.",
+    "preparing": "Folder sedang disiapkan…",
+    "usedOf": "{used} dari {quota} terpakai",
+    "usedFree": "{used} terpakai, {free} tersisa",
+    "openFiles": "Buka di File Station",
+    "smbHelp": "Dari komputer lain di jaringan (login dengan akun Sapo Anda):",
+    "smbOff": "Akses lewat jaringan (SMB) sedang dimatikan administrator. Folder tetap bisa dibuka di File Station.",
+    "settings": "Pengaturan",
+    "settingsSummary": "Pool {pool} · batas bawaan {quota}",
+    "changeDefault": "Ubah batas bawaan",
+    "defaultQuota": "Batas ukuran bawaan per pengguna (GB, kosong = tanpa batas)",
+    "turnOff": "Matikan",
+    "turnOffHelp": "Folder pribadi tidak lagi bisa dibuka, tetapi isinya disimpan. Menyalakan lagi di pool yang sama membukanya kembali.",
+    "saved": "Pengaturan disimpan.",
+    "users": "Pengguna",
+    "quota": "Batas",
+    "quotaDefault": "bawaan",
+    "noLimit": "tanpa batas",
+    "gb": "{n} GB",
+    "changeQuota": "Ubah batas",
+    "userQuota": "Batas ukuran (GB)",
+    "userQuotaHelp": "Kosong = batas bawaan, 0 = tanpa batas. Bila isinya sudah lebih besar, file lama tetap ada tetapi tidak bisa menambah file baru.",
+    "orphans": "Folder sisa",
+    "orphansHelp": "Folder pribadi pengguna yang sudah dihapus (atau di pool lain). Isinya disimpan sampai Anda menghapusnya. Pengguna baru tidak bisa memakai nama yang masih punya folder sisa.",
+    "onPool": "di pool {pool}",
+    "deleteHome": "Hapus folder",
+    "deleteHomeHelp": "Folder pribadi {user} beserta semua isinya akan dihapus permanen dan tidak bisa dikembalikan.",
+    "homeDeleted": "Folder pribadi {user} dihapus."
   }
 }

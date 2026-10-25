@@ -126,7 +126,7 @@ func CleanFilePath(p string) (string, error) {
 // path. Mengembalikan identitas proses pembantu dan akar folder.
 func (f *Files) prepare(ctx context.Context, t proto.FilesTarget) (fsCred, string, string, error) {
 	invalid := func(msg string) error { return &OpError{Code: proto.ErrInvalidParams, Message: msg} }
-	if !accountNamePattern.MatchString(t.User) || !poolNamePattern.MatchString(t.Pool) || !shareNamePattern.MatchString(t.Share) {
+	if !accountNamePattern.MatchString(t.User) || !poolNamePattern.MatchString(t.Pool) || (t.Home != (t.Share == "")) || (!t.Home && !shareNamePattern.MatchString(t.Share)) {
 		return fsCred{}, "", "", invalid("pengguna atau folder tidak valid")
 	}
 	path, err := CleanFilePath(t.Path)
@@ -137,10 +137,16 @@ func (f *Files) prepare(ctx context.Context, t proto.FilesTarget) (fsCred, strin
 	if err != nil {
 		return fsCred{}, "", "", err
 	}
+	// Folder pribadi (Sapo Drive) selalu milik pengguna sesi itu sendiri.
+	ds, prop, want := t.Pool+"/"+t.Share, sharePropName, t.Share
 	root := filepath.Join(f.t.MountBase, t.Pool, t.Share)
-	props, err := f.shares.zfsProps(ctx, t.Pool+"/"+t.Share, "mountpoint", "mounted", sharePropName)
-	if errors.Is(err, errNoDataset) || (err == nil && (props[sharePropName] != t.Share || props["mountpoint"] != root || props["mounted"] != "yes")) {
-		return fsCred{}, "", "", &OpError{Code: proto.ErrNotFound, Message: "shared folder tidak ditemukan atau belum terpasang"}
+	if t.Home {
+		ds, prop, want = t.Pool+"/"+homesDataset+"/"+t.User, homePropName, t.User
+		root = homePath(f.t.MountBase, t.Pool, t.User)
+	}
+	props, err := f.shares.zfsProps(ctx, ds, "mountpoint", "mounted", prop)
+	if errors.Is(err, errNoDataset) || (err == nil && (props[prop] != want || props["mountpoint"] != root || props["mounted"] != "yes")) {
+		return fsCred{}, "", "", &OpError{Code: proto.ErrNotFound, Message: "folder tidak ditemukan atau belum terpasang"}
 	}
 	if err != nil {
 		return fsCred{}, "", "", err

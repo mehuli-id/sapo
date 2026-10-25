@@ -237,7 +237,22 @@ func (s *Server) syncSystem(ctx context.Context) (res proto.SharesApplyResult, e
 	}
 
 	v := s.settings.get()
-	params := proto.SharesApplyParams{Shares: []proto.ShareSpec{}, SMBOff: v.SMBOff, NFSOff: v.NFSOff}
+	// Folder pribadi (Sapo Drive) disiapkan dulu, agar sudah ada saat Samba
+	// membagikannya. Hanya untuk pengguna yang akunnya berhasil disinkronkan.
+	var homesErr error
+	if v.HomesPool != "" {
+		hp := proto.HomesApplyParams{Pool: v.HomesPool, Users: []proto.HomeUser{}}
+		for _, u := range users {
+			if exists["user:"+u.Username] {
+				hp.Users = append(hp.Users, proto.HomeUser{Name: u.Username, QuotaBytes: homeQuota(v, u.Username)})
+			}
+		}
+		var hres proto.HomesApplyResult
+		if homesErr = s.agent.Call(ctx, proto.OpHomesApply, hp, &hres); homesErr == nil && len(hres.Failures) > 0 {
+			homesErr = errors.New("sebagian folder pribadi gagal disiapkan: " + strings.Join(hres.Failures, "; "))
+		}
+	}
+	params := proto.SharesApplyParams{Shares: []proto.ShareSpec{}, SMBOff: v.SMBOff, NFSOff: v.NFSOff, HomesPool: v.HomesPool}
 	for _, sh := range s.shares.list() {
 		spec := proto.ShareSpec{Name: sh.Name, Pool: sh.Pool, Description: sh.Description, Read: []string{}, Write: []string{}}
 		for p, level := range sh.Permissions {
@@ -281,6 +296,9 @@ func (s *Server) syncSystem(ctx context.Context) (res proto.SharesApplyResult, e
 	}
 	if err == nil && failed {
 		err = errors.New("sebagian akun sistem gagal disinkronkan: " + failures)
+	}
+	if err == nil {
+		err = homesErr
 	}
 	return res, err
 }
@@ -425,7 +443,7 @@ func (s *Server) scheduleResync() {
 var shareNameRe = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
 
 // sapo-apps: dataset data aplikasi App Center (ADR 0012).
-var reservedShareNames = []string{"global", "homes", "printers", "print", "ipc", "sapo-apps"}
+var reservedShareNames = []string{"global", "homes", "printers", "print", "ipc", "sapo-apps", "sapo-home"}
 
 type shareView struct {
 	Share

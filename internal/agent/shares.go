@@ -118,7 +118,7 @@ const (
 var shareNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
 
 // Nama share yang punya arti khusus di Samba.
-var reservedShares = []string{"global", "homes", "printers", "print", "ipc", "sapo-apps"}
+var reservedShares = []string{"global", "homes", "printers", "print", "ipc", "sapo-apps", "sapo-home"}
 
 // validShareText: keterangan folder masuk ke smb.conf (comment = …), jadi
 // hanya teks satu baris tanpa karakter kendali, format, atau tanda kurung siku.
@@ -195,6 +195,9 @@ func (s *Shares) ApplyOp() Handler {
 		}
 		if err := s.checkSpecs(req.Shares); err != nil {
 			return nil, err
+		}
+		if req.HomesPool != "" && !poolNamePattern.MatchString(req.HomesPool) {
+			return nil, &OpError{Code: proto.ErrInvalidParams, Message: "pool folder pribadi tidak valid"}
 		}
 		if !s.p.write.TryLock() {
 			return nil, &OpError{Code: proto.ErrBusy, Message: "operasi pool lain sedang berjalan"}
@@ -303,12 +306,13 @@ func (s *Shares) ApplyOp() Handler {
 		if req.NFSOff {
 			exports = nil
 		}
+		homesPool := req.HomesPool
 		if req.SMBOff {
-			active = nil
+			active, homesPool = nil, ""
 		}
 		var nfsErr, smbErr, appErr error
 		out.NFS, nfsErr = s.writeExports(ctx, exports)
-		out.SMB, smbErr = s.writeSMBConf(ctx, active)
+		out.SMB, smbErr = s.writeSMBConf(ctx, active, homesPool)
 		// Folder aplikasi: keadaan lengkap, jadi folder yang dicabut (atau
 		// gagal disiapkan) dilepas dari container.
 		if s.apps != nil {
@@ -611,7 +615,7 @@ type shareConf struct {
 // renderSMBConf menyusun smb.conf dari templat tetap. Semua nilai sudah
 // divalidasi (nama, path, keterangan), jadi tidak bisa menambah baris atau
 // bagian baru.
-func (s *Shares) renderSMBConf(shares []shareConf) []byte {
+func (s *Shares) renderSMBConf(shares []shareConf, homesPool string) []byte {
 	var b bytes.Buffer
 	b.WriteString("# Dibuat oleh sapod (Sapo). Jangan diubah manual: atur shared folder lewat panel.\n")
 	fmt.Fprintf(&b, "[global]\n")
@@ -636,6 +640,13 @@ func (s *Shares) renderSMBConf(shares []shareConf) []byte {
 		{"max log size", "1000"},
 	} {
 		fmt.Fprintf(&b, "   %s = %s\n", kv[0], kv[1])
+	}
+	// Folder pribadi (Sapo Drive): \\nas\<nama> hanya untuk pengguna itu
+	// sendiri; foldernya juga 0700 milik akunnya.
+	if homesPool != "" {
+		b.WriteString("\n[homes]\n   comment = Folder pribadi\n")
+		fmt.Fprintf(&b, "   path = %s/%%S\n", filepath.Join(s.t.MountBase, homesPool, homesDataset))
+		b.WriteString("   valid users = %S\n   browseable = no\n   guest ok = no\n   read only = no\n   create mask = 0600\n   directory mask = 0700\n")
 	}
 	for _, sc := range shares {
 		var valid, write []string
@@ -670,11 +681,11 @@ func (s *Shares) renderSMBConf(shares []shareConf) []byte {
 // writeSMBConf menulis smb.conf (diperiksa testparm dulu) lalu meminta Samba
 // memuat ulang. Hasil: "applied", atau "unavailable" bila Samba tidak
 // terpasang.
-func (s *Shares) writeSMBConf(ctx context.Context, shares []shareConf) (string, error) {
+func (s *Shares) writeSMBConf(ctx context.Context, shares []shareConf, homesPool string) (string, error) {
 	if _, err := os.Stat(s.t.Testparm); err != nil {
 		return "unavailable", nil
 	}
-	data := s.renderSMBConf(shares)
+	data := s.renderSMBConf(shares, homesPool)
 	dir := filepath.Dir(s.t.SMBConf)
 	if err := checkSocketDir(dir); err != nil {
 		return "", fmt.Errorf("direktori smb.conf tidak aman: %w", err)

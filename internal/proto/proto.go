@@ -113,6 +113,11 @@ const (
 	OpAppsStop    = "apps.stop"
 	OpAppsRemove  = "apps.remove"
 
+	// Sapo Drive (ADR 0013): folder pribadi setiap pengguna.
+	OpHomesApply  = "homes.apply"
+	OpHomesStatus = "homes.status"
+	OpHomesDelete = "homes.delete"
+
 	// Pembaruan sistem (ADR 0011): OpUpdatesCheck menjalankan apt-get update
 	// dan mendaftar paket yang bisa diperbarui; OpUpdatesInstall memasangnya
 	// di unit systemd terpisah (tetap berjalan bila sapod di-restart);
@@ -469,6 +474,9 @@ type SharesApplyParams struct {
 	Shares []ShareSpec `json:"shares"`
 	SMBOff bool        `json:"smb_off,omitempty"`
 	NFSOff bool        `json:"nfs_off,omitempty"`
+	// HomesPool: folder pribadi (Sapo Drive) di pool ini juga dibagikan
+	// lewat SMB ([homes]); kosong = tidak.
+	HomesPool string `json:"homes_pool,omitempty"`
 }
 
 // ShareSpec adalah satu shared folder: dataset <Pool>/<Name>. Read dan Write
@@ -653,6 +661,8 @@ type FilesTarget struct {
 	Pool  string `json:"pool"`
 	Share string `json:"share"`
 	Path  string `json:"path"`
+	// Home: folder pribadi User di Pool (Share kosong).
+	Home bool `json:"home,omitempty"`
 }
 
 // FilesRenameParams: To adalah path baru di folder yang sama.
@@ -796,4 +806,40 @@ type AppInstallParams struct {
 type AppRemoveParams struct {
 	ID         string `json:"id"`
 	RemoveData bool   `json:"remove_data"`
+}
+
+// HomesApplyParams adalah keadaan lengkap folder pribadi (Sapo Drive):
+// setiap pengguna di Users mendapat dataset <Pool>/sapo-home/<nama>.
+// Folder pengguna yang tidak ada di daftar TIDAK dihapus.
+type HomesApplyParams struct {
+	Pool  string     `json:"pool"`
+	Users []HomeUser `json:"users"`
+}
+
+// HomeUser: QuotaBytes 0 = tanpa batas.
+type HomeUser struct {
+	Name       string `json:"name"`
+	QuotaBytes uint64 `json:"quota_bytes"`
+}
+
+// HomesApplyResult: Failures berisi "nama: alasan" untuk folder yang gagal
+// disiapkan.
+type HomesApplyResult struct {
+	Failures []string `json:"failures"`
+}
+
+// HomeStatus adalah satu folder pribadi yang ada di sistem (di pool mana
+// pun).
+type HomeStatus struct {
+	Pool           string `json:"pool"`
+	User           string `json:"user"`
+	UsedBytes      uint64 `json:"used_bytes"`
+	AvailableBytes uint64 `json:"available_bytes"`
+	QuotaBytes     uint64 `json:"quota_bytes"`
+}
+
+// HomeDeleteParams menghapus folder pribadi pengguna yang sudah dihapus.
+type HomeDeleteParams struct {
+	Pool string `json:"pool"`
+	User string `json:"user"`
 }

@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/mehuli-id/sapo/internal/auth"
+	"github.com/mehuli-id/sapo/internal/proto"
 )
 
 // --- Pengguna dan grup (admin) -----------------------------------------------
@@ -152,6 +153,15 @@ func (s *Server) handleUserCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	admin, ok := s.reauthField(w, r, req.AdminPassword, "admin_password")
 	if !ok {
+		return
+	}
+	// Folder pribadi pengguna lama bernama sama tidak boleh jatuh ke
+	// pengguna baru (dihapus dulu di Sapo Drive). Gagal-tertutup.
+	if taken, err := s.homeExists(r, req.Username); err != nil {
+		s.agentError(w, proto.OpHomesStatus, err)
+		return
+	} else if taken {
+		writeErrorDetail(w, http.StatusConflict, "home_exists", "masih ada folder pribadi pengguna lama bernama sama", map[string]any{"field": "username"})
 		return
 	}
 	hash, ok := s.hashNew(w, r, req.Password)
