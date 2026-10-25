@@ -81,6 +81,10 @@
     "network": {
       "title": "Jaringan",
       "description": "Nama host, alamat IP, dan DNS"
+    },
+    "backup": {
+      "title": "Backup",
+      "description": "Salin shared folder ke pool lain setiap hari"
     }
   },
   "systemInfo": {
@@ -342,7 +346,9 @@
     "disk_identity": "Disk punya nomor seri atau WWN yang sama dengan disk lain, jadi tidak bisa dipastikan. Sambungkan disk itu langsung (SATA) atau pakai enclosure lain.",
     "external_unsupported": "Drive ini tidak bisa dipasang: {message}",
     "install_not_live": "Installer hanya tersedia saat Sapo berjalan dari ISO.",
-    "install_disk_small": "Disk terlalu kecil untuk sistem Sapo."
+    "install_disk_small": "Disk terlalu kecil untuk sistem Sapo.",
+    "backup_diverged": "Salinan di tujuan tidak lagi cocok dengan folder asal. Hapus tugas beserta salinannya, lalu buat ulang.",
+    "backup_same_pool": "Pool tujuan harus berbeda dari pool folder."
   },
   "pool": {
     "title": "Pool penyimpanan",
@@ -892,5 +898,42 @@
     "done": "Sapo terpasang di {disk}. Cabut media ISO (atau ubah urutan boot), lalu nyalakan ulang NAS.",
     "failed": "Pemasangan gagal di langkah {step}: {error}. Data di pool tidak tersentuh; perbaiki lalu coba lagi.",
     "interrupted": "terputus sebelum selesai"
+  },
+  "backup": {
+    "help": "Backup menyalin shared folder ke pool lain (misalnya pool di drive USB) setiap hari. Backup pertama menyalin semuanya, berikutnya hanya bagian yang berubah. Data di folder asal tidak pernah diubah.",
+    "create": "Tugas baru",
+    "created": "Tugas backup dibuat. Backup pertama berjalan pada jam yang dijadwalkan, atau tekan Backup sekarang.",
+    "needTwoPools": "Backup butuh minimal dua pool. Buat pool kedua di Storage Manager, misalnya di drive USB (nyalakan pilihan izinkan disk USB).",
+    "none": "Belum ada tugas backup.",
+    "noShares": "Belum ada shared folder.",
+    "running": "Berjalan",
+    "off": "Mati",
+    "schedule": "Setiap hari pukul {hour}.00, simpan {keep} salinan",
+    "copies": "{n} salinan",
+    "lastRun": "Backup terakhir berhasil: {when}",
+    "sent": "{size} dikirim",
+    "never": "Belum pernah di-backup.",
+    "lastFailed": "Percobaan terakhir gagal",
+    "runNow": "Backup sekarang",
+    "started": "Backup {name} dimulai di latar belakang.",
+    "restore": "Pulihkan",
+    "edit": "Ubah tugas",
+    "delete": "Hapus tugas",
+    "hour": "Jam backup (0–23)",
+    "keep": "Jumlah salinan disimpan (1–366)",
+    "enabled": "Jalankan sesuai jadwal",
+    "keepWarning": "{n} salinan terlama akan dibuang saat backup berikutnya.",
+    "save": "Simpan",
+    "saved": "Tugas backup disimpan.",
+    "restoreHelp": "Salinan dipulihkan sebagai shared folder baru di pool asal, dengan izin yang sama dengan folder asalnya. Folder yang ada tidak ditimpa.",
+    "copy": "Salinan dari",
+    "newName": "Nama folder baru",
+    "restoreStarted": "Pemulihan ke folder {name} dimulai. Folder muncul di Shared Folder setelah selesai.",
+    "deleteHelp": "Menghapus tugas tidak mengubah folder asal. Salinan di pool tujuan tetap disimpan kecuali Anda memilih untuk menghapusnya.",
+    "deleteData": "Hapus juga semua salinan di pool {pool}",
+    "confirmId": "Ketik {id} untuk konfirmasi",
+    "deleted": "Tugas backup dihapus.",
+    "restores": "Pemulihan terakhir",
+    "restoreRow": "{name} (mulai {when})"
   }
 }

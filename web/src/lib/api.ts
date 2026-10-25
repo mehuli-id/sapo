@@ -517,6 +517,7 @@ export interface WizardField {
     | "group-select"
     | "toggle"
     | "pool-select"
+    | "share-select"
     | "permissions"
   label: Localized
   help?: Localized
@@ -658,6 +659,14 @@ export const api = {
   mountExternal: (req: { uuid: string; name: string; read_only: boolean; group: string; smb: boolean; admin_password: string }) =>
     post<{ ok: boolean }>("/api/v1/storage/external/mount", req),
   unmountExternal: (name: string) => post<{ ok: boolean }>(`/api/v1/storage/external/${encodeURIComponent(name)}/unmount`),
+  backups: () => get<BackupsList>("/api/v1/backups"),
+  setBackup: (req: { id?: string; share: string; dest_pool: string; hour: number; keep: number; enabled: boolean; admin_password: string }) =>
+    post<BackupJob>("/api/v1/backups", req),
+  runBackup: (id: string) => post<{ ok: boolean }>(`/api/v1/backups/${encodeURIComponent(id)}/run`),
+  deleteBackup: (id: string, req: { delete_data: boolean; confirm_name: string; admin_password: string }) =>
+    post<{ ok: boolean }>(`/api/v1/backups/${encodeURIComponent(id)}/delete`, req),
+  restoreBackup: (id: string, req: { copy: string; name: string; admin_password: string }) =>
+    post<{ ok: boolean }>(`/api/v1/backups/${encodeURIComponent(id)}/restore`, req),
   snapshotPresets: () => get<SnapshotPreset[]>("/api/v1/snapshots/presets"),
   snapshots: (t: SnapshotTarget) =>
     get<{ snapshots: SnapshotInfo[]; used_by_snapshots: number }>(`/api/v1/snapshots?${new URLSearchParams({ pool: t.pool, share: t.share ?? "", user: t.user ?? "" })}`),
@@ -732,6 +741,42 @@ export const api = {
 
 // Data yang dibutuhkan isian wizard tertentu (misalnya daftar disk untuk
 // disk-select), disiapkan aplikasi yang membuka wizard.
+// Tugas backup (ADR 0017).
+export interface BackupJob {
+  id: string
+  src_pool: string
+  share: string
+  dest_pool: string
+  hour: number
+  keep: number
+  enabled: boolean
+}
+export interface BackupStatus extends BackupJob {
+  running: boolean
+  last_run?: string
+  last_ok: boolean
+  last_error?: string
+  last_bytes?: number
+  copies: { name: string; created: string }[]
+  used_bytes: number
+  dest_exists: boolean
+}
+export interface BackupRestore {
+  job_id: string
+  copy: string
+  pool: string
+  name: string
+  started: string
+  finished?: string
+  running: boolean
+  ok: boolean
+  error?: string
+}
+export interface BackupsList {
+  jobs: BackupStatus[]
+  restores: BackupRestore[]
+}
+
 export interface WizardContext {
   disks?: Disk[]
   pools?: PoolsResult
@@ -742,6 +787,8 @@ export interface WizardContext {
   groups?: UserGroup[]
   // Pengguna untuk isian permissions.
   users?: UserAccount[]
+  // Shared folder untuk isian share-select.
+  shares?: SharedFolder[]
 }
 
 // Daftar nama dari isian disk-select (dipisah koma).
@@ -817,6 +864,15 @@ export const wizardActions: Record<string, (values: Record<string, string>, ctx:
       pool: v.pool ?? "",
       description: v.description ?? "",
       permissions: parsePermissions(v.permissions),
+      admin_password: v.admin_password ?? "",
+    }),
+  "backups.create": (v) =>
+    api.setBackup({
+      share: v.share ?? "",
+      dest_pool: v.dest_pool ?? "",
+      hour: Number(v.hour),
+      keep: Number(v.keep),
+      enabled: true,
       admin_password: v.admin_password ?? "",
     }),
   "drive.enable": async (v) => {

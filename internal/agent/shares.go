@@ -76,6 +76,8 @@ type Shares struct {
 	smbState string
 	// external: penyimpanan eksternal (nil bila tidak dipakai).
 	external *External
+	// backups: tugas backup (nil bila tidak dipakai).
+	backups *Backups
 	// smbMu: smb.conf ditulis satu per satu. lastSMB: masukan smb.conf dari
 	// shares.apply terakhir (nil = belum ada sejak sapod menyala), agar
 	// smb.conf bisa ditulis ulang saat drive eksternal dicolok/dicabut.
@@ -880,6 +882,12 @@ func (s *Shares) DeleteOp() Handler {
 			return nil, &OpError{Code: proto.ErrConflict, Message: "shared folder " + ds + " berisi dataset lain"}
 		}
 		path := filepath.Join(s.t.MountBase, req.Pool, req.Name)
+		// Folder yang masih di-backup tidak dihapus (tugasnya akan gagal terus).
+		if s.backups != nil {
+			if id := s.backups.usingShare(req.Pool, req.Name); id != "" {
+				return nil, &OpError{Code: proto.ErrConflict, Message: "shared folder " + ds + " masih di-backup oleh tugas " + id + "; hapus tugas itu dulu"}
+			}
+		}
 		// Folder yang masih dipasang di container aplikasi tidak dihapus.
 		if s.apps != nil {
 			if id := s.apps.usingShare(path); id != "" {

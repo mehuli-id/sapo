@@ -81,6 +81,10 @@
     "network": {
       "title": "Network",
       "description": "Host name, IP addresses, and DNS"
+    },
+    "backup": {
+      "title": "Backup",
+      "description": "Copy shared folders to another pool every day"
     }
   },
   "systemInfo": {
@@ -342,7 +346,9 @@
     "disk_identity": "The disk has the same serial number or WWN as another disk, so it can’t be identified for sure. Connect it directly (SATA) or use another enclosure.",
     "external_unsupported": "This drive can’t be mounted: {message}",
     "install_not_live": "The installer is only available while Sapo runs from the ISO.",
-    "install_disk_small": "The disk is too small for the Sapo system."
+    "install_disk_small": "The disk is too small for the Sapo system.",
+    "backup_diverged": "The copy on the destination no longer matches the original folder. Delete the task with its copies, then create it again.",
+    "backup_same_pool": "The destination pool must be different from the folder's pool."
   },
   "pool": {
     "title": "Storage pools",
@@ -892,5 +898,42 @@
     "done": "Sapo is installed on {disk}. Remove the ISO media (or change the boot order), then restart the NAS.",
     "failed": "Installation failed at step {step}: {error}. Data in pools wasn’t touched; fix the problem and try again.",
     "interrupted": "interrupted before finishing"
+  },
+  "backup": {
+    "help": "Backup copies a shared folder to another pool (for example a pool on a USB drive) every day. The first backup copies everything, later ones only what changed. The original folder is never changed.",
+    "create": "New task",
+    "created": "Backup task created. The first backup runs at the scheduled hour, or press Back up now.",
+    "needTwoPools": "Backup needs at least two pools. Create a second pool in Storage Manager, for example on a USB drive (turn on allow USB disks).",
+    "none": "No backup tasks yet.",
+    "noShares": "No shared folders yet.",
+    "running": "Running",
+    "off": "Off",
+    "schedule": "Every day at {hour}:00, keep {keep} copies",
+    "copies": "{n} copies",
+    "lastRun": "Last successful backup: {when}",
+    "sent": "{size} sent",
+    "never": "Not backed up yet.",
+    "lastFailed": "Last attempt failed",
+    "runNow": "Back up now",
+    "started": "Backup of {name} started in the background.",
+    "restore": "Restore",
+    "edit": "Edit task",
+    "delete": "Delete task",
+    "hour": "Backup hour (0–23)",
+    "keep": "Copies to keep (1–366)",
+    "enabled": "Run on schedule",
+    "keepWarning": "The {n} oldest copies will be removed at the next backup.",
+    "save": "Save",
+    "saved": "Backup task saved.",
+    "restoreHelp": "The copy is restored as a new shared folder on the original pool, with the same permissions as the original folder. Existing folders are never overwritten.",
+    "copy": "Copy from",
+    "newName": "New folder name",
+    "restoreStarted": "Restore to folder {name} started. The folder appears in Shared Folders when done.",
+    "deleteHelp": "Deleting the task doesn't change the original folder. Copies on the destination pool are kept unless you choose to delete them.",
+    "deleteData": "Also delete all copies on pool {pool}",
+    "confirmId": "Type {id} to confirm",
+    "deleted": "Backup task deleted.",
+    "restores": "Recent restores",
+    "restoreRow": "{name} (started {when})"
   }
 }
