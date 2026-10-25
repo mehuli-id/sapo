@@ -784,6 +784,10 @@ d=[x for x in v if x['serial']=='SAPOUJI4'][0]
 import json as j; print(j.dumps(dict(name=d['name'],serial=d['serial'],wwn=d['wwn'],size_bytes=d['size_bytes'],usage=d['usage'],erase=d['usage']!='free')))" <<<"$disks_json")"
 # (json membuang kata terakhir, biasanya kode HTTP: diberi kode tiruan.)
 sysdisk="$(json 'print(v["name"])' <<<"$sysref 0")"
+# Sertifikat saat ini (nama host berubah di uji jaringan, jadi sertifikat
+# sudah dibuat ulang sejak awal uji): itu yang harus ikut terbawa.
+cert_installed="$(openssl s_client -connect "127.0.0.1:$TLS_PORT" -servername localhost </dev/null 2>/dev/null \
+  | openssl x509 -noout -fingerprint -sha256 | cut -d= -f2)"
 res="$(api POST /api/v1/system/install "{\"disk\":$sysref,\"confirm_name\":\"$sysdisk\",\"password\":\"$PASS\"}")"
 [[ "$res" == *' 200' ]] || fail "mulai pasang ke disk: $res"
 start=$SECONDS
@@ -868,7 +872,7 @@ until curl -kfsS --max-time 5 "$HTTPS/api/v1/health" 2>/dev/null | grep -q '"age
 done
 served2="$(openssl s_client -connect "127.0.0.1:$TLS_PORT" -servername localhost </dev/null 2>/dev/null \
   | openssl x509 -noout -fingerprint -sha256 | cut -d= -f2)"
-[[ "$served2" == "$served" ]] || fail "sertifikat panel harus ikut terbawa: $served2 ≠ $served"
+[[ "$served2" == "$cert_installed" ]] || fail "sertifikat panel harus ikut terbawa: $served2 ≠ $cert_installed"
 JAR="$WORK/cookies-disk"
 sleep 31 # kode 2FA berikutnya (kode yang sama tidak bisa dipakai ulang)
 res="$(api POST /api/v1/auth/login "{\"username\":\"penguji\",\"password\":\"$PASS\",\"totp_code\":\"$(totp "$secret")\"}")"
