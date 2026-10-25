@@ -249,7 +249,9 @@ func (s *Server) validateNewUser(username, password, confirm string) (string, st
 		return "username_invalid", "nama pengguna tidak sesuai aturan"
 	// Nama pengguna dan grup satu ruang nama (nantinya juga akun dan grup
 	// sistem): nama grup sistem, grup Sapo, dan akun sistem tidak boleh dipakai.
-	case slices.Contains(s.cfg.Auth.ReservedUsernames, username) || slices.Contains(s.cfg.Auth.ReservedGroupNames, username):
+	// Awalan sapo- dipakai akun Sapo sendiri (misalnya akun aplikasi
+	// sapo-app-<id>, ADR 0012).
+	case slices.Contains(s.cfg.Auth.ReservedUsernames, username) || slices.Contains(s.cfg.Auth.ReservedGroupNames, username) || strings.HasPrefix(username, "sapo-"):
 		return "username_reserved", "nama pengguna ini dipakai sistem"
 	case s.groupExists(username):
 		return "username_taken", "nama ini sudah dipakai grup"

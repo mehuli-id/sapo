@@ -22,6 +22,7 @@ PORT="${PORT:-15000}"              # port HTTP di host, diteruskan ke 5000 di VM
 TLS_PORT="${TLS_PORT:-15001}"      # port HTTPS di host, diteruskan ke 5001 di VM
 SMB_PORT="${SMB_PORT:-14450}"      # port SMB di host, diteruskan ke 445 di VM
 NFS_PORT="${NFS_PORT:-12049}"      # port NFS di host, diteruskan ke 2049 di VM
+APP_PORT="${APP_PORT:-18090}"      # port aplikasi uji (Homer) di host, diteruskan ke 8090 di VM
 RPCBIND_PORT="${RPCBIND_PORT:-10111}" # diteruskan ke 111 (rpcbind) di VM, harus tertutup
 MOUNTD_PORT="${MOUNTD_PORT:-20048}"   # diteruskan ke 20048 (mountd) di VM, harus tertutup
 TIMEOUT_S="${TIMEOUT_S:-600}"      # batas waktu boot sampai panel siap
@@ -44,7 +45,7 @@ if [[ -w /dev/kvm ]]; then accel=(-accel kvm -cpu host); fi
 
 qemu-system-x86_64 "${accel[@]}" -m "$VM_RAM_MB" -smp 2 \
   -cdrom "$ISO" -boot d "${disks[@]}" \
-  -nic "user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:$PORT-:5000,hostfwd=tcp:127.0.0.1:$TLS_PORT-:5001,hostfwd=tcp:127.0.0.1:$SMB_PORT-:445,hostfwd=tcp:127.0.0.1:$NFS_PORT-:2049,hostfwd=tcp:127.0.0.1:$RPCBIND_PORT-:111,hostfwd=tcp:127.0.0.1:$MOUNTD_PORT-:20048" \
+  -nic "user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:$PORT-:5000,hostfwd=tcp:127.0.0.1:$TLS_PORT-:5001,hostfwd=tcp:127.0.0.1:$SMB_PORT-:445,hostfwd=tcp:127.0.0.1:$NFS_PORT-:2049,hostfwd=tcp:127.0.0.1:$APP_PORT-:8090,hostfwd=tcp:127.0.0.1:$RPCBIND_PORT-:111,hostfwd=tcp:127.0.0.1:$MOUNTD_PORT-:20048" \
   -display none \
   -chardev "socket,id=ser0,path=$WORK/serial.sock,server=on,wait=off,logfile=$LOG" -serial chardev:ser0 &
 qemu=$!
@@ -371,6 +372,30 @@ res="$(api POST /api/v1/shares/keluarga/delete "{\"confirm_name\":\"keluarga\",\
 out="$(smb budi "ls")"
 [[ "$out" == *"NT_STATUS_BAD_NETWORK_NAME"* ]] || fail "folder terhapus masih bisa dibuka: $out"
 echo "shared folder dihapus"
+
+# --- App Center (ADR 0012) --------------------------------------------------------
+# Homer (image kecil) dipasang dengan Podman sungguhan: berjalan sebagai akun
+# aplikasi tanpa capability, data di dataset uji/sapo-apps/homer.
+res="$(api GET /api/v1/apps/catalog)"
+json 'assert "homer" in [a["id"] for a in v], v' <<<"$res" || fail "katalog App Center: $res"
+res="$(api POST /api/v1/apps/install "{\"id\":\"homer\",\"pool\":\"uji\",\"port\":8090,\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "pasang Homer: $res"
+for _ in $(seq 1 100); do
+  apps="$(api GET /api/v1/apps)"
+  json 'import sys; sys.exit(0 if v and v[0]["status"]=="active" else 1)' <<<"$apps" && \
+    curl -fsS --max-time 5 -o /dev/null "http://127.0.0.1:$APP_PORT/" 2>/dev/null && break
+  sleep 3
+done
+json 'assert v[0]["status"]=="active", v' <<<"$apps" || fail "Homer tidak berjalan: $apps"
+curl -fsS --max-time 5 "http://127.0.0.1:$APP_PORT/" | grep -qi homer || fail "Homer tidak menjawab di port 8090"
+res="$(api POST /api/v1/apps/homer/stop '{}')"
+[[ "$res" == *' 200' ]] || fail "hentikan Homer: $res"
+if curl -fsS --max-time 5 -o /dev/null "http://127.0.0.1:$APP_PORT/" 2>/dev/null; then fail "Homer yang dihentikan masih menjawab"; fi
+res="$(api POST /api/v1/apps/homer/remove "{\"remove_data\":true,\"confirm_name\":\"homer\",\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "hapus Homer beserta data: $res"
+apps="$(api GET /api/v1/apps)"
+json 'assert v==[], v' <<<"$apps" || fail "Homer masih tercatat: $apps"
+echo "App Center: Homer dipasang lewat Podman (akun sendiri, tanpa capability), menjawab di port 8090, dihentikan, lalu dihapus beserta data"
 
 # Ganti disk SAPOUJI2 dengan SAPOUJI3 (berisi ext4, penghapusan dikonfirmasi).
 disks_json="$(api GET /api/v1/storage/disks)"

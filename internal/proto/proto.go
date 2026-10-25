@@ -105,6 +105,14 @@ const (
 	OpTimeZones  = "time.zones"
 	OpTimeSet    = "time.set"
 
+	// App Center (ADR 0012).
+	OpAppsCatalog = "apps.catalog"
+	OpAppsList    = "apps.list"
+	OpAppsInstall = "apps.install"
+	OpAppsStart   = "apps.start"
+	OpAppsStop    = "apps.stop"
+	OpAppsRemove  = "apps.remove"
+
 	// Pembaruan sistem (ADR 0011): OpUpdatesCheck menjalankan apt-get update
 	// dan mendaftar paket yang bisa diperbarui; OpUpdatesInstall memasangnya
 	// di unit systemd terpisah (tetap berjalan bila sapod di-restart);
@@ -721,4 +729,47 @@ type UpdateRun struct {
 	ExitCode   int       `json:"exit_code"`
 	// Interrupted: pemasangan berhenti sebelum selesai (diisi updates.status).
 	Interrupted bool `json:"interrupted,omitempty"`
+}
+
+// CatalogApp adalah satu aplikasi di katalog App Center.
+type CatalogApp struct {
+	ID          string            `json:"id"`
+	Name        map[string]string `json:"name"`
+	Description map[string]string `json:"description"`
+	Website     string            `json:"website,omitempty"`
+	Image       string            `json:"image"`
+	DefaultPort int               `json:"default_port"`
+	MemoryMB    int               `json:"memory_mb"`
+}
+
+// InstalledApp adalah aplikasi yang terpasang (atau datanya masih ada).
+type InstalledApp struct {
+	ID   string `json:"id"`
+	Pool string `json:"pool"`
+	Port int    `json:"port"`
+	// Installed: false bila aplikasi dihapus tetapi datanya disimpan.
+	Installed bool `json:"installed"`
+	// Enabled: dijalankan (juga saat boot); Status dari systemd: active,
+	// activating, inactive, failed.
+	Enabled     bool      `json:"enabled"`
+	Status      string    `json:"status,omitempty"`
+	InstalledAt time.Time `json:"installed_at"`
+}
+
+// AppParams menunjuk satu aplikasi.
+type AppParams struct {
+	ID string `json:"id"`
+}
+
+// AppInstallParams adalah parameter apps.install.
+type AppInstallParams struct {
+	ID   string `json:"id"`
+	Pool string `json:"pool"`
+	Port int    `json:"port"`
+}
+
+// AppRemoveParams: RemoveData menghapus dataset data aplikasi juga.
+type AppRemoveParams struct {
+	ID         string `json:"id"`
+	RemoveData bool   `json:"remove_data"`
 }

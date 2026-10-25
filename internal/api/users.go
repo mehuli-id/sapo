@@ -329,7 +329,7 @@ func (s *Server) validGroupName(name string) (string, bool) {
 	switch {
 	case !s.groupRe.MatchString(name) || len(name) > 32:
 		return "group_invalid", false
-	case slices.Contains(s.cfg.Auth.ReservedGroupNames, name) || slices.Contains(s.cfg.Auth.ReservedUsernames, name):
+	case slices.Contains(s.cfg.Auth.ReservedGroupNames, name) || slices.Contains(s.cfg.Auth.ReservedUsernames, name) || strings.HasPrefix(name, "sapo-"):
 		return "group_reserved", false
 	}
 	// Satu ruang nama dengan pengguna (nantinya grup pribadi akun sistem).

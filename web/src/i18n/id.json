@@ -667,5 +667,33 @@
     "installFailed": "Pemasangan pembaruan terakhir gagal (kode {code}). Lihat log.",
     "updateLog": "Log pemasangan",
     "installInterrupted": "Pemasangan pembaruan terakhir terputus sebelum selesai. Pasang lagi: pemasangan yang terputus akan dilanjutkan dulu."
+  },
+  "appCenter": {
+    "intro": "Aplikasi tambahan dari katalog Sapo. Setiap aplikasi berjalan terpisah dengan akunnya sendiri, tanpa hak istimewa, dan datanya disimpan di pool yang dipilih. Belum bisa membuka shared folder.",
+    "install": "Pasang",
+    "open": "Buka",
+    "start": "Jalankan",
+    "stop": "Hentikan",
+    "remove": "Hapus aplikasi",
+    "pool": "Pool untuk data aplikasi",
+    "port": "Port di NAS",
+    "installHelp": "Image aplikasi diunduh saat pertama dijalankan (bisa beberapa menit). Batas memori {memory} MB.",
+    "onPool": "data di pool {pool}, port {port}",
+    "dataKept": "Dihapus, data masih disimpan",
+    "status": {
+      "running": "Berjalan",
+      "starting": "Sedang dinyalakan (mengunduh image)…",
+      "stopped": "Dihentikan",
+      "failed": "Gagal berjalan"
+    },
+    "installed": "{name} dipasang.",
+    "removed": "{name} dihapus; datanya disimpan.",
+    "removedData": "{name} dan datanya dihapus.",
+    "started": "{name} dijalankan.",
+    "stopped": "{name} dihentikan.",
+    "removeHelp": "{name} dihentikan dan dilepas. Datanya disimpan, jadi bisa dipasang lagi kapan saja.",
+    "removeData": "Hapus juga data aplikasi",
+    "removeDataHelp": "Data aplikasi ({id}) akan dihapus permanen dan tidak bisa dikembalikan.",
+    "typeId": "Ketik {id} untuk konfirmasi"
   }
 }

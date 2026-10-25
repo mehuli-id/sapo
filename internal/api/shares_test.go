@@ -314,3 +314,38 @@ func TestUpdatesAPI(t *testing.T) {
 		t.Fatalf("pasang: %d %s", rec.Code, rec.Body)
 	}
 }
+
+func TestAppsAPI(t *testing.T) {
+	agent := shareAgent()
+	agent.results[proto.OpAppsInstall] = map[string]bool{"ok": true}
+	agent.results[proto.OpAppsRemove] = map[string]bool{"ok": true}
+	h := newHarness(t, agent)
+	h.runSetup()
+	body := map[string]any{"id": "homer", "pool": "tank", "port": 8090}
+	if rec := h.do(http.MethodPost, "/api/v1/apps/install", body); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("pasang tanpa password: %d", rec.Code)
+	}
+	body["admin_password"] = adminPassword
+	if rec := h.do(http.MethodPost, "/api/v1/apps/install", body); rec.Code != http.StatusOK {
+		t.Fatalf("pasang: %d %s", rec.Code, rec.Body)
+	}
+	if p, _ := agent.param(proto.OpAppsInstall).(proto.AppInstallParams); p != (proto.AppInstallParams{ID: "homer", Pool: "tank", Port: 8090}) {
+		t.Fatalf("apps.install = %+v", p)
+	}
+	// Hapus beserta data: nama diketik ulang dan password admin.
+	if rec := h.do(http.MethodPost, "/api/v1/apps/homer/remove", map[string]any{"remove_data": true, "confirm_name": "hom", "admin_password": adminPassword}); errCode(rec) != "confirm_mismatch" {
+		t.Fatalf("nama salah: %d %s", rec.Code, rec.Body)
+	}
+	if rec := h.do(http.MethodPost, "/api/v1/apps/homer/remove", map[string]any{"remove_data": true, "confirm_name": "homer"}); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("tanpa password: %d", rec.Code)
+	}
+	if rec := h.do(http.MethodPost, "/api/v1/apps/homer/remove", map[string]any{"remove_data": false}); rec.Code != http.StatusOK {
+		t.Fatalf("hapus, data disimpan: %d %s", rec.Code, rec.Body)
+	}
+	// Nama pengguna berawalan sapo- dicadangkan untuk akun aplikasi.
+	rec := h.do(http.MethodPost, "/api/v1/users", map[string]any{"username": "sapo-app-homer", "password": userPassword, "password_confirm": userPassword,
+		"role": "user", "groups": []string{}, "admin_password": adminPassword})
+	if errCode(rec) != "username_reserved" {
+		t.Fatalf("nama sapo-: %d %s", rec.Code, rec.Body)
+	}
+}

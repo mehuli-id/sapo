@@ -1,0 +1,16 @@
+# Katalog App Center (ADR 0012). Image dikunci digest: yang diuji adalah yang
+# dipasang. Container selalu berjalan sebagai akun aplikasi (bukan root),
+# tanpa capability, hanya port web yang dibuka.
+id: homer
+name: { id: Homer, en: Homer }
+description:
+  id: Halaman awal berisi tautan ke layanan-layanan di rumah atau kantor.
+  en: A start page with links to the services in your home or office.
+website: https://github.com/bastienwirtz/homer
+image: docker.io/b4bz/homer:v25.09.1@sha256:febb5c423e5fb969ddcad7ad2b344de37bb47cd8c16c14df23e9150f5ddd3171
+# Port web di dalam container dan port bawaan di NAS.
+web_port: 8080
+default_port: 8090
+# Data aplikasi (dataset ZFS sendiri) dipasang di sini di dalam container.
+data_path: /www/assets
+memory_mb: 128

@@ -361,6 +361,26 @@ export function uploadFile(share: string, dir: string, file: File, overwrite: bo
   })
 }
 
+export interface CatalogApp {
+  id: string
+  name: Localized
+  description: Localized
+  website?: string
+  image: string
+  default_port: number
+  memory_mb: number
+}
+
+export interface InstalledApp {
+  id: string
+  pool: string
+  port: number
+  installed: boolean
+  enabled: boolean
+  status?: string
+  installed_at: string
+}
+
 export type Localized = Record<string, string>
 
 export interface WizardField {
@@ -490,6 +510,13 @@ export const api = {
   pools: () => get<PoolsResult>("/api/v1/storage/pools"),
   createPool: (req: PoolCreateRequest) => post<Pool>("/api/v1/storage/pools", req),
   networkStatus: () => get<NetworkStatus>("/api/v1/network"),
+  appCatalog: () => get<CatalogApp[]>("/api/v1/apps/catalog"),
+  installedApps: () => get<InstalledApp[]>("/api/v1/apps"),
+  installApp: (req: { id: string; pool: string; port: number; admin_password: string }) => post<{ ok: boolean }>("/api/v1/apps/install", req),
+  startApp: (id: string) => post<{ ok: boolean }>(`/api/v1/apps/${encodeURIComponent(id)}/start`),
+  stopApp: (id: string) => post<{ ok: boolean }>(`/api/v1/apps/${encodeURIComponent(id)}/stop`),
+  removeApp: (id: string, req: { remove_data: boolean; confirm_name?: string; admin_password?: string }) =>
+    post<{ ok: boolean }>(`/api/v1/apps/${encodeURIComponent(id)}/remove`, req),
   services: () => get<{ smb: boolean; nfs: boolean }>("/api/v1/settings/services"),
   setServices: (req: { smb?: boolean; nfs?: boolean }) => post<{ smb: boolean; nfs: boolean; warning?: string }>("/api/v1/settings/services", req),
   updatesStatus: () =>

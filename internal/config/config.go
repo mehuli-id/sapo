@@ -72,6 +72,7 @@ type Agent struct {
 	Shares         Shares   `yaml:"shares"`
 	Time           Time     `yaml:"time"`
 	Updates        Updates  `yaml:"updates"`
+	Apps           Apps     `yaml:"apps"`
 	Network        Network  `yaml:"network"`
 	Stats          Stats    `yaml:"stats"`
 	Files          Files    `yaml:"files"`
@@ -97,6 +98,32 @@ type Accounts struct {
 	IDMax        int    `yaml:"id_max"`
 	PrimaryGroup string `yaml:"primary_group"`
 	Shell        string `yaml:"shell"`
+}
+
+// Apps mengatur App Center (ADR 0012).
+type Apps struct {
+	CatalogDir string `yaml:"catalog_dir"`
+	Podman     string `yaml:"podman"`
+	// QuadletDir: file .container yang dibaca generator systemd Podman.
+	QuadletDir string `yaml:"quadlet_dir"`
+	StateFile  string `yaml:"state_file"`
+	// Rentang UID/GID akun aplikasi (terpisah dari akun pengguna).
+	IDMin int `yaml:"id_min"`
+	IDMax int `yaml:"id_max"`
+	// Port yang tidak boleh dipakai aplikasi (panel, SMB, NFS, …).
+	ReservedPorts []int `yaml:"reserved_ports"`
+}
+
+func (a Apps) validate() error {
+	for _, p := range []string{a.CatalogDir, a.Podman, a.QuadletDir, a.StateFile} {
+		if !filepath.IsAbs(p) {
+			return fmt.Errorf("agent.apps: %q harus path absolut", p)
+		}
+	}
+	if a.IDMin < 1000 || a.IDMax > 59999 || a.IDMin >= a.IDMax {
+		return errors.New("agent.apps: id_min/id_max tidak valid")
+	}
+	return nil
 }
 
 // Updates mengatur pembaruan sistem (ADR 0011).
@@ -369,6 +396,9 @@ func Default() Config {
 			},
 			Stats: Stats{IntervalSeconds: 2, History: 300, IdleStopSeconds: 60},
 			Time:  Time{Timedatectl: "/usr/bin/timedatectl"},
+			Apps: Apps{CatalogDir: "/usr/share/sapo/apps", Podman: "/usr/bin/podman", QuadletDir: "/etc/containers/systemd",
+				StateFile: "/var/lib/sapod/apps.json", IDMin: 30000, IDMax: 30999,
+				ReservedPorts: []int{22, 53, 80, 111, 139, 443, 445, 2049, 5000, 5001, 5353, 20048}},
 			Updates: Updates{AptGet: "/usr/bin/apt-get", Dpkg: "/usr/bin/dpkg", SystemdRun: "/usr/bin/systemd-run", Unit: "sapo-updates.service",
 				LogFile: "/var/lib/sapod/updates.log", ResultFile: "/var/lib/sapod/updates-result.json", CheckTimeoutSeconds: 240,
 				InstallTimeoutSeconds: 3 * 3600},
@@ -575,6 +605,12 @@ func (c Config) Validate() error {
 	}
 	if err := c.Agent.Accounts.validate(); err != nil {
 		return err
+	}
+	if err := c.Agent.Apps.validate(); err != nil {
+		return err
+	}
+	if c.Agent.Apps.IDMin <= c.Agent.Accounts.IDMax && c.Agent.Accounts.IDMin <= c.Agent.Apps.IDMax {
+		return errors.New("agent.apps: rentang ID tidak boleh bertumpuk dengan agent.accounts")
 	}
 	if err := c.Agent.Updates.validate(); err != nil {
 		return err

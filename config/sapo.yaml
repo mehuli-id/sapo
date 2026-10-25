@@ -113,6 +113,17 @@ agent:
   time:
     timedatectl: /usr/bin/timedatectl
 
+  # App Center (ADR 0012): katalog kurasi, Podman + Quadlet, setiap
+  # aplikasi berjalan sebagai akun sendiri dari rentang ID di bawah.
+  apps:
+    catalog_dir: /usr/share/sapo/apps
+    podman: /usr/bin/podman
+    quadlet_dir: /etc/containers/systemd
+    state_file: /var/lib/sapod/apps.json
+    id_min: 30000
+    id_max: 30999
+    reserved_ports: [22, 53, 80, 111, 139, 443, 445, 2049, 5000, 5001, 5353, 20048]
+
   # Pembaruan sistem (ADR 0011): apt-get upgrade (tanpa menghapus paket)
   # dijalankan di unit systemd tersendiri, agar tetap berjalan bila paket
   # sapo sendiri diperbarui dan sapod di-restart.
