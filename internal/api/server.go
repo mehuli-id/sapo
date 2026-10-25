@@ -24,8 +24,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"golang.org/x/net/webdav"
-
 	"github.com/mehuli-id/sapo/internal/audit"
 	"github.com/mehuli-id/sapo/internal/auth"
 	"github.com/mehuli-id/sapo/internal/config"
@@ -78,8 +76,8 @@ type Server struct {
 	hosts    map[string]bool
 	sessions *auth.Sessions
 	limiter  *auth.Limiter
-	// davLocks: kunci WebDAV (LOCK/UNLOCK) di memori.
-	davLocks webdav.LockSystem
+	// davLocks: kunci WebDAV (LOCK/UNLOCK) di memori (davlock.go).
+	davLocks *davLockTable
 	// totpLimiter menghitung kode 2FA salah per akun.
 	totpLimiter *auth.Limiter
 	userRe      *regexp.Regexp
@@ -184,7 +182,7 @@ func New(o Options) (*Server, error) {
 		reenroll: pendingTOTP{entries: map[string]pendingEntry{}},
 		shares:   shares,
 		settings: settings,
-		davLocks: webdav.NewMemLS(),
+		davLocks: newDAVLockTable(),
 
 		resyncDelay: 30 * time.Second,
 

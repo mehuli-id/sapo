@@ -84,6 +84,17 @@ func TestFSHelperOps(t *testing.T) {
 	if _, err := do(fsRequest{Op: "rename", Path: "c.txt", To: "dokumen/b.jpg"}); code(err) != errFileExists {
 		t.Fatalf("rename tidak boleh menimpa: %v", err)
 	}
+	// Overwrite: file biasa ditimpa atomik; direktori tidak pernah ditimpa.
+	if _, err := do(fsRequest{Op: "rename", Path: "c.txt", To: "dokumen/b.jpg", Overwrite: true}); err != nil {
+		t.Fatalf("rename menimpa file: %v", err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(root, "dokumen/b.jpg")); string(b) != "c" {
+		t.Fatalf("isi setelah menimpa = %q", b)
+	}
+	_ = os.WriteFile(filepath.Join(root, "d.txt"), []byte("d"), 0o644)
+	if _, err := do(fsRequest{Op: "rename", Path: "d.txt", To: "foto", Overwrite: true}); code(err) != errFileExists {
+		t.Fatalf("rename tidak boleh menimpa direktori: %v", err)
+	}
 
 	// Unggah: file sementara lewat fd, lalu diberi nama.
 	pr, pw, err := socketPair()

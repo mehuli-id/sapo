@@ -82,6 +82,10 @@ type Store struct {
 	path  string
 	mu    sync.Mutex
 	state State
+	// touching: password aplikasi yang waktu pakainya sedang dicatat;
+	// touchWG menunggu semuanya (test).
+	touching sync.Map
+	touchWG  sync.WaitGroup
 }
 
 // OpenStore membuka (atau membuat) penyimpanan di dir.

@@ -1,12 +1,14 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
 	"io/fs"
 	"mime"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path"
@@ -46,21 +48,25 @@ func (s *Server) davAuth(w http.ResponseWriter, r *http.Request) (auth.User, boo
 		writeError(w, http.StatusUnauthorized, "unauthorized", "masuk dengan nama pengguna dan password aplikasi")
 		return auth.User{}, false
 	}
+	// Hanya kegagalan yang dihitung (password aplikasi acak ~75 bit, jadi
+	// permintaan bersamaan dari klien yang benar tidak pernah terkunci), dan
+	// kunci akun dihitung per jaringan klien: orang lain tidak bisa mengunci
+	// WebDAV pengguna dari jaringannya sendiri. Nama yang tidak ada diperlakukan
+	// sama dengan yang ada.
 	ipKey := "dav-ip:" + clientNet(r)
-	if ok, rem := s.limiter.Begin(ipKey); !ok {
+	userKey := "dav-user:" + clientNet(r) + ":" + name
+	if rem := max(s.limiter.Locked(ipKey), s.limiter.Locked(userKey)); rem > 0 {
 		s.writeLocked(w, rem)
 		return auth.User{}, false
 	}
 	u, exists := s.store.Get(name)
-	userKey := "dav-user:" + name
-	if exists {
-		if ok, rem := s.limiter.Begin(userKey); !ok {
-			s.writeLocked(w, rem)
-			return auth.User{}, false
-		}
+	ok := false
+	if exists && !u.Disabled && !u.MustChangePassword {
+		_, ok = s.store.CheckAppPassword(name, secret, s.now())
 	}
-	_, ok := s.store.CheckAppPassword(name, secret, s.now())
-	if !exists || !ok || u.Disabled || u.MustChangePassword {
+	if !ok {
+		s.limiter.Begin(ipKey)
+		s.limiter.Begin(userKey)
 		actor := ""
 		if exists {
 			actor = u.Username
@@ -70,8 +76,6 @@ func (s *Server) davAuth(w http.ResponseWriter, r *http.Request) (auth.User, boo
 		writeError(w, http.StatusUnauthorized, "bad_credentials", "nama pengguna atau password aplikasi salah")
 		return auth.User{}, false
 	}
-	s.limiter.Refund(ipKey)
-	s.limiter.Refund(userKey)
 	return u, true
 }
 
@@ -89,8 +93,22 @@ func (s *Server) handleDAV(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Password ada di setiap permintaan: hanya lewat HTTPS (HTTP biasa hanya
+	// dari NAS sendiri, untuk mode pengembangan).
+	if r.TLS == nil && !isLoopback(r) {
+		writeError(w, http.StatusForbidden, "https_required", "WebDAV hanya lewat HTTPS")
+		return
+	}
 	u, ok := s.davAuth(w, r)
 	if !ok {
+		return
+	}
+	// PROPFIND tanpa batas kedalaman (RFC 4918 §9.1) bisa memanggil sapod
+	// untuk setiap direktori: hanya Depth 0 dan 1.
+	if r.Method == "PROPFIND" && r.Header.Get("Depth") != "0" && r.Header.Get("Depth") != "1" {
+		w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = io.WriteString(w, `<?xml version="1.0" encoding="utf-8"?><D:error xmlns:D="DAV:"><D:propfind-finite-depth/></D:error>`)
 		return
 	}
 	// Isi file tidak pernah ditampilkan sebagai halaman di origin panel.
@@ -103,10 +121,16 @@ func (s *Server) handleDAV(w http.ResponseWriter, r *http.Request) {
 	}
 	k := &keepAlive{rc: http.NewResponseController(w)}
 	k.touch()
-	body := &davBody{r: deadlineReader{r: r.Body, k: k}}
+	var in io.Reader = r.Body
+	if r.Method != http.MethodPut {
+		// Badan XML (PROPFIND, LOCK, PROPPATCH) kecil.
+		in = http.MaxBytesReader(w, r.Body, 1<<20)
+	}
+	body := &davBody{r: deadlineReader{r: in, k: k}}
 	r.Body = io.NopCloser(body)
 	shares, all := s.sharesFor(u)
-	fsys := &davFS{s: s, user: u.Username, shares: shares, all: all, req: &davRequest{body: body, put: r.Method == http.MethodPut}, stat: map[string]*davInfo{}}
+	req := &davRequest{body: body, put: r.Method == http.MethodPut, method: r.Method}
+	fsys := &davFS{s: s, user: u.Username, shares: shares, all: all, req: req, stat: map[string]*davInfo{}}
 	if t, ok := s.homeTargetFor(u); ok {
 		fsys.home = &t
 	}
@@ -117,20 +141,57 @@ func (s *Server) handleDAV(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "permission_denied", "folder ini hanya bisa dibaca")
 		return
 	}
-	if d := r.Header.Get("Destination"); d != "" && (r.Method == "MOVE" || r.Method == "COPY") {
-		if u, err := url.Parse(d); err != nil || !strings.HasPrefix(u.Path, davPrefix+"/") || !fsys.writable(strings.TrimPrefix(u.Path, davPrefix)) {
+	if r.Method == "MOVE" || r.Method == "COPY" {
+		d, err := url.Parse(r.Header.Get("Destination"))
+		if err != nil || !strings.HasPrefix(d.Path, davPrefix+"/") || !fsys.writable(strings.TrimPrefix(d.Path, davPrefix)) {
 			writeError(w, http.StatusForbidden, "permission_denied", "tujuan hanya bisa dibaca")
 			return
 		}
+		src, dst := davKey(strings.TrimPrefix(r.URL.Path, davPrefix)), davKey(strings.TrimPrefix(d.Path, davPrefix))
+		// Ke dalam dirinya sendiri: tidak pernah selesai.
+		if strings.HasPrefix(dst+"/", src+"/") {
+			writeError(w, http.StatusForbidden, "bad_request", "tujuan berada di dalam sumber")
+			return
+		}
+		// Pindah antar-folder tidak didukung (sistem berkas berbeda): klien
+		// menyalin lalu menghapus. Ditolak sebelum webdav sempat menghapus
+		// tujuan yang akan ditimpa.
+		if r.Method == "MOVE" && strings.SplitN(src, "/", 2)[0] != strings.SplitN(dst, "/", 2)[0] {
+			writeError(w, http.StatusBadGateway, "cross_folder", "pindah antar-folder tidak didukung; salin lalu hapus")
+			return
+		}
+		req.dest = dst
 	}
 	rec := &statusRecorder{ResponseWriter: davWriter{ResponseWriter: w, k: k}, status: http.StatusOK}
-	handler := &webdav.Handler{Prefix: davPrefix, FileSystem: fsys, LockSystem: s.davLocks}
+	handler := &webdav.Handler{Prefix: davPrefix, FileSystem: fsys, LockSystem: s.davLocks.forUser(u.Username)}
+	if r.Method == "PROPFIND" {
+		// Jawaban PROPFIND ditampung dulu: bila daftar isi gagal (misalnya
+		// terpotong), klien mendapat galat utuh, bukan daftar setengah jadi.
+		buf := &davBuffer{h: http.Header{}, status: http.StatusOK}
+		handler.ServeHTTP(buf, r)
+		if req.listFailed {
+			writeError(rec, http.StatusInsufficientStorage, "too_many_files", "folder berisi terlalu banyak file untuk WebDAV")
+			return
+		}
+		for k, v := range buf.h {
+			h[k] = v
+		}
+		rec.WriteHeader(buf.status)
+		_, _ = rec.Write(buf.b.Bytes())
+		return
+	}
 	handler.ServeHTTP(rec, r)
 	switch r.Method {
-	case http.MethodPut, http.MethodDelete, "MKCOL", "MOVE", "COPY":
+	case http.MethodPut, http.MethodDelete, "MKCOL", "MOVE", "COPY", "LOCK", "UNLOCK", "PROPPATCH":
 		detail := map[string]string{"path": auditText(strings.TrimPrefix(r.URL.Path, davPrefix)), "status": strconv.Itoa(rec.status)}
 		if d := r.Header.Get("Destination"); d != "" {
 			detail["to"] = auditText(d)
+			// Bawaan webdav: COPY menimpa kecuali "F", MOVE hanya bila "T".
+			ow := r.Header.Get("Overwrite") != "F"
+			if r.Method == "MOVE" {
+				ow = r.Header.Get("Overwrite") == "T"
+			}
+			detail["overwrite"] = strconv.FormatBool(ow)
 		}
 		s.record(r, u.Username, "dav."+strings.ToLower(r.Method), rec.status < 300, detail)
 	}
@@ -139,7 +200,7 @@ func (s *Server) handleDAV(w http.ResponseWriter, r *http.Request) {
 // davWrites: metode yang mengubah isi folder.
 func davWrites(m string) bool {
 	switch m {
-	case http.MethodPut, http.MethodDelete, "MKCOL", "MOVE", "PROPPATCH":
+	case http.MethodPut, http.MethodDelete, "MKCOL", "MOVE", "PROPPATCH", "LOCK":
 		return true
 	}
 	return false
@@ -209,9 +270,16 @@ func (b *davBody) complete() bool {
 
 // davRequest: keadaan satu permintaan WebDAV.
 type davRequest struct {
-	body *davBody
-	put  bool
-	mu   sync.Mutex
+	body   *davBody
+	put    bool
+	method string
+	// dest: tujuan MOVE/COPY (davKey). Penghapusan tujuan sebelum ditimpa
+	// ditunda (deferred) agar penimpaan atomik (rename atau commit).
+	dest     string
+	deferred bool
+	// listFailed: daftar isi direktori tidak lengkap.
+	listFailed bool
+	mu         sync.Mutex
 	// readFail: membaca file sumber gagal (COPY), jadi salinannya tidak
 	// diberi nama akhir.
 	readFail bool
@@ -326,9 +394,22 @@ func (f *davFS) RemoveAll(ctx context.Context, name string) error {
 	case !p.write:
 		return fs.ErrPermission
 	}
+	// MOVE/COPY yang menimpa file: tujuan tidak dihapus dulu, melainkan
+	// ditimpa atomik oleh Rename atau Close. Bila operasinya gagal, file
+	// lama tetap ada. Tujuan berupa direktori: COPY gagal (direktori tidak
+	// ditimpa), MOVE menghapusnya dulu seperti biasa.
+	if (f.req.method == "MOVE" || f.req.method == "COPY") && davKey(name) == f.req.dest {
+		if info, err := f.Stat(ctx, name); err == nil && (!info.IsDir() || f.req.method == "COPY") {
+			f.req.deferred = true
+			return nil
+		}
+	}
 	f.forget(name)
 	return f.call(ctx, proto.OpFilesDelete, p.target, nil)
 }
+
+// davKey: nama yang sudah dibersihkan, tanpa "/" di depan.
+func davKey(name string) string { return strings.Trim(path.Clean("/"+name), "/") }
 
 func (f *davFS) Rename(ctx context.Context, oldName, newName string) error {
 	from, err := f.resolve(oldName)
@@ -346,7 +427,8 @@ func (f *davFS) Rename(ctx context.Context, oldName, newName string) error {
 	}
 	f.forget(oldName)
 	f.forget(newName)
-	return f.call(ctx, proto.OpFilesRename, proto.FilesRenameParams{FilesTarget: from.target, To: to.path}, nil)
+	overwrite := f.req.deferred && davKey(newName) == f.req.dest
+	return f.call(ctx, proto.OpFilesRename, proto.FilesRenameParams{FilesTarget: from.target, To: to.path, Overwrite: overwrite}, nil)
 }
 
 func (f *davFS) forget(name string) {
@@ -471,6 +553,7 @@ type davFile struct {
 	w        *os.File
 	temp     string
 	writeErr bool
+	wrote    bool
 	closed   bool
 }
 
@@ -520,6 +603,9 @@ func (d *davFile) Write(p []byte) (int, error) {
 		return 0, fs.ErrPermission
 	}
 	n, err := d.w.Write(p)
+	if n > 0 {
+		d.wrote = true
+	}
 	if err != nil {
 		d.writeErr = true
 	}
@@ -544,6 +630,13 @@ func (d *davFile) Readdir(count int) ([]fs.FileInfo, error) {
 		var list proto.FilesListResult
 		if err := d.fs.call(d.ctx, proto.OpFilesList, d.p.target, &list); err != nil {
 			return nil, err
+		}
+		// Daftar yang terpotong tidak pernah diberikan sebagai daftar
+		// lengkap (klien sinkron akan menganggap sisanya terhapus, COPY
+		// akan kehilangan file).
+		if list.Truncated {
+			d.fs.req.listFailed = true
+			return nil, errors.New("folder berisi terlalu banyak file untuk WebDAV")
 		}
 		d.fs.statMu.Lock()
 		for _, e := range list.Entries {
@@ -588,14 +681,39 @@ func (d *davFile) Close() error {
 	}
 	closeErr := d.w.Close()
 	ctx := context.WithoutCancel(d.ctx)
-	commit := proto.FilesCommitParams{FilesTarget: d.p.target, Temp: d.temp, Overwrite: true}
+	// Menimpa file lama hanya untuk PUT, atau salinan (COPY) yang memang
+	// berisi data. File yang dibuat tanpa isi (misalnya LOCK pada nama yang
+	// gagal dibaca karena sapod sibuk) tidak pernah menggantikan file lama.
+	overwrite := d.fs.req.put || d.wrote || (d.fs.req.deferred && davKey(d.name) == d.fs.req.dest)
+	commit := proto.FilesCommitParams{FilesTarget: d.p.target, Temp: d.temp, Overwrite: overwrite}
 	if closeErr != nil || d.writeErr || !d.fs.req.writeOK() {
 		_ = d.fs.s.agent.Call(ctx, proto.OpFilesAbort, commit, nil)
 		return errors.Join(closeErr, errors.New("unggahan tidak lengkap"))
 	}
 	if err := d.fs.call(ctx, proto.OpFilesCommit, commit, nil); err != nil {
 		_ = d.fs.s.agent.Call(ctx, proto.OpFilesAbort, commit, nil)
+		if !overwrite && errors.Is(err, fs.ErrExist) {
+			// Sudah ada: dibiarkan apa adanya.
+			return nil
+		}
 		return err
 	}
 	return nil
 }
+
+// isLoopback: permintaan dari NAS sendiri (mode pengembangan tanpa HTTPS).
+func isLoopback(r *http.Request) bool {
+	addr, err := netip.ParseAddr(clientIP(r))
+	return err == nil && addr.Unmap().IsLoopback()
+}
+
+// davBuffer menampung satu jawaban (PROPFIND).
+type davBuffer struct {
+	h      http.Header
+	status int
+	b      bytes.Buffer
+}
+
+func (d *davBuffer) Header() http.Header         { return d.h }
+func (d *davBuffer) Write(p []byte) (int, error) { return d.b.Write(p) }
+func (d *davBuffer) WriteHeader(code int)        { d.status = code }
