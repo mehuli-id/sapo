@@ -70,15 +70,16 @@ type notifier struct {
 	cur  notifyFile
 	// kick: periksa sekarang (setelah pengaturan diubah).
 	kick chan struct{}
-	// sending: satu pemeriksaan atau email uji pada satu waktu.
-	sending   sync.Mutex
+	// sending: satu pemeriksaan atau email uji pada satu waktu (kanal
+	// berkapasitas 1 agar email uji bisa menunggu dengan batas waktu).
+	sending   chan struct{}
 	lastSMART time.Time
 	// send diganti di test.
 	send func(ctx context.Context, s mail.Server, m mail.Message) error
 }
 
 func openNotifier(dir string) (*notifier, error) {
-	n := &notifier{path: filepath.Join(dir, "notify.json"), kick: make(chan struct{}, 1), send: mail.Send}
+	n := &notifier{path: filepath.Join(dir, "notify.json"), kick: make(chan struct{}, 1), sending: make(chan struct{}, 1), send: mail.Send}
 	data, err := os.ReadFile(n.path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
@@ -261,10 +262,12 @@ func (s *Server) notifyCollect(ctx context.Context, st NotifySettings, active ma
 
 // notifyCheck: satu putaran pemeriksaan dan (bila perlu) satu email.
 func (s *Server) notifyCheck(ctx context.Context) {
-	if !s.notify.sending.TryLock() {
+	select {
+	case s.notify.sending <- struct{}{}:
+	default:
 		return
 	}
-	defer s.notify.sending.Unlock()
+	defer func() { <-s.notify.sending }()
 	st := s.notify.get().Settings
 	if !st.Enabled {
 		return
@@ -512,15 +515,19 @@ func (s *Server) handleNotifyTest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "teks email tidak ada di konfigurasi")
 		return
 	}
-	if !s.notify.sending.TryLock() {
-		writeError(w, http.StatusServiceUnavailable, "busy", "email lain sedang dikirim")
-		return
-	}
-	defer s.notify.sending.Unlock()
-	host := s.notifyHost(r.Context())
+	// Menyimpan pengaturan langsung memicu pemeriksaan (termasuk SMART):
+	// email uji menunggu pemeriksaan itu selesai, bukan menolak.
 	ctx, cancel := context.WithTimeout(r.Context(), 50*time.Second)
 	defer cancel()
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(55 * time.Second))
+	select {
+	case s.notify.sending <- struct{}{}:
+	case <-ctx.Done():
+		writeError(w, http.StatusServiceUnavailable, "busy", "email lain sedang dikirim")
+		return
+	}
+	defer func() { <-s.notify.sending }()
+	host := s.notifyHost(ctx)
 	err := s.notify.send(ctx, st.server(), mail.Message{From: st.From, To: st.To,
 		Subject: fill(msgs.SubjectTest, "{host}", host), Body: fill(msgs.Test, "{host}", host) + "\n\n" + msgs.Footer + "\n"})
 	sess, _, _ := s.currentSession(r)

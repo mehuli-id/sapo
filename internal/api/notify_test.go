@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/mehuli-id/sapo/internal/config"
 	"github.com/mehuli-id/sapo/internal/mail"
@@ -242,5 +243,29 @@ func TestNotifyNoFalseResolve(t *testing.T) {
 	h.s.notifyCheck(ctx)
 	if sent.count() != 2 || strings.Count(sent.last().Body, "\n- ") != 3 {
 		t.Fatalf("pulih: %d\n%s", sent.count(), sent.last().Body)
+	}
+}
+
+// Email uji menunggu pemeriksaan yang sedang berjalan, bukan menolak.
+func TestNotifyTestWaitsForCheck(t *testing.T) {
+	h := newHarness(t, shareAgent())
+	shipped, err := config.Load("../../config/sapo.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.s.cfg.API.Notify.Messages = shipped.API.Notify.Messages
+	h.runSetup()
+	sent := &sentMail{}
+	h.s.notify.send = sent.send
+	if rec := h.do(http.MethodPost, "/api/v1/notify", map[string]any{"enabled": true, "host": "127.0.0.1", "port": 2525, "security": "none", "from": "sapo@uji.local", "to": []string{"admin@uji.local"}, "admin_password": adminPassword}); rec.Code != http.StatusOK {
+		t.Fatalf("simpan: %d %s", rec.Code, rec.Body)
+	}
+	h.s.notify.sending <- struct{}{} // pemeriksaan sedang berjalan
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		<-h.s.notify.sending
+	}()
+	if rec := h.do(http.MethodPost, "/api/v1/notify/test", nil); rec.Code != http.StatusOK || sent.count() != 1 {
+		t.Fatalf("email uji: %d %s", rec.Code, rec.Body)
 	}
 }
