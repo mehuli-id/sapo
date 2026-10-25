@@ -73,7 +73,7 @@ func TestPoolCreateConflictsAndAuditOfFailure(t *testing.T) {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
 	b, _ := os.ReadFile(filepath.Join(h.data, "audit.log"))
-	if !strings.Contains(string(b), `"ok":false,"detail":{"disks":"vdb,vdc","erase":"vdc","error":"disk_has_data"`) {
+	if !strings.Contains(string(b), `"ok":false,"detail":{"allow_usb":"false","disks":"vdb,vdc","erase":"vdc","error":"disk_has_data"`) {
 		t.Fatalf("kegagalan harus tercatat:\n%s", b)
 	}
 	if rec := h.do(http.MethodPost, "/api/v1/storage/pools", poolCreateRequest{Name: "data", ConfirmName: "data", Password: adminPassword}); rec.Code != http.StatusBadRequest {
