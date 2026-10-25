@@ -32,7 +32,7 @@ ISO Sapo berjalan dari RAM: semua perubahan hilang saat NAS dimatikan. Pengguna 
   - akun live (`remove_users`, password umum dan sudo) gagal-tertutup: pemasangan gagal bila akun itu masih ada di passwd, shadow, group, atau gshadow sistem baru;
   - `copy_paths` disamakan dengan sesi live (yang tidak ada di sana juga dibuang di sistem baru, misalnya NTP mati);
   - path tujuan tidak pernah melewati symlink keluar dari sistem baru;
-  - sapo-api dihentikan sebentar selama pengaturan disalin, agar datanya utuh.
+  - sapo-api dan sapod tetap berjalan saat pengaturan disalin (sesi panel di memori tidak hilang). File datanya ditulis atomik, jadi setiap file tersalin utuh; log audit bisa terpotong di baris terakhir.
 - **Root ext4 di satu disk**, bukan ZFS-on-root. Data tetap di pool ZFS terpisah. Disk sistem rusak = pasang ulang ke disk baru; pool diimpor lagi.
 - **Setelah selesai**, panel meminta media ISO dicabut lalu NAS dinyalakan ulang. Sistem terpasang memakai akun, sertifikat HTTPS, pengaturan, dan pool yang sama, dan diperbarui lewat APT seperti biasa (ADR 0011).
 

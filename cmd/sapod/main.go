@@ -175,8 +175,7 @@ func main() {
 		Programs: agent.InstallPrograms{Wipefs: pg["wipefs"], Sgdisk: pg["sgdisk"], MkfsVfat: pg["mkfs_vfat"], MkfsExt4: pg["mkfs_ext4"],
 			Mount: pg["mount"], Umount: pg["umount"], Cp: pg["cp"], Chroot: pg["chroot"], Blkid: pg["blkid"], Udevadm: pg["udevadm"], Sync: pg["sync"],
 			Lsblk: sc.Lsblk},
-		StopService: cfg.Recovery.APIService,
-		CopyPaths:   ic.CopyPaths, RemovePaths: ic.RemovePaths, RemoveUsers: ic.RemoveUsers, PurgePackages: ic.PurgePackages,
+		CopyPaths: ic.CopyPaths, RemovePaths: ic.RemovePaths, RemoveUsers: ic.RemoveUsers, PurgePackages: ic.PurgePackages,
 	}, storage, pools)
 	reg.Register(proto.OpInstallStatus, install.StatusOp())
 	reg.Register(proto.OpInstallStart, install.StartOp())

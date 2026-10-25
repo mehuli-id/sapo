@@ -39,12 +39,10 @@ type InstallTools struct {
 	Timeout                  time.Duration
 	Target                   string
 	Programs                 InstallPrograms
-	// StopService: dihentikan selama pengaturan disalin (sapo-api).
-	StopService            string
-	KernelCmdline          string
-	CopyPaths, RemovePaths []string
-	RemoveUsers            []string
-	PurgePackages          []string
+	KernelCmdline            string
+	CopyPaths, RemovePaths   []string
+	RemoveUsers              []string
+	PurgePackages            []string
 }
 
 // InstallPrograms: program yang dipakai install-run (path absolut).
@@ -333,12 +331,9 @@ func (r *installer) install() error {
 	}
 
 	r.step("salin pengaturan")
-	// sapo-api dihentikan selama menyalin agar datanya utuh (panel tidak
-	// bisa dibuka sebentar).
-	if t.StopService != "" {
-		_ = r.do(t.Systemctl, "stop", "--", t.StopService)
-		defer func() { _ = r.do(t.Systemctl, "start", "--", t.StopService) }()
-	}
+	// sapo-api dan sapod tetap berjalan (sesi panel di memori tidak boleh
+	// hilang di tengah pemasangan); file datanya ditulis atomik (file
+	// sementara lalu rename), jadi setiap file yang tersalin utuh.
 	for _, p := range t.CopyPaths {
 		src := filepath.Join(r.root, p)
 		dst, err := r.safeTarget(p)
