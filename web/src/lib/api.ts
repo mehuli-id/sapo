@@ -250,6 +250,8 @@ export interface SharedFolder {
   nfs_error?: string
   // Aplikasi App Center yang diberi akses → read | write.
   apps?: Record<string, ShareAccess>
+  // Jadwal snapshot (tidak ada = mati).
+  snapshots?: SnapshotPolicy
 }
 
 export interface ShareNFS {
@@ -356,6 +358,36 @@ export interface DriveAdmin {
   users: { user: string; exists: boolean; quota_gb?: number; home?: HomeStatus }[]
   // Folder pengguna yang sudah dihapus, atau di pool lain.
   orphans: HomeStatus[]
+  // Jadwal snapshot semua folder pribadi (tidak ada = mati).
+  snapshots?: SnapshotPolicy | null
+}
+
+// Snapshot ZFS terjadwal (ADR 0014): jumlah snapshot per jam, harian, dan
+// mingguan yang disimpan; hour = jam snapshot harian/mingguan (waktu NAS).
+export interface SnapshotPolicy {
+  hourly: number
+  daily: number
+  weekly: number
+  hour: number
+}
+
+export interface SnapshotPreset extends SnapshotPolicy {
+  id: string
+  label: Localized
+}
+
+export interface SnapshotInfo {
+  name: string
+  kind: "hourly" | "daily" | "weekly" | "manual"
+  created: string
+  used_bytes: number
+}
+
+// Folder snapshot: shared folder (share) atau folder pribadi (user).
+export interface SnapshotTarget {
+  pool: string
+  share?: string
+  user?: string
 }
 
 export interface FileEntry {
@@ -583,6 +615,14 @@ export const api = {
   setTime: (timezone: string, ntp: boolean) => post<{ ok: boolean }>("/api/v1/settings/time", { timezone, ntp }),
   fileShares: () => get<FileShare[]>("/api/v1/files/shares"),
   drive: () => get<DriveInfo>("/api/v1/drive"),
+  snapshotPresets: () => get<SnapshotPreset[]>("/api/v1/snapshots/presets"),
+  snapshots: (t: SnapshotTarget) =>
+    get<{ snapshots: SnapshotInfo[]; used_by_snapshots: number }>(`/api/v1/snapshots?${new URLSearchParams({ pool: t.pool, share: t.share ?? "", user: t.user ?? "" })}`),
+  createSnapshot: (t: SnapshotTarget) => post<{ name: string }>("/api/v1/snapshots", t),
+  deleteSnapshot: (t: SnapshotTarget, name: string, admin_password: string) => post<{ ok: boolean }>("/api/v1/snapshots/delete", { ...t, name, admin_password }),
+  setSharePolicy: (share: string, policy: SnapshotPolicy | null) =>
+    post<{ ok: boolean; warning?: string }>(`/api/v1/shares/${encodeURIComponent(share)}/snapshot-policy`, { policy }),
+  setDrivePolicy: (policy: SnapshotPolicy | null) => post<{ ok: boolean; warning?: string }>("/api/v1/drive/snapshot-policy", { policy }),
   driveAdmin: () => get<DriveAdmin>("/api/v1/drive/admin"),
   setDrive: (req: { pool: string; quota_gb: number; admin_password: string }) => post<{ ok: boolean; warning?: string }>("/api/v1/drive/settings", req),
   setDriveQuota: (user: string, req: { quota_gb: number | null; admin_password: string }) =>

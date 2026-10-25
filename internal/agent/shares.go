@@ -151,6 +151,9 @@ func (s *Shares) checkSpecs(specs []proto.ShareSpec) error {
 			return invalid("nama shared folder tidak valid: " + clip(sp.Name))
 		}
 		seen[sp.Name] = true
+		if sp.Snapshots != nil && !sp.Snapshots.Valid() {
+			return invalid("jadwal snapshot " + sp.Name + " tidak valid")
+		}
 		if !poolNamePattern.MatchString(sp.Pool) || !validShareText(sp.Description) {
 			return invalid("pool atau keterangan shared folder " + sp.Name + " tidak valid")
 		}
@@ -272,6 +275,9 @@ func (s *Shares) ApplyOp() Handler {
 			}
 			if err == nil {
 				err = s.setPermissions(ctx, path, perms)
+			}
+			if err == nil {
+				err = s.setSnapPolicy(ctx, sp.Pool+"/"+sp.Name, sp.Snapshots)
 			}
 			st.Path = path
 			if err != nil {
@@ -635,6 +641,13 @@ func (s *Shares) renderSMBConf(shares []shareConf, homesPool string) []byte {
 		{"unix password sync", "no"},
 		{"invalid users", "root"},
 		{"hosts deny", strings.Join(s.t.DenyNetworks, " ")},
+		// Snapshot Sapo (ADR 0014) sebagai "Previous Versions" di Windows.
+		{"vfs objects", "shadow_copy2"},
+		{"shadow:snapdir", ".zfs/snapshot"},
+		{"shadow:sort", "desc"},
+		{"shadow:snapprefix", `^sapo-\(hourly\)\{0,1\}\(daily\)\{0,1\}\(weekly\)\{0,1\}\(manual\)\{0,1\}$`},
+		{"shadow:delimiter", "_GMT"},
+		{"shadow:format", "_GMT-%Y.%m.%d-%H.%M.%S"},
 		{"logging", "file"},
 		{"log file", "/var/log/samba/log.%m"},
 		{"max log size", "1000"},

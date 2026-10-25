@@ -17,3 +17,4 @@ Setiap keputusan arsitektur penting dicatat di sini sebagai file bernomor (`NNNN
 | [0011](0011-system-updates.md) | Pembaruan sistem dari panel di unit systemd tersendiri | Diterima |
 | [0012](0012-app-center.md) | App Center: Podman, katalog kurasi, akun per aplikasi, Quadlet | Diterima |
 | [0013](0013-sapo-drive.md) | Sapo Drive: folder pribadi per pengguna (dataset ZFS, SMB [homes], File Station) dan WebDAV dengan password aplikasi | Diterima |
+| [0014](0014-snapshots.md) | Snapshot ZFS terjadwal per folder (jadwal di properti dataset, Previous Versions lewat SMB) | Diterima |

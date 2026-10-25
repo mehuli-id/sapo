@@ -68,7 +68,7 @@ func (h *Homes) ApplyOp() Handler {
 		if err := decodeParams(raw, &p); err != nil {
 			return nil, err
 		}
-		if !poolNamePattern.MatchString(p.Pool) || len(p.Users) > maxHomeUsers {
+		if !poolNamePattern.MatchString(p.Pool) || len(p.Users) > maxHomeUsers || (p.Snapshots != nil && !p.Snapshots.Valid()) {
 			return nil, invalidApp("pool atau daftar pengguna tidak valid")
 		}
 		for _, u := range p.Users {
@@ -89,7 +89,7 @@ func (h *Homes) ApplyOp() Handler {
 		}
 		res := proto.HomesApplyResult{Failures: []string{}}
 		for _, u := range p.Users {
-			if err := h.ensureHome(ctx, p.Pool, u); err != nil {
+			if err := h.ensureHome(ctx, p.Pool, u, p.Snapshots); err != nil {
 				res.Failures = append(res.Failures, u.Name+": "+clipTo(err.Error(), maxErrorText))
 				sh.p.logWarn("folder pribadi gagal disiapkan", "user", u.Name, "err", err)
 			}
@@ -139,7 +139,7 @@ func (h *Homes) ensureParent(ctx context.Context, pool string) error {
 
 // ensureHome menyiapkan folder satu pengguna: dataset bertanda, terpasang
 // di tempatnya, milik akun pengguna (0700), dan kuotanya.
-func (h *Homes) ensureHome(ctx context.Context, pool string, u proto.HomeUser) error {
+func (h *Homes) ensureHome(ctx context.Context, pool string, u proto.HomeUser, snap *proto.SnapshotPolicy) error {
 	uid, gid, ok := h.managed(u.Name)
 	if !ok {
 		return errors.New("bukan akun Sapo")
@@ -201,7 +201,7 @@ func (h *Homes) ensureHome(ctx context.Context, pool string, u proto.HomeUser) e
 			return err
 		}
 	}
-	return nil
+	return sh.setSnapPolicy(ctx, ds, snap)
 }
 
 func (h *Homes) zfs(ctx context.Context, flags []string, ds string) error {

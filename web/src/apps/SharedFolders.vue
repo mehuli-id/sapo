@@ -11,9 +11,10 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useSession } from "@/composables/useSession"
-import type { PoolsResult, ShareAccess, SharedFolder, UserAccount, UserGroup, Wizard } from "@/lib/api"
+import type { PoolsResult, ShareAccess, SharedFolder, SnapshotPolicy, UserAccount, UserGroup, Wizard } from "@/lib/api"
 import { api, ApiError, wizardActions } from "@/lib/api"
 import { formatBytes } from "@/lib/format"
+import SnapshotPanel from "@/components/SnapshotPanel.vue"
 import WizardRunner from "@/wizard/WizardRunner.vue"
 
 const { t, locale } = useI18n()
@@ -66,6 +67,9 @@ function summary(p: Record<string, ShareAccess>) {
   return list.length ? list.join(", ") : t("permissions.nobodyShort")
 }
 
+// Jadwal snapshot satu folder (SnapshotPanel).
+const sharePolicy = (name: string) => (p: SnapshotPolicy | null) => api.setSharePolicy(name, p)
+
 // --- Buat (wizard) ---
 async function openWizard() {
   notice.value = ""
@@ -93,7 +97,7 @@ function wizardDone(values: Record<string, string>) {
 
 // --- Ubah izin dan hapus ---
 const open = ref("")
-const mode = ref<"" | "edit" | "nfs" | "delete">("")
+const mode = ref<"" | "edit" | "nfs" | "snap" | "delete">("")
 const busy = ref(false)
 const error = ref("")
 const form = reactive({
@@ -105,7 +109,7 @@ const form = reactive({
   nfsClients: "",
 })
 
-function start(s: SharedFolder, m: "edit" | "nfs" | "delete") {
+function start(s: SharedFolder, m: "edit" | "nfs" | "snap" | "delete") {
   open.value = s.name
   mode.value = m
   error.value = ""
@@ -194,6 +198,10 @@ const remove = (s: SharedFolder) =>
               </p>
               <p class="text-xs">{{ t("shares.access") }}: {{ summary(s.permissions) }}</p>
               <p class="text-xs">{{ s.nfs && s.nfs_access ? nfsSummary(s) : t("shares.nfsOff") }}</p>
+              <p class="text-xs">
+                {{ t("snapshots.title") }}:
+                {{ s.snapshots ? t("snapshots.summary", { ...s.snapshots, hour: String(s.snapshots.hour).padStart(2, "0") }) : t("snapshots.off") }}
+              </p>
               <p v-if="s.apps && Object.keys(s.apps).length" class="text-xs">
                 {{ t("shares.apps") }}: {{ Object.entries(s.apps).map(([id, l]) => `${id} (${t(`permissions.${l}`)})`).join(", ") }}
               </p>
@@ -202,6 +210,7 @@ const remove = (s: SharedFolder) =>
           <div v-if="open !== s.name" class="flex gap-1">
             <Button size="sm" variant="outline" @click="start(s, 'edit')">{{ t("shares.editAccess") }}</Button>
             <Button size="sm" variant="outline" @click="start(s, 'nfs')">{{ t("shares.nfs") }}</Button>
+            <Button size="sm" variant="outline" @click="start(s, 'snap')">{{ t("snapshots.title") }}</Button>
             <Button size="sm" variant="ghost" class="text-destructive hover:text-destructive" @click="start(s, 'delete')"><Trash2 /></Button>
           </div>
         </div>
@@ -232,7 +241,11 @@ const remove = (s: SharedFolder) =>
           </p>
         </div>
 
-        <form v-if="open === s.name && mode === 'edit'" class="space-y-3 border-t pt-3" @submit.prevent="save(s)">
+        <div v-if="open === s.name && mode === 'snap'" class="space-y-3 border-t pt-3">
+          <SnapshotPanel :target="{ pool: s.pool, share: s.name }" :policy="s.snapshots" :save="sharePolicy(s.name)" @saved="load" />
+          <Button size="sm" variant="ghost" @click="open = ''">{{ t("common.close") }}</Button>
+        </div>
+        <form v-else-if="open === s.name && mode === 'edit'" class="space-y-3 border-t pt-3" @submit.prevent="save(s)">
           <PermissionEditor v-model="form.permissions" :users="users" :groups="groups" />
           <div class="space-y-1.5">
             <Label :for="`sp-${s.name}`">{{ t("account.password") }}</Label>

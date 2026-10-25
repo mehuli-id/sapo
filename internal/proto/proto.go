@@ -113,6 +113,11 @@ const (
 	OpAppsStop    = "apps.stop"
 	OpAppsRemove  = "apps.remove"
 
+	// Snapshot ZFS terjadwal (ADR 0014).
+	OpSnapshotsList   = "snapshots.list"
+	OpSnapshotsCreate = "snapshots.create"
+	OpSnapshotsDelete = "snapshots.delete"
+
 	// Sapo Drive (ADR 0013): folder pribadi setiap pengguna.
 	OpHomesApply  = "homes.apply"
 	OpHomesStatus = "homes.status"
@@ -492,6 +497,61 @@ type ShareSpec struct {
 	NFS *NFSExport `json:"nfs,omitempty"`
 	// Apps: aplikasi App Center yang diberi akses ke folder (ADR 0012).
 	Apps []ShareApp `json:"apps,omitempty"`
+	// Snapshots: jadwal snapshot folder (nil = mati; snapshot yang sudah ada
+	// tidak dihapus).
+	Snapshots *SnapshotPolicy `json:"snapshots,omitempty"`
+}
+
+// SnapshotPolicy adalah jadwal snapshot satu dataset: berapa snapshot per
+// jam, harian, dan mingguan yang disimpan (0 = jenis itu tidak diambil), dan
+// jam (waktu lokal NAS) snapshot harian dan mingguan (Senin) diambil.
+type SnapshotPolicy struct {
+	Hourly int `json:"hourly"`
+	Daily  int `json:"daily"`
+	Weekly int `json:"weekly"`
+	Hour   int `json:"hour"`
+}
+
+// Batas jadwal snapshot.
+const (
+	MaxSnapshotHourly = 168
+	MaxSnapshotDaily  = 366
+	MaxSnapshotWeekly = 520
+)
+
+// Valid: angka dalam batas.
+func (p SnapshotPolicy) Valid() bool {
+	return p.Hourly >= 0 && p.Hourly <= MaxSnapshotHourly && p.Daily >= 0 && p.Daily <= MaxSnapshotDaily &&
+		p.Weekly >= 0 && p.Weekly <= MaxSnapshotWeekly && p.Hour >= 0 && p.Hour <= 23
+}
+
+// SnapshotTarget menunjuk dataset: shared folder Share di Pool, atau folder
+// pribadi User (Sapo Drive) bila Share kosong.
+type SnapshotTarget struct {
+	Pool  string `json:"pool"`
+	Share string `json:"share,omitempty"`
+	User  string `json:"user,omitempty"`
+}
+
+// SnapshotInfo adalah satu snapshot. Kind: hourly, daily, weekly, manual.
+type SnapshotInfo struct {
+	Name      string    `json:"name"`
+	Kind      string    `json:"kind"`
+	Created   time.Time `json:"created"`
+	UsedBytes uint64    `json:"used_bytes"`
+}
+
+// SnapshotsListResult: snapshot dataset (terbaru dulu) dan ruang yang hanya
+// dipakai snapshot.
+type SnapshotsListResult struct {
+	Snapshots       []SnapshotInfo `json:"snapshots"`
+	UsedBySnapshots uint64         `json:"used_by_snapshots"`
+}
+
+// SnapshotParams menunjuk satu snapshot (snapshots.delete).
+type SnapshotParams struct {
+	SnapshotTarget
+	Name string `json:"name"`
 }
 
 // ShareApp: aplikasi ID boleh membaca folder (dan menulis bila Write).
@@ -817,6 +877,8 @@ type AppRemoveParams struct {
 type HomesApplyParams struct {
 	Pool  string     `json:"pool"`
 	Users []HomeUser `json:"users"`
+	// Snapshots: jadwal snapshot semua folder pribadi (nil = mati).
+	Snapshots *SnapshotPolicy `json:"snapshots,omitempty"`
 }
 
 // HomeUser: QuotaBytes 0 = tanpa batas.
