@@ -114,3 +114,36 @@ func TestFilesLimitsConcurrency(t *testing.T) {
 		t.Fatalf("hapus kedua: %v", err)
 	}
 }
+
+func TestFilesHome(t *testing.T) {
+	f, reqs, _ := testFiles(t)
+	f.shares.isMount = func(string) bool { return true }
+	f.shares.chown = func(string, int, int) error { return nil }
+	homes := NewHomes(f.shares, f.managed)
+	raw, _ := json.Marshal(proto.HomesApplyParams{Pool: "tank", Users: []proto.HomeUser{{Name: "budi"}}})
+	if _, err := homes.ApplyOp()(context.Background(), raw); err != nil {
+		t.Fatal(err)
+	}
+	call := func(p proto.FilesTarget) error {
+		raw, _ := json.Marshal(p)
+		_, err := f.ListOp()(context.Background(), raw)
+		return err
+	}
+	if err := call(proto.FilesTarget{User: "budi", Pool: "tank", Home: true}); err != nil {
+		t.Fatal(err)
+	}
+	if r := (*reqs)[len(*reqs)-1]; r.Root != filepath.Join(f.t.MountBase, "tank/sapo-home/budi") {
+		t.Fatalf("akar folder pribadi = %s", r.Root)
+	}
+	var oe *OpError
+	// Folder pribadi dan nama share sekaligus, atau dataset induk sebagai
+	// shared folder: ditolak.
+	for name, p := range map[string]proto.FilesTarget{
+		"home + share": {User: "budi", Pool: "tank", Share: "keluarga", Home: true},
+		"induk":        {User: "budi", Pool: "tank", Share: "sapo-home"},
+	} {
+		if err := call(p); !errors.As(err, &oe) {
+			t.Errorf("%s harus ditolak: %v", name, err)
+		}
+	}
+}

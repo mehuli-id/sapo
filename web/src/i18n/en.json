@@ -52,7 +52,7 @@
     },
     "sapo-drive": {
       "title": "Sapo Drive",
-      "description": "Personal drive like Google Drive"
+      "description": "A personal folder for every user"
     },
     "app-center": {
       "title": "App Center",
@@ -327,7 +327,11 @@
     "nfs_invalid": "Invalid NFS settings: pick a user and enter client IP addresses or networks (for example 192.168.1.0/24). Host names and overly wide networks aren’t accepted.",
     "invalid_params": "Invalid input: {message}",
     "updates_failed": "Update failed: {message}",
-    "share_used_by_app": "This folder is still used by an app. Remove it from that app in App Center first."
+    "share_used_by_app": "This folder is still used by an app. Remove it from that app in App Center first.",
+    "home_exists": "A former user with the same name still has a personal folder. Delete it in Sapo Drive (Leftover folders) first, or use another name.",
+    "drive_pool_in_use": "Personal folders still exist on another pool. Personal folders aren’t moved automatically.",
+    "home_user_exists": "This user still exists; their personal folder can’t be deleted.",
+    "home_delete_failed": "The personal folder couldn’t be deleted: {message}"
   },
   "pool": {
     "title": "Storage pools",
@@ -632,7 +636,9 @@
       "timeout": "The operation took too long (very large folder). Part of it may already be deleted; try again.",
       "invalid_params": "Invalid name or location.",
       "network_error": "Lost the connection to the NAS."
-    }
+    },
+    "home": "My drive",
+    "homeHelp": "Your personal folder"
   },
   "controlPanel": {
     "settings": "Settings",
@@ -711,5 +717,40 @@
     },
     "save": "Save",
     "foldersExposure": "Anyone who can open this app (from the network, including other apps on the NAS) can see these folders, subject to the app’s own login settings. Set up the app’s admin account right after installing it."
+  },
+  "drive": {
+    "intro": "A personal folder for every user: only you can open it, from File Station or from other computers over the network.",
+    "off": "Sapo Drive isn’t turned on yet. Ask an administrator to turn it on.",
+    "offAdmin": "Sapo Drive isn’t turned on yet. Once it is, every user gets a personal folder on the pool you choose.",
+    "enable": "Turn on Sapo Drive",
+    "enabled": "Sapo Drive is on. Each user’s personal folder is being prepared.",
+    "disabled": "Sapo Drive is off. Personal folders are kept and come back when it’s turned on again on the same pool.",
+    "preparing": "Preparing the folder…",
+    "usedOf": "{used} of {quota} used",
+    "usedFree": "{used} used, {free} left",
+    "openFiles": "Open in File Station",
+    "smbHelp": "From other computers on the network (sign in with your Sapo account):",
+    "smbOff": "Network access (SMB) is turned off by an administrator. You can still open the folder in File Station.",
+    "settings": "Settings",
+    "settingsSummary": "Pool {pool} · default limit {quota}",
+    "changeDefault": "Change default limit",
+    "defaultQuota": "Default size limit per user (GB, empty = no limit)",
+    "turnOff": "Turn off",
+    "turnOffHelp": "Personal folders can no longer be opened, but their contents are kept. Turning it on again on the same pool opens them again.",
+    "saved": "Settings saved.",
+    "users": "Users",
+    "quota": "Limit",
+    "quotaDefault": "default",
+    "noLimit": "no limit",
+    "gb": "{n} GB",
+    "changeQuota": "Change limit",
+    "userQuota": "Size limit (GB)",
+    "userQuotaHelp": "Empty = default limit, 0 = no limit. If the folder is already larger, existing files stay but no new files can be added.",
+    "orphans": "Leftover folders",
+    "orphansHelp": "Personal folders of deleted users (or on another pool). Their contents are kept until you delete them. A new user can’t take a name that still has a leftover folder.",
+    "onPool": "on pool {pool}",
+    "deleteHome": "Delete folder",
+    "deleteHomeHelp": "{user}’s personal folder and everything in it will be deleted permanently and can’t be recovered.",
+    "homeDeleted": "{user}’s personal folder was deleted."
   }
 }

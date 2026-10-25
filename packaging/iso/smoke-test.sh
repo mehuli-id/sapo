@@ -435,6 +435,43 @@ for f in media pribadi; do
 done
 echo "App Center: miniserve membaca folder media yang diberikan (termasuk file lama), tidak melihat folder pribadi, izin tulis ditolak, folder yang dipakai tidak bisa dihapus, dan pencabutan melepas folder"
 
+# --- Sapo Drive (ADR 0013) ---------------------------------------------------------
+# Folder pribadi di pool uji (batas 1 GB): budi menulis lewat SMB dan
+# membacanya di File Station ("Drive saya"); ani tidak bisa membuka folder
+# budi. Folder pengguna yang dihapus disimpan dan menahan nama itu sampai
+# dihapus admin.
+res="$(api POST /api/v1/drive/settings "{\"pool\":\"uji\",\"quota_gb\":1,\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' && "$res" != *system_sync_failed* ]] || fail "nyalakan Sapo Drive: $res; status sinkronisasi: $(api GET /api/v1/system/sync)"
+home() { # home USER SAMBUNGAN PERINTAH → keluaran smbclient
+  smbclient "//127.0.0.1/$2" -p "$SMB_PORT" -m SMB3 -U "$1%$UPASS" -c "$3" 2>&1 || true
+}
+echo "milik budi" > "$WORK/pribadi.txt"
+out="$(home budi budi "put $WORK/pribadi.txt catatan.txt; ls")"
+[[ "$out" == *catatan.txt* ]] || fail "budi menulis ke folder pribadinya: $out"
+out="$(home ani budi "ls")"
+[[ "$out" == *NT_STATUS_ACCESS_DENIED* || "$out" == *NT_STATUS_BAD_NETWORK_NAME* ]] || fail "ani tidak boleh membuka folder pribadi budi: $out"
+out="$(home ani ani "ls")"
+[[ "$out" != *NT_STATUS* ]] || fail "ani membuka folder pribadinya: $out"
+login_as budi
+res="$(api GET '/api/v1/files/list?share=@home&path=')"
+json 'assert "catatan.txt" in [e["name"] for e in v["entries"]], v' <<<"$res" || fail "File Station, Drive saya budi: $res"
+res="$(api GET /api/v1/drive)"
+json 'assert v["home"]["quota_bytes"]==1<<30 and v["home"]["used_bytes"]>0, v' <<<"$res" || fail "pemakaian Drive budi: $res"
+JAR="$admin_jar"
+# cici dihapus: foldernya disimpan; nama cici tidak bisa dipakai lagi sampai
+# foldernya dihapus.
+res="$(api POST /api/v1/users/cici/delete "{\"confirm_name\":\"cici\",\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "hapus pengguna cici: $res"
+res="$(api GET /api/v1/drive/admin)"
+json 'assert [h["user"] for h in v["orphans"]]==["cici"], v' <<<"$res" || fail "folder sisa cici: $res"
+res="$(api POST /api/v1/users "{\"username\":\"cici\",\"password\":\"$UPASS\",\"password_confirm\":\"$UPASS\",\"role\":\"user\",\"groups\":[],\"must_change_password\":false,\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *'"home_exists"'*' 409' ]] || fail "nama dengan folder sisa harus ditolak: $res"
+res="$(api POST /api/v1/drive/homes/uji/cici/delete "{\"confirm_name\":\"cici\",\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "hapus folder sisa cici: $res"
+res="$(api GET /api/v1/drive/admin)"
+json 'assert v["orphans"]==[], v' <<<"$res" || fail "folder sisa masih ada: $res"
+echo "Sapo Drive: folder pribadi lewat SMB dan File Station, ani tidak bisa membuka folder budi, kuota 1 GB, folder pengguna yang dihapus disimpan lalu dihapus admin"
+
 # Ganti disk SAPOUJI2 dengan SAPOUJI3 (berisi ext4, penghapusan dikonfirmasi).
 disks_json="$(api GET /api/v1/storage/disks)"
 old_disk="$(json "print([x['name'] for x in v if x['serial']=='SAPOUJI2'][0])" <<<"$disks_json")"

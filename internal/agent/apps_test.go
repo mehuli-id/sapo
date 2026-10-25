@@ -117,7 +117,7 @@ func TestAppsInstallLifecycle(t *testing.T) {
 	calls, _ := os.ReadFile(log)
 	inOrder(t, string(calls), "groupadd --system --gid 30000 -- sapo-app-homer",
 		"useradd --system --uid 30000 --gid 30000 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin --comment Aplikasi Sapo homer -- sapo-app-homer",
-		"zfs create -o sapo:app=- -o devices=off -o setuid=off -- tank/sapo-apps",
+		"zfs create -o sapo:app=@induk -o devices=off -o setuid=off -- tank/sapo-apps",
 		"zfs create -o sapo:app=homer -o devices=off -o setuid=off -o exec=on -- tank/sapo-apps/homer",
 		"systemctl daemon-reload --", "systemctl start --no-block -- sapo-app-homer.service")
 	// Port yang sama untuk aplikasi lain, atau memasang dua kali: ditolak.

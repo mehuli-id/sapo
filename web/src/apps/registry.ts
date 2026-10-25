@@ -79,6 +79,7 @@ const components: Record<string, Component> = {
   FileStation: defineAsyncComponent(() => import("./FileStation.vue")),
   ControlPanel: defineAsyncComponent(() => import("./ControlPanel.vue")),
   AppCenter: defineAsyncComponent(() => import("./AppCenter.vue")),
+  SapoDrive: defineAsyncComponent(() => import("./SapoDrive.vue")),
   About: defineAsyncComponent(() => import("./About.vue")),
   Planned: defineAsyncComponent(() => import("./Planned.vue")),
 }

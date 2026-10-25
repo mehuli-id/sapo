@@ -24,6 +24,12 @@ import (
 type Settings struct {
 	SMBOff bool `json:"smb_off,omitempty"`
 	NFSOff bool `json:"nfs_off,omitempty"`
+	// Sapo Drive (ADR 0013): pool folder pribadi (kosong = mati), kuota
+	// bawaan dalam GiB (0 = tanpa batas), dan kuota per pengguna (-1 = tanpa
+	// batas).
+	HomesPool    string           `json:"homes_pool,omitempty"`
+	HomesQuotaGB int64            `json:"homes_quota_gb,omitempty"`
+	HomeQuotaGB  map[string]int64 `json:"home_quota_gb,omitempty"`
 }
 
 type settingsStore struct {

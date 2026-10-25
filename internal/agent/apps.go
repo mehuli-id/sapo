@@ -458,12 +458,12 @@ func (a *Apps) ensureData(ctx context.Context, pool, id string, uid int) (string
 	parent := pool + "/sapo-apps"
 	pprops, err := sh.zfsProps(ctx, parent, "sapo:app", sharePropName)
 	if errors.Is(err, errNoDataset) {
-		if err := a.zfs(ctx, []string{"create", "-o", "sapo:app=-", "-o", "devices=off", "-o", "setuid=off"}, parent); err != nil {
+		if err := a.zfs(ctx, []string{"create", "-o", "sapo:app=" + parentMarker, "-o", "devices=off", "-o", "setuid=off"}, parent); err != nil {
 			return "", err
 		}
 	} else if err != nil {
 		return "", err
-	} else if pprops["sapo:app"] != "-" || (pprops[sharePropName] != "-" && pprops[sharePropName] != "") {
+	} else if pprops["sapo:app"] != parentMarker || (pprops[sharePropName] != "-" && pprops[sharePropName] != "") {
 		// Dataset bernama sama yang bukan buatan App Center (misalnya
 		// dibuat dari terminal): tidak dipakai.
 		return "", &OpError{Code: proto.ErrConflict, Message: "dataset " + parent + " sudah ada dan bukan milik App Center"}
