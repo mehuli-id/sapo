@@ -119,6 +119,7 @@ const (
 	OpBackupsDelete  = "backups.delete"
 	OpBackupsRun     = "backups.run"
 	OpBackupsRestore = "backups.restore"
+	OpBackupsClaim   = "backups.claim"
 
 	// Installer ke disk (ADR 0016).
 	OpInstallStatus = "install.status"
@@ -1094,9 +1095,17 @@ type BackupRestore struct {
 	Running  bool      `json:"running"`
 	OK       bool      `json:"ok"`
 	Error    string    `json:"error,omitempty"`
-	// Present: dataset Pool/Name masih ada sebagai shared folder Name
-	// (sapo-api hanya mendaftarkan folder pulihan yang Present).
+	// Present: dataset Pool/Name masih ada sebagai shared folder Name.
 	Present bool `json:"present"`
+	// Claimed: sapo-api sudah mendaftarkan folder ini (backups.claim, sekali
+	// saja).
+	Claimed bool `json:"claimed"`
+}
+
+// BackupClaimParams: klaim pendaftaran folder pulihan Pool/Name.
+type BackupClaimParams struct {
+	Pool string `json:"pool"`
+	Name string `json:"name"`
 }
 
 // BackupDeleteParams: DeleteData juga menghapus salinan di tujuan.

@@ -335,10 +335,10 @@ func (b *Backups) runJob(ctx context.Context, j proto.BackupJob) (uint64, error)
 		if err != nil {
 			return 0, err
 		}
-		for i := len(have) - 1; i >= 0 && base == ""; i-- {
-			if slices.ContainsFunc(srcSnaps, func(c proto.BackupCopy) bool { return c.Name == have[i].Name }) {
-				base = have[i].Name
-			}
+		// Dasar harus snapshot TERBARU di tujuan (receive -i tanpa -F menolak
+		// dasar lain) dan masih ada di sumber.
+		if n := len(have); n > 0 && slices.ContainsFunc(srcSnaps, func(c proto.BackupCopy) bool { return c.Name == have[n-1].Name }) {
+			base = have[n-1].Name
 		}
 		if base == "" {
 			// Tidak pernah ditimpa otomatis (data dulu).
@@ -361,16 +361,28 @@ func (b *Backups) runJob(ctx context.Context, j proto.BackupJob) (uint64, error)
 			[]string{"receive", "-u", "--", dst})
 	}
 	if err != nil {
-		// Snapshot yang gagal dikirim dibuang (dasar lama tetap).
-		_ = b.locked(context.WithoutCancel(ctx), func() error {
-			_, err := b.zfs(context.WithoutCancel(ctx), []string{"destroy"}, src+"@"+snap)
-			return err
-		})
+		// Stream bisa saja sudah diterima utuh walau salah satu proses
+		// melapor gagal di akhir: bila snapshot itu ada di tujuan, ia dasar
+		// berikutnya dan tidak boleh dibuang dari sumber.
+		if got, lerr := b.snapshots(context.WithoutCancel(ctx), dst, prefix); lerr == nil && slices.ContainsFunc(got, func(c proto.BackupCopy) bool { return c.Name == snap }) {
+			b.shares.p.logWarn("backup melapor gagal tetapi salinan diterima", "tugas", j.ID, "err", err)
+		} else {
+			b.discardSnap(ctx, src+"@"+snap)
+		}
 		return n, err
 	}
 	_ = b.locked(ctx, func() error { b.prune(ctx, j, src, dst, snap); return nil })
 	b.shares.p.logInfo("backup selesai", "tugas", j.ID, "byte", n, "salinan", snap)
 	return n, nil
+}
+
+// discardSnap membuang snapshot backup yang gagal dikirim (dasar lama tetap).
+func (b *Backups) discardSnap(ctx context.Context, name string) {
+	ctx = context.WithoutCancel(ctx)
+	_ = b.locked(ctx, func() error {
+		_, err := b.zfs(ctx, []string{"destroy"}, name)
+		return err
+	})
 }
 
 // prune membuang snapshot backup lama: di sumber semua kecuali snap (dasar
@@ -477,6 +489,15 @@ func (b *Backups) due(j *backupJobState, now time.Time) bool {
 
 // Run memeriksa jadwal setiap menit sampai ctx selesai.
 func (b *Backups) Run(ctx context.Context) {
+	// Pemulihan yang terputus karena sapod berhenti tidak akan selesai.
+	_ = b.update(func(st *backupState) error {
+		for i := range st.Restores {
+			if r := &st.Restores[i]; r.Running {
+				r.Running, r.OK, r.Finished, r.Error = false, false, b.now().UTC(), "terputus sebelum selesai (sapod berhenti)"
+			}
+		}
+		return nil
+	})
 	for {
 		if st, err := b.loadLocked(); err == nil {
 			ids := make([]string, 0, len(st.Jobs))
@@ -692,6 +713,13 @@ func (b *Backups) RestoreOp() Handler {
 		if !strings.HasPrefix(p.Copy, backupSnapPrefix(j.ID)) || !snapNameTail.MatchString(strings.TrimPrefix(p.Copy, backupSnapPrefix(j.ID))) {
 			return nil, &OpError{Code: proto.ErrInvalidParams, Message: "salinan tidak valid"}
 		}
+		// Salinan harus milik tugas ini (pool tujuan bisa drive lain bernama
+		// sama).
+		if exists, err := b.destState(ctx, j); err != nil {
+			return nil, err
+		} else if !exists {
+			return nil, &OpError{Code: proto.ErrNotFound, Message: "salinan tugas ini tidak ada di pool " + j.DestPool}
+		}
 		target := j.SrcPool + "/" + p.Name
 		if _, err := b.propsFn(ctx, target, "type"); !errors.Is(err, errNoDataset) {
 			return nil, &OpError{Code: proto.ErrConflict, Message: "folder " + p.Name + " sudah ada; pilih nama lain"}
@@ -702,8 +730,14 @@ func (b *Backups) RestoreOp() Handler {
 		rec := proto.BackupRestore{JobID: j.ID, Copy: p.Copy, Pool: j.SrcPool, Name: p.Name, Started: b.now().UTC(), Running: true}
 		if err := b.update(func(st *backupState) error {
 			st.Restores = append(st.Restores, rec)
-			if len(st.Restores) > 20 {
-				st.Restores = st.Restores[len(st.Restores)-20:]
+			// Catatan lama dibuang, kecuali pemulihan berhasil yang belum
+			// didaftarkan sapo-api.
+			for len(st.Restores) > 20 {
+				i := slices.IndexFunc(st.Restores, func(r proto.BackupRestore) bool { return !r.Running && (r.Claimed || !r.OK) })
+				if i < 0 {
+					break
+				}
+				st.Restores = slices.Delete(st.Restores, i, i+1)
 			}
 			return nil
 		}); err != nil {
@@ -740,6 +774,38 @@ func (b *Backups) RestoreOp() Handler {
 			}
 		}()
 		return map[string]bool{"ok": true}, nil
+	}
+}
+
+// ClaimOp mengembalikan handler backups.claim: sapo-api mengklaim folder
+// pulihan Pool/Name untuk didaftarkan. Berhasil sekali saja, dan hanya bila
+// pemulihan selesai dan datasetnya masih shared folder itu; jadi folder yang
+// sudah didaftarkan lalu dihapus admin tidak pernah didaftarkan ulang.
+func (b *Backups) ClaimOp() Handler {
+	return func(ctx context.Context, raw json.RawMessage) (any, error) {
+		var p proto.BackupClaimParams
+		if err := decodeParams(raw, &p); err != nil {
+			return nil, err
+		}
+		claimed := false
+		err := b.update(func(st *backupState) error {
+			for i := range st.Restores {
+				r := &st.Restores[i]
+				if r.Pool != p.Pool || r.Name != p.Name || !r.OK || r.Running || r.Claimed {
+					continue
+				}
+				props, err := b.propsFn(ctx, r.Pool+"/"+r.Name, sharePropName)
+				if err == nil && props[sharePropName] == r.Name {
+					r.Claimed, claimed = true, true
+				}
+				return nil
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		return map[string]bool{"claimed": claimed}, nil
 	}
 }
 

@@ -13,6 +13,7 @@ func TestBackupsAPI(t *testing.T) {
 	agent.results[proto.OpBackupsRun] = map[string]bool{"ok": true}
 	agent.results[proto.OpBackupsDelete] = map[string]bool{"ok": true}
 	agent.results[proto.OpBackupsRestore] = map[string]bool{"ok": true}
+	agent.results[proto.OpBackupsClaim] = map[string]bool{"claimed": true}
 	agent.results[proto.OpBackupsList] = proto.BackupsListResult{Jobs: []proto.BackupStatus{}, Restores: []proto.BackupRestore{}}
 	h := newHarness(t, agent)
 	h.runSetup()

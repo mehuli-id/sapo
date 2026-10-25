@@ -14,11 +14,12 @@ Snapshot (ADR 0014) melindungi dari file yang terhapus atau berubah, tetapi bera
 - **Di tujuan** data diterima di `<pool>/sapo-backup/<id>` dengan `canmount=noauto`, `readonly=on`, dan penanda `sapo:backup=<id>` (induk `sapo-backup` bertanda `@induk`, `canmount=off`). Tidak ada penanda `sapo:share`, jadi tidak pernah dibagikan lewat SMB/NFS/File Station. Dataset bernama sama yang bukan milik tugas itu tidak pernah disentuh.
 - **Data dulu.**
   - Backup tidak pernah mengubah atau menghapus data di folder asal; yang dibuang hanya snapshot backup lama.
-  - `zfs receive -F` tidak dipakai. Bila salinan di tujuan tidak punya dasar bersama dengan sumber (`backup_diverged`), backup berhenti dan admin harus menghapus salinan lama secara eksplisit.
-  - Snapshot yang gagal dikirim dibuang dari sumber; salinan lama di tujuan tetap.
+  - `zfs receive -F` tidak dipakai. Dasar inkremental harus snapshot terbaru di tujuan; bila snapshot itu tidak ada lagi di sumber (`backup_diverged`), backup berhenti dan admin harus menghapus salinan lama secara eksplisit.
+  - Snapshot yang gagal dikirim dibuang dari sumber, kecuali bila ternyata sudah diterima di tujuan (proses melapor gagal di akhir); salinan lama di tujuan tetap.
+  - Nama `sapo-backup` dicadangkan, tidak bisa dipakai sebagai nama shared folder.
   - Folder yang di-backup dan pool sumber/tujuan tugas tidak bisa dihapus selama tugas ada (`sapod` menolak, `409`).
   - Mengubah tugas, menghapus tugas, dan memulihkan butuh password admin dan tercatat di log audit. Menghapus beserta salinan butuh mengetik ulang ID tugas (`destructive`).
-- **Pemulihan** selalu membuat shared folder **baru** di pool asal (`zfs send` salinan → `zfs receive` dengan `sapo:share=<nama baru>`); folder yang ada tidak pernah ditimpa. Setelah selesai, sapo-api mendaftarkan folder itu dengan izin folder asalnya. Pendaftaran hanya untuk pemulihan yang datasetnya masih ada (`present`), sehingga folder yang kemudian dihapus admin tidak pernah didaftarkan ulang (dan tidak dibuat kosong oleh sinkronisasi).
+- **Pemulihan** selalu membuat shared folder **baru** di pool asal (`zfs send` salinan → `zfs receive` dengan `sapo:share=<nama baru>`); folder yang ada tidak pernah ditimpa. Setelah selesai, sapo-api mendaftarkan folder itu dengan izin folder asalnya. Setiap folder pulihan diklaim sekali di `sapod` (`backups.claim`, hanya bila datasetnya masih ada), sehingga folder yang kemudian dihapus admin tidak pernah didaftarkan ulang (dan tidak dibuat kosong oleh sinkronisasi). Salinan dipulihkan hanya bila dataset tujuan memang milik tugas itu (`sapo:backup=<id>`); drive lain dengan nama pool sama ditolak. Pemulihan yang terputus karena `sapod` berhenti ditandai gagal saat `sapod` mulai.
 - **Satu backup atau pemulihan pada satu waktu**, paling lama `agent.backup.max_run_hours`. Pembuatan dan pemangkasan snapshot memegang kunci pool sebentar; pengiriman data berjalan tanpa kunci pool. Pool tujuan yang hilang (drive dicabut) membuat backup gagal dengan pesan jelas dan dicoba lagi paling cepat sejam kemudian.
 
 ## Akibat
