@@ -24,4 +24,6 @@ gdisk
 dosfstools
 grub-pc-bin
 grub-efi-amd64-bin
+# grub-install dan grub-mkconfig (grub-common ikut sebagai dependensi).
+grub2-common
 # SSH sengaja tidak dipasang: user live memakai password bawaan.
