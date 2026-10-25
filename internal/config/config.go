@@ -187,7 +187,9 @@ type Files struct {
 
 // Cloud mengatur backup ke S3/cloud dengan restic (ADR 0020).
 type Cloud struct {
-	Restic      string `yaml:"restic"`
+	Restic string `yaml:"restic"`
+	// Journalctl: membaca alasan bila unit restic gagal sebelum berjalan.
+	Journalctl  string `yaml:"journalctl"`
 	StateFile   string `yaml:"state_file"`
 	SecretsDir  string `yaml:"secrets_dir"`
 	CacheDir    string `yaml:"cache_dir"`
@@ -195,7 +197,7 @@ type Cloud struct {
 }
 
 func (c Cloud) validate() error {
-	for _, p := range []string{c.Restic, c.StateFile, c.SecretsDir, c.CacheDir} {
+	for _, p := range []string{c.Restic, c.Journalctl, c.StateFile, c.SecretsDir, c.CacheDir} {
 		if !filepath.IsAbs(p) {
 			return errors.New("agent.cloud: restic, state_file, secrets_dir, cache_dir harus path absolut")
 		}
@@ -630,7 +632,7 @@ func Default() Config {
 			Snapshots: Snapshots{MaxPoolCapacityPercent: 90, CallTimeoutSeconds: 30},
 			External:  External{Mount: "/usr/bin/mount", Umount: "/usr/bin/umount", MountBase: "/srv/sapo-external", StateFile: "/var/lib/sapod/external.json"},
 			Backup:    Backup{StateFile: "/var/lib/sapod/backup.json", MaxRunHours: 24},
-			Cloud: Cloud{Restic: "/usr/bin/restic", StateFile: "/var/lib/sapod/cloud.json", SecretsDir: "/var/lib/sapod/cloud",
+			Cloud: Cloud{Restic: "/usr/bin/restic", Journalctl: "/usr/bin/journalctl", StateFile: "/var/lib/sapod/cloud.json", SecretsDir: "/var/lib/sapod/cloud",
 				CacheDir: "/var/cache/sapo-restic", MaxRunHours: 24},
 			Install: Install{LiveMarker: "/run/live/medium", SquashfsRoot: "/run/live/rootfs/filesystem.squashfs", MinDiskGB: 16,
 				Unit: "sapo-install.service", ParamsFile: "/var/lib/sapod/install-params.json", LogFile: "/var/lib/sapod/install.log",

@@ -170,6 +170,7 @@ agent:
   # systemd terkunci, paling lama max_run_hours.
   cloud:
     restic: /usr/bin/restic
+    journalctl: /usr/bin/journalctl
     state_file: /var/lib/sapod/cloud.json
     secrets_dir: /var/lib/sapod/cloud
     cache_dir: /var/cache/sapo-restic
