@@ -351,7 +351,7 @@ func (f *Files) RenameOp() Handler {
 		if err != nil || to == "" || p.Path == "" {
 			return nil, &OpError{Code: proto.ErrInvalidParams, Message: "nama baru tidak valid"}
 		}
-		if _, _, err := f.call(ctx, p.FilesTarget, fsRequest{Op: "rename", To: to}, f.t.Timeout, false); err != nil {
+		if _, _, err := f.call(ctx, p.FilesTarget, fsRequest{Op: "rename", To: to, Overwrite: p.Overwrite}, f.t.Timeout, false); err != nil {
 			return nil, err
 		}
 		return map[string]bool{"ok": true}, nil

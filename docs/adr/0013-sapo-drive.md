@@ -51,4 +51,19 @@ Pengguna NAS ingin tempat file pribadi yang hanya bisa dibuka dirinya sendiri, s
   - admin bisa mematikan WebDAV di Control Panel.
 - **Sertifikat**: sertifikat HTTPS panel (bukan rahasia) bisa diunduh dari Sapo Drive (`/api/v1/tls/certificate`) untuk dipercaya di perangkat lain. Petunjuk di Sapo Drive tidak pernah menyarankan mematikan pemeriksaan sertifikat.
 - **Petunjuk di Sapo Drive** untuk Windows, macOS, iOS, Android, dan rclone (`rclone bisync` untuk sinkron dua arah).
-- Kunci WebDAV (LOCK) di memori sapo-api; hilang saat sapo-api di-restart.
+- **Kunci WebDAV** (LOCK) di memori sapo-api, hilang saat sapo-api di-restart:
+  - path `@home` dipisah per pengguna;
+  - token acak dan hanya berlaku untuk pemiliknya (tidak bisa dipakai atau dicabut pengguna lain);
+  - lama kunci paling lama 1 jam, paling banyak 200 kunci per pengguna;
+  - LOCK pada akar `/dav/`, akar folder, dan folder baca saja ditolak.
+- **Penimpaan aman**:
+  - MOVE dan COPY yang menimpa file tidak menghapus tujuan dulu; tujuan ditimpa atomik oleh `sapod` (rename dengan `Overwrite`, atau commit file sementara), jadi bila operasinya gagal, file lama tetap ada;
+  - file baru tanpa isi (misalnya LOCK pada nama yang gagal dibaca karena `sapod` sibuk) tidak pernah menggantikan file lama;
+  - MOVE antar-folder dijawab 502 sebelum apa pun dihapus (klien menyalin lalu menghapus);
+  - COPY dan MOVE ke dalam dirinya sendiri ditolak.
+- **Daftar isi yang terpotong** (lebih dari `agent.files.max_entries`) tidak pernah dikirim sebagai daftar lengkap: PROPFIND dijawab 507, agar klien sinkron tidak menganggap file sisanya terhapus. Folder sebesar itu belum bisa dibuka lewat WebDAV; paging menyusul.
+- **Batas lain**:
+  - PROPFIND hanya Depth 0 dan 1 (RFC 4918 §9.1);
+  - badan permintaan selain PUT paling besar 1 MiB;
+  - limiter login WebDAV hanya menghitung kegagalan, dengan kunci per jaringan klien dan per (jaringan, akun), jadi tebakan dari jaringan lain tidak mengunci pengguna yang sah;
+  - waktu pakai password aplikasi dicatat di latar belakang.

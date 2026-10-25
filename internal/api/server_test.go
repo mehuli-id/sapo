@@ -127,6 +127,7 @@ func newHarness(t *testing.T, agent AgentCaller) *harness {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { al.Close() })
+	t.Cleanup(store.WaitIdle)
 	h.s, err = New(Options{Config: cfg, Agent: agent, Store: store, Audit: al, Now: func() time.Time { return h.now }})
 	if err != nil {
 		t.Fatal(err)

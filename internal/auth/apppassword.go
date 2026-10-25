@@ -153,17 +153,34 @@ func (s *Store) CheckAppPassword(username, secret string, now time.Time) (string
 	}
 	ap := u.AppPasswords[match]
 	if ap.LastUsedAt == nil || now.Sub(*ap.LastUsedAt) > appPasswordTouch {
-		at := now.UTC()
+		s.touchAppPassword(username, ap.ID, now.UTC())
+	}
+	return ap.ID, true
+}
+
+// WaitIdle menunggu pencatatan waktu pakai yang sedang berjalan selesai.
+func (s *Store) WaitIdle() { s.touchWG.Wait() }
+
+// touchAppPassword mencatat waktu pakai di latar belakang (menulis file
+// pengguna dengan fsync tidak menahan permintaan WebDAV), paling banyak satu
+// penulisan berjalan per password.
+func (s *Store) touchAppPassword(username, id string, at time.Time) {
+	if _, busy := s.touching.LoadOrStore(id, true); busy {
+		return
+	}
+	s.touchWG.Add(1)
+	go func() {
+		defer s.touchWG.Done()
+		defer s.touching.Delete(id)
 		_ = s.updateUser(username, func(u *User) error {
 			next := append([]AppPassword(nil), u.AppPasswords...)
 			for i := range next {
-				if next[i].ID == ap.ID {
+				if next[i].ID == id {
 					next[i].LastUsedAt = &at
 				}
 			}
 			u.AppPasswords = next
 			return nil
 		})
-	}
-	return ap.ID, true
+	}()
 }

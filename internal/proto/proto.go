@@ -670,6 +670,8 @@ type FilesTarget struct {
 type FilesRenameParams struct {
 	FilesTarget
 	To string `json:"to"`
+	// Overwrite: menimpa file biasa di To secara atomik (WebDAV MOVE).
+	Overwrite bool `json:"overwrite,omitempty"`
 }
 
 // FilesCommitParams: Temp dari files.open_write; Path adalah nama akhir.

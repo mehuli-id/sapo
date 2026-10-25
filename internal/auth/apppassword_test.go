@@ -36,6 +36,7 @@ func TestAppPasswords(t *testing.T) {
 	if _, ok := st.CheckAppPassword("ani", secret, now); ok {
 		t.Fatal("akun lain cocok")
 	}
+	st.WaitIdle()
 	if u, _ := st.Get("budi"); u.AppPasswords[0].LastUsedAt == nil {
 		t.Fatal("waktu pakai harus dicatat")
 	}

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/tls"
 	"errors"
 	"io"
 	"net/http"
@@ -9,6 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"golang.org/x/net/webdav"
 
 	"github.com/mehuli-id/sapo/internal/proto"
 )
@@ -61,6 +65,7 @@ func TestWebDAV(t *testing.T) {
 	dav := func(method, path, user, pass string, body io.Reader, hdr ...string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, path, body)
 		r.RemoteAddr = "192.168.1.20:40000"
+		r.TLS = &tls.ConnectionState{}
 		if user != "" {
 			r.SetBasicAuth(user, pass)
 		}
@@ -70,6 +75,13 @@ func TestWebDAV(t *testing.T) {
 		w := httptest.NewRecorder()
 		h.s.ServeHTTP(w, r)
 		return w
+	}
+	// HTTP biasa dari komputer lain: ditolak sebelum login diperiksa.
+	plain := httptest.NewRequest("PROPFIND", "/dav/", nil)
+	plain.RemoteAddr = "192.168.1.20:40000"
+	plain.SetBasicAuth("budi", secret)
+	if w := httptest.NewRecorder(); func() int { h.s.ServeHTTP(w, plain); return w.Code }() != http.StatusForbidden {
+		t.Fatal("WebDAV lewat HTTP biasa harus ditolak")
 	}
 	if w := dav("PROPFIND", "/dav/", "", "", nil); w.Code != http.StatusUnauthorized || !strings.Contains(w.Header().Get("WWW-Authenticate"), "Basic") {
 		t.Fatalf("tanpa login: %d %v", w.Code, w.Header())
@@ -135,6 +147,61 @@ func TestWebDAV(t *testing.T) {
 	if w := dav(http.MethodDelete, "/dav/keluarga/a.txt", "budi", secret, nil, "Origin", "https://jahat.example"); w.Code != http.StatusForbidden {
 		t.Fatalf("Origin lain: %d", w.Code)
 	}
+	// Tebakan dari jaringan lain tidak mengunci WebDAV budi di jaringannya
+	// sendiri.
+	for i := 0; i < 20; i++ {
+		r := httptest.NewRequest("PROPFIND", "/dav/", nil)
+		r.RemoteAddr = "192.168.1.99:40000"
+		r.TLS = &tls.ConnectionState{}
+		r.Header.Set("Depth", "0")
+		r.SetBasicAuth("budi", "tebakan-salah")
+		h.s.ServeHTTP(httptest.NewRecorder(), r)
+	}
+	if w := dav("PROPFIND", "/dav/", "budi", secret, nil, "Depth", "0"); w.Code != http.StatusMultiStatus {
+		t.Fatalf("budi terkunci oleh tebakan dari jaringan lain: %d", w.Code)
+	}
+	// PROPFIND tanpa batas kedalaman: ditolak.
+	if w := dav("PROPFIND", "/dav/keluarga/", "budi", secret, nil); w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "propfind-finite-depth") {
+		t.Fatalf("PROPFIND Depth infinity: %d %s", w.Code, w.Body)
+	}
+	// Pindah antar-folder: 502 sebelum tujuan sempat dihapus.
+	agent.forget(proto.OpFilesDelete)
+	if w := dav("MOVE", "/dav/keluarga/a.txt", "budi", secret, nil, "Destination", "http://example.com/dav/@home/a.txt"); w.Code != http.StatusBadGateway && w.Code != http.StatusForbidden {
+		t.Fatalf("pindah antar-folder: %d", w.Code)
+	}
+	// Ke dalam dirinya sendiri: ditolak.
+	if w := dav("COPY", "/dav/keluarga/foto", "budi", secret, nil, "Destination", "http://example.com/dav/keluarga/foto/salinan"); w.Code != http.StatusForbidden {
+		t.Fatalf("salin ke dalam dirinya sendiri: %d", w.Code)
+	}
+	// Pindah menimpa file di folder yang sama: tujuan tidak dihapus dulu,
+	// rename menimpa atomik di sapod.
+	agent.results[proto.OpFilesRename] = map[string]bool{"ok": true}
+	agent.forget(proto.OpFilesDelete)
+	if w := dav("MOVE", "/dav/keluarga/a.txt", "budi", secret, nil, "Destination", "http://example.com/dav/keluarga/c.txt", "Overwrite", "T"); w.Code >= 300 {
+		t.Fatalf("pindah menimpa: %d %s", w.Code, w.Body)
+	}
+	if p, _ := agent.param(proto.OpFilesRename).(proto.FilesRenameParams); !p.Overwrite || p.To != "c.txt" || agent.called(proto.OpFilesDelete) {
+		t.Fatalf("rename = %+v, hapus dipanggil = %v", p, agent.called(proto.OpFilesDelete))
+	}
+	// LOCK saat sapod sibuk (stat gagal): file kosong tidak pernah
+	// menggantikan file lama.
+	agent.setErrs(map[string]error{proto.OpFilesStat: &proto.Error{Code: proto.ErrBusy, Message: "sibuk"}})
+	agent.forget(proto.OpFilesCommit)
+	lockBody := `<?xml version="1.0"?><D:lockinfo xmlns:D="DAV:"><D:lockscope><D:exclusive/></D:lockscope><D:locktype><D:write/></D:locktype></D:lockinfo>`
+	dav("LOCK", "/dav/keluarga/a.txt", "budi", secret, strings.NewReader(lockBody), "Timeout", "Infinite")
+	agent.setErrs(nil)
+	if p, ok := agent.param(proto.OpFilesCommit).(proto.FilesCommitParams); ok && p.Overwrite {
+		t.Fatalf("LOCK tidak boleh menimpa file: %+v", p)
+	}
+	// Daftar isi yang terpotong tidak pernah diberikan sebagai daftar
+	// lengkap.
+	agent.mu.Lock()
+	agent.results[proto.OpFilesStat] = proto.FileEntry{Name: "keluarga", Type: "dir"}
+	agent.results[proto.OpFilesList] = proto.FilesListResult{Entries: []proto.FileEntry{{Name: "a.txt", Type: "file"}}, Truncated: true}
+	agent.mu.Unlock()
+	if w := dav("PROPFIND", "/dav/keluarga/", "budi", secret, nil, "Depth", "1"); w.Code == http.StatusMultiStatus {
+		t.Fatalf("daftar terpotong harus gagal: %d %s", w.Code, w.Body)
+	}
 	// Dicabut: tidak berlaku lagi.
 	if rec := h.do(http.MethodPost, "/api/v1/account/app-passwords/"+id+"/delete", nil); rec.Code != http.StatusOK {
 		t.Fatalf("cabut: %d %s", rec.Code, rec.Body)
@@ -157,4 +224,45 @@ func between(s, a, b string) string {
 	_, rest, _ := strings.Cut(s, a)
 	v, _, _ := strings.Cut(rest, b)
 	return v
+}
+
+// Kunci WebDAV: @home per pengguna, token hanya berlaku untuk pemiliknya,
+// lama kunci dibatasi.
+func TestDAVLocks(t *testing.T) {
+	tbl := newDAVLockTable()
+	now := time.Now()
+	ani, budi := tbl.forUser("ani"), tbl.forUser("budi")
+	d := webdav.LockDetails{Root: "/@home/a.docx", Duration: -1, ZeroDepth: true}
+	tokA, err := ani.Create(now, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Folder pribadi budi tidak bertabrakan dengan milik ani.
+	if _, err := budi.Create(now, d); err != nil {
+		t.Fatalf("@home budi terkunci oleh ani: %v", err)
+	}
+	// Di shared folder, kunci berlaku untuk semua, tetapi token ani tidak
+	// bisa dipakai atau dicabut budi.
+	tokS, err := ani.Create(now, webdav.LockDetails{Root: "/keluarga/b.docx", Duration: time.Minute, ZeroDepth: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := budi.Confirm(now, "/keluarga/b.docx", "", webdav.Condition{Token: tokS}); err == nil {
+		t.Fatal("token ani tidak boleh berlaku untuk budi")
+	}
+	if err := budi.Unlock(now, tokS); err == nil {
+		t.Fatal("budi tidak boleh mencabut kunci ani")
+	}
+	release, err := ani.Confirm(now, "/keluarga/b.docx", "", webdav.Condition{Token: tokS})
+	if err != nil {
+		t.Fatalf("pemilik kunci: %v", err)
+	}
+	release()
+	if !strings.HasPrefix(tokA, "opaquelocktoken:sapo-") || len(tokA) < 40 {
+		t.Fatalf("token = %q", tokA)
+	}
+	// Lama kunci "Infinite" dibatasi: setelah lewat, kunci hilang.
+	if _, err := budi.Create(now.Add(2*time.Hour), webdav.LockDetails{Root: "/keluarga/b.docx", Duration: time.Minute, ZeroDepth: true}); err != nil {
+		t.Fatalf("kunci kedaluwarsa masih menahan: %v", err)
+	}
 }

@@ -121,7 +121,16 @@ func fsDo(req fsRequest) (any, error) {
 		toDir, toName := splitParent(req.To)
 		return nil, withDir(root, fromDir, func(ofd int) error {
 			return withDir(root, toDir, func(nfd int) error {
-				return unix.Renameat2(ofd, fromName, nfd, toName, unix.RENAME_NOREPLACE)
+				flags := uint(unix.RENAME_NOREPLACE)
+				if req.Overwrite {
+					// Menimpa (atomik) hanya file biasa yang boleh ditulis
+					// pengguna, sama dengan commit.
+					if err := replaceableFile(nfd, toName); err != nil {
+						return err
+					}
+					flags = 0
+				}
+				return unix.Renameat2(ofd, fromName, nfd, toName, flags)
 			})
 		})
 	case "delete":
@@ -176,19 +185,8 @@ func fsDo(req fsRequest) (any, error) {
 			}
 			flags := uint(unix.RENAME_NOREPLACE)
 			if req.Overwrite {
-				// Hanya menimpa file biasa, bukan direktori atau symlink, dan
-				// hanya file yang boleh ditulis pengguna (bukan sekadar
-				// direktorinya yang boleh ditulis).
-				var st unix.Stat_t
-				if err := unix.Fstatat(pfd, name, &st, unix.AT_SYMLINK_NOFOLLOW); err == nil {
-					if st.Mode&unix.S_IFMT != unix.S_IFREG {
-						return &OpError{Code: errFileExists, Message: "nama sudah dipakai folder atau symlink"}
-					}
-					// Sudah pasti file biasa (bukan symlink); tanpa flag agar
-					// kernel memeriksa ACL sungguhan.
-					if err := unix.Faccessat(pfd, name, unix.W_OK, 0); err != nil {
-						return err
-					}
+				if err := replaceableFile(pfd, name); err != nil {
+					return err
 				}
 				flags = 0
 			}
@@ -196,6 +194,22 @@ func fsDo(req fsRequest) (any, error) {
 		})
 	}
 	return nil, &OpError{Code: proto.ErrInvalidParams, Message: "operasi tidak dikenal"}
+}
+
+// replaceableFile: name (bila ada) adalah file biasa, bukan direktori atau
+// symlink, dan boleh ditulis pengguna (bukan sekadar direktorinya yang boleh
+// ditulis).
+func replaceableFile(dirfd int, name string) error {
+	var st unix.Stat_t
+	if err := unix.Fstatat(dirfd, name, &st, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		return nil
+	}
+	if st.Mode&unix.S_IFMT != unix.S_IFREG {
+		return &OpError{Code: errFileExists, Message: "nama sudah dipakai folder atau symlink"}
+	}
+	// Sudah pasti file biasa (bukan symlink); tanpa flag agar kernel
+	// memeriksa ACL sungguhan.
+	return unix.Faccessat(dirfd, name, unix.W_OK, 0)
 }
 
 // withDir membuka direktori path (di bawah akar) lalu menjalankan fn.
