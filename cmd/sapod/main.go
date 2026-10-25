@@ -116,6 +116,15 @@ func main() {
 		IDMin:        ac.IDMin, IDMax: ac.IDMax,
 	})
 	shares.SetAccounts(accounts)
+	ec := cfg.Agent.External
+	external := agent.NewExternal(agent.ExternalTools{
+		Mount: ec.Mount, Umount: ec.Umount, Lsblk: sc.Lsblk, MountBase: ec.MountBase, StateFile: ec.StateFile,
+		GroupFile: ac.GroupFile, IDMin: ac.IDMin, IDMax: ac.IDMax, Timeout: time.Duration(sc.CommandTimeoutSeconds) * time.Second,
+	}, storage, shares)
+	go external.Run(context.Background())
+	reg.Register(proto.OpExternalList, external.ListOp())
+	reg.Register(proto.OpExternalMount, external.MountOp())
+	reg.Register(proto.OpExternalUnmount, external.UnmountOp())
 	self, err := os.Executable()
 	if err != nil {
 		log.Error("lokasi sapod", "err", err)

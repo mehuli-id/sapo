@@ -168,7 +168,9 @@
       "crypt": "Open encrypted volume",
       "removable": "Removable disks (USB sticks) are not used for pools",
       "holder": "Held by another device (device-mapper, multipath, or similar)",
-      "zfs_label": "Has a label from an inactive ZFS pool (deleted, or from another NAS)"
+      "zfs_label": "Has a label from an inactive ZFS pool (deleted, or from another NAS)",
+      "usb": "Connected over USB: not used for pools unless allowed.",
+      "identity": "Same serial number or WWN as another disk (cheap USB enclosure), so the disk can’t be identified for sure."
     }
   },
   "about": {
@@ -335,7 +337,10 @@
     "webdav_off": "WebDAV is turned off by an administrator.",
     "app_password_limit": "Too many app passwords. Revoke the ones you no longer use.",
     "snapshot_prune_confirm": "The new schedule will discard existing snapshots. Enter your password.",
-    "restore_too_large": "Too large to restore at once. Restore the folders inside one by one, or use Previous Versions in Windows."
+    "restore_too_large": "Too large to restore at once. Restore the folders inside one by one, or use Previous Versions in Windows.",
+    "disk_usb": "USB disks aren’t used for pools unless allowed in the disk selection step.",
+    "disk_identity": "The disk has the same serial number or WWN as another disk, so it can’t be identified for sure. Connect it directly (SATA) or use another enclosure.",
+    "external_unsupported": "This drive can’t be mounted: {message}"
   },
   "pool": {
     "title": "Storage pools",
@@ -847,5 +852,31 @@
       "manual": "manual"
     },
     "pruneConfirm": "This new schedule will discard old snapshots beyond the number kept. Enter your password to continue."
+  },
+  "external": {
+    "title": "External storage",
+    "help": "Plugged-in USB drives. exFAT, FAT32, or NTFS drives can be mounted as an external folder for one group (read-only or read-write), opened from File Station, WebDAV, and SMB. Sapo never formats or changes a drive’s contents by itself. Eject a drive here before unplugging it.",
+    "none": "No USB drives are plugged in.",
+    "mount": "Mount",
+    "eject": "Eject safely",
+    "forget": "Forget",
+    "name": "Folder name",
+    "group": "Who can open it",
+    "allUsers": "All users",
+    "readOnly": "Read-only",
+    "smb": "Also share over SMB",
+    "free": "{free} free",
+    "mounted": "Drive mounted as {name}.",
+    "unmounted": "{name} ejected; the drive can be unplugged.",
+    "state": {
+      "mounted": "Mounted",
+      "disconnected": "Not plugged in"
+    },
+    "reason": {
+      "unsupported_fs": "This format isn’t supported yet (only exFAT, FAT32, NTFS). Open Linux formats such as ext4 on a Linux computer.",
+      "member": "Member of a ZFS pool, RAID, LVM, encrypted, or swap: not mounted here.",
+      "no_uuid": "A file system without a UUID can’t be recognized when plugged in again.",
+      "mounted_elsewhere": "In use by the system."
+    }
   }
 }

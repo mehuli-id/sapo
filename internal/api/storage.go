@@ -41,6 +41,8 @@ type poolCreateRequest struct {
 	Disks       []proto.DiskRef `json:"disks"`
 	ConfirmName string          `json:"confirm_name"`
 	Password    string          `json:"password"`
+	// AllowUSB: admin sengaja memakai disk USB (ADR 0015).
+	AllowUSB bool `json:"allow_usb"`
 }
 
 // maxPoolDisks membatasi isi permintaan; batas sebenarnya per susunan ada di
@@ -74,10 +76,10 @@ func (s *Server) handlePoolCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	detail := map[string]string{
 		"pool": req.Name, "layout": req.Layout,
-		"disks": strings.Join(names, ","), "erase": strings.Join(erase, ","),
+		"disks": strings.Join(names, ","), "erase": strings.Join(erase, ","), "allow_usb": strconv.FormatBool(req.AllowUSB),
 	}
 	s.destructive(w, r, user, "storage.pool_create", detail, proto.OpStoragePoolCreate,
-		proto.PoolCreateParams{Name: req.Name, Layout: req.Layout, Disks: req.Disks}, nil)
+		proto.PoolCreateParams{Name: req.Name, Layout: req.Layout, Disks: req.Disks, AllowUSB: req.AllowUSB}, nil)
 }
 
 // destructive menjalankan operasi sapod yang menghapus data, setelah
@@ -131,6 +133,7 @@ func (s *Server) handlePoolReplace(w http.ResponseWriter, r *http.Request) {
 		OldGUID  string        `json:"old_guid"`
 		Disk     proto.DiskRef `json:"disk"`
 		Password string        `json:"password"`
+		AllowUSB bool          `json:"allow_usb"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
@@ -142,7 +145,7 @@ func (s *Server) handlePoolReplace(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	detail := map[string]string{"pool": auditText(name), "old_guid": auditText(req.OldGUID), "disk": auditText(req.Disk.Name), "erase": strconv.FormatBool(req.Disk.Erase)}
 	s.destructive(w, r, user, "storage.pool_replace", detail, proto.OpStoragePoolReplace,
-		proto.PoolReplaceParams{Name: name, OldGUID: req.OldGUID, Disk: req.Disk}, nil)
+		proto.PoolReplaceParams{Name: name, OldGUID: req.OldGUID, Disk: req.Disk, AllowUSB: req.AllowUSB}, nil)
 }
 
 func (s *Server) handlePoolDestroy(w http.ResponseWriter, r *http.Request) {

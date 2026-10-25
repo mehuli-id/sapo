@@ -48,6 +48,7 @@ App Center (ADR 0012): katalog kurasi `apps/*.yaml` (image dikunci digest), Podm
 Sapo Drive tahap 1 (ADR 0013): folder pribadi per pengguna, dataset `<pool>/sapo-home/<nama>` (0700, kuota ZFS) lewat `homes.apply` saat sinkronisasi, dibuka lewat SMB `[homes]` dan File Station ("Drive saya"); folder pengguna yang dihapus disimpan sampai admin menghapusnya. Tahap 2: WebDAV di `https://<nas>/dav/` (sapo-api, operasi tetap lewat `sapod fs-helper` sebagai pengguna), login dengan password aplikasi per perangkat (Keamanan Akun), sertifikat bisa diunduh untuk dipercaya perangkat lain.
 Snapshot terjadwal (ADR 0014): jadwal per shared folder dan untuk semua folder pribadi di properti ZFS `sapo:snap`, `sapod` mengambil/membuang snapshot setiap menit, snapshot manual, hapus dengan password, "Previous Versions" lewat Samba `shadow_copy2`.
 Pemulihan di File Station: "Versi sebelumnya" (snapshot sebagai akar baca saja `FilesTarget.Snapshot`) dan `files.restore` (salin sebagai pengguna, nama baru bila sudah ada).
+Penyimpanan eksternal (ADR 0015): drive USB exFAT/FAT/NTFS dipasang `sapod` sebagai folder eksternal (grup + ro/rw lewat opsi mount, `nosuid,nodev,noexec`), diingat per UUID, dibuka lewat File Station/WebDAV/SMB, dilepas dengan aman; disk USB tidak untuk pool kecuali diizinkan, identitas disk kembar ditolak.
 Berikutnya (urutan disepakati):
-1. Penyimpanan eksternal (USB): pasang, buka di File Station/SMB, lepas dengan aman.
-2. Installer ke disk (ISO sekarang hanya berjalan dari RAM).
+1. Installer ke disk (ISO sekarang hanya berjalan dari RAM).
+2. Backup shared folder ke drive lain (pool cadangan di USB).

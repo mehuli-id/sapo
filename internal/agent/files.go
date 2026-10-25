@@ -151,7 +151,14 @@ func CleanFilePath(p string) (string, error) {
 // path. Mengembalikan identitas proses pembantu dan akar folder.
 func (f *Files) prepare(ctx context.Context, t proto.FilesTarget) (fsCred, string, string, error) {
 	invalid := func(msg string) error { return &OpError{Code: proto.ErrInvalidParams, Message: msg} }
-	if !accountNamePattern.MatchString(t.User) || !poolNamePattern.MatchString(t.Pool) || (t.Home != (t.Share == "")) || (!t.Home && !shareNamePattern.MatchString(t.Share)) {
+	switch {
+	case !accountNamePattern.MatchString(t.User):
+		return fsCred{}, "", "", invalid("pengguna tidak valid")
+	case t.External:
+		if t.Home || t.Pool != "" || !shareNamePattern.MatchString(t.Share) {
+			return fsCred{}, "", "", invalid("folder eksternal tidak valid")
+		}
+	case !poolNamePattern.MatchString(t.Pool) || (t.Home != (t.Share == "")) || (!t.Home && !shareNamePattern.MatchString(t.Share)):
 		return fsCred{}, "", "", invalid("pengguna atau folder tidak valid")
 	}
 	path, err := CleanFilePath(t.Path)
@@ -161,6 +168,17 @@ func (f *Files) prepare(ctx context.Context, t proto.FilesTarget) (fsCred, strin
 	cred, err := f.cred(t.User)
 	if err != nil {
 		return fsCred{}, "", "", err
+	}
+	// Folder eksternal (USB): hanya yang sedang terpasang oleh sapod.
+	if t.External {
+		if t.Snapshot != "" || f.shares.external == nil {
+			return fsCred{}, "", "", invalid("folder eksternal tidak punya versi sebelumnya")
+		}
+		root, ok := f.shares.external.root(t.Share)
+		if !ok {
+			return fsCred{}, "", "", &OpError{Code: proto.ErrNotFound, Message: "folder eksternal tidak terpasang"}
+		}
+		return cred, root, path, nil
 	}
 	// Folder pribadi (Sapo Drive) selalu milik pengguna sesi itu sendiri.
 	ds, prop, want := t.Pool+"/"+t.Share, sharePropName, t.Share

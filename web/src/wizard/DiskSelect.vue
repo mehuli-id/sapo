@@ -12,15 +12,16 @@ import { ineligibleReason } from "@/lib/pool"
 import { cn } from "@/lib/utils"
 
 // max: jumlah disk paling banyak; 1 = pilih satu (memilih disk lain mengganti pilihan).
-const props = defineProps<{ modelValue: string; disks: Disk[]; allowRemovable: boolean; inputId: string; invalid?: boolean; max?: number }>()
+const props = defineProps<{ modelValue: string; disks: Disk[]; allowRemovable: boolean; allowUsb?: boolean; inputId: string; invalid?: boolean; max?: number }>()
 const emit = defineEmits<{ "update:modelValue": [string] }>()
 const { t, locale } = useI18n()
 
+const reason = (d: Disk) => ineligibleReason(d, props.allowRemovable, !!props.allowUsb, props.disks)
 const selected = computed(() => new Set(splitList(props.modelValue)))
 const size = (b: number) => formatBytes(b, locale.value, 1000)
 
 function toggle(d: Disk) {
-  if (ineligibleReason(d, props.allowRemovable)) return
+  if (reason(d)) return
   const next = new Set(props.max === 1 ? [] : selected.value)
   if (selected.value.has(d.name)) next.delete(d.name)
   else next.add(d.name)
@@ -41,7 +42,7 @@ const smallest = computed(() => Math.min(...picked.value.map((d) => d.size_bytes
           type="button"
           :role="max === 1 ? 'radio' : 'checkbox'"
           :aria-checked="selected.has(d.name)"
-          :disabled="!!ineligibleReason(d, allowRemovable)"
+          :disabled="!!reason(d)"
           :class="
             cn(
               'flex w-full items-start gap-3 rounded-lg border px-3 py-2.5 text-left text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent',
@@ -59,10 +60,10 @@ const smallest = computed(() => Math.min(...picked.value.map((d) => d.size_bytes
             <span class="block text-xs text-muted-foreground">
               {{ size(d.size_bytes) }} · <code class="font-mono">{{ d.name }}</code><template v-if="d.serial"> · {{ d.serial }}</template>
             </span>
-            <span v-if="ineligibleReason(d, allowRemovable)" class="block text-xs text-muted-foreground">{{ t(ineligibleReason(d, allowRemovable)) }}</span>
+            <span v-if="reason(d)" class="block text-xs text-muted-foreground">{{ t(reason(d)) }}</span>
           </span>
           <Badge v-if="d.usage === 'data'" variant="outline" class="border-amber-500/60 text-amber-700 dark:text-amber-400">{{ t("storage.usage.data") }}</Badge>
-          <Badge v-else-if="d.usage === 'free' && !ineligibleReason(d, allowRemovable)" variant="secondary">{{ t("storage.usage.free") }}</Badge>
+          <Badge v-else-if="d.usage === 'free' && !reason(d)" variant="secondary">{{ t("storage.usage.free") }}</Badge>
         </button>
       </li>
     </ul>

@@ -130,6 +130,8 @@ export interface PoolCreateRequest {
   disks: DiskRef[]
   confirm_name: string
   password: string
+  // Admin sengaja memakai disk USB (ADR 0015).
+  allow_usb?: boolean
 }
 
 export type SmartStatus = "passed" | "warning" | "failed" | "standby" | "unsupported" | "unavailable"
@@ -322,6 +324,8 @@ export interface FileShare {
   access: ShareAccess
   // Folder pribadi pengguna (Sapo Drive), bernama "@home".
   home?: boolean
+  // Folder eksternal (USB).
+  external?: boolean
 }
 
 // Password aplikasi untuk WebDAV (Sapo Drive); password-nya hanya
@@ -331,6 +335,28 @@ export interface AppPassword {
   name: string
   created_at: string
   last_used_at?: string
+}
+
+// Penyimpanan eksternal (USB, ADR 0015).
+export interface ExternalVolume {
+  uuid: string
+  device: string
+  disk: string
+  model: string
+  serial: string
+  fstype: string
+  label: string
+  size_bytes: number
+  supported: boolean
+  reason?: string
+  name?: string
+  read_only?: boolean
+  group?: string
+  smb?: boolean
+  state: "available" | "mounted" | "disconnected" | "error"
+  error?: string
+  used_bytes?: number
+  available_bytes?: number
 }
 
 export interface HomeStatus {
@@ -617,6 +643,10 @@ export const api = {
   setTime: (timezone: string, ntp: boolean) => post<{ ok: boolean }>("/api/v1/settings/time", { timezone, ntp }),
   fileShares: () => get<FileShare[]>("/api/v1/files/shares"),
   drive: () => get<DriveInfo>("/api/v1/drive"),
+  externalVolumes: () => get<ExternalVolume[]>("/api/v1/storage/external"),
+  mountExternal: (req: { uuid: string; name: string; read_only: boolean; group: string; smb: boolean; admin_password: string }) =>
+    post<{ ok: boolean }>("/api/v1/storage/external/mount", req),
+  unmountExternal: (name: string) => post<{ ok: boolean }>(`/api/v1/storage/external/${encodeURIComponent(name)}/unmount`),
   snapshotPresets: () => get<SnapshotPreset[]>("/api/v1/snapshots/presets"),
   snapshots: (t: SnapshotTarget) =>
     get<{ snapshots: SnapshotInfo[]; used_by_snapshots: number }>(`/api/v1/snapshots?${new URLSearchParams({ pool: t.pool, share: t.share ?? "", user: t.user ?? "" })}`),
@@ -646,7 +676,7 @@ export const api = {
   cancelNetwork: (token: string) => post<{ ok: boolean }>("/api/v1/network/cancel", { token }),
   scrubPool: (name: string, action: "start" | "stop") =>
     post<{ ok: boolean }>(`/api/v1/storage/pools/${encodeURIComponent(name)}/scrub`, { action }),
-  replacePoolDisk: (name: string, req: { old_guid: string; disk: DiskRef; password: string }) =>
+  replacePoolDisk: (name: string, req: { old_guid: string; disk: DiskRef; password: string; allow_usb?: boolean }) =>
     post<{ ok: boolean }>(`/api/v1/storage/pools/${encodeURIComponent(name)}/replace`, req),
   destroyPool: (name: string, req: { confirm_name: string; password: string }) =>
     post<{ ok: boolean }>(`/api/v1/storage/pools/${encodeURIComponent(name)}/destroy`, req),
@@ -747,11 +777,12 @@ export const wizardActions: Record<string, (values: Record<string, string>, ctx:
       disks: diskRefs(splitList(v.disks), ctx, v.erase_ok === "yes"),
       confirm_name: v.confirm_name ?? "",
       password: v.password ?? "",
+      allow_usb: v.allow_usb === "yes",
     }),
   "storage.pool_replace": (v, ctx) => {
     const [disk] = diskRefs(splitList(v.disk), ctx, v.erase_ok === "yes")
     if (!ctx.pool || !ctx.vdev?.guid || !disk) throw new ApiError(409, "disk_changed", "")
-    return api.replacePoolDisk(ctx.pool.name, { old_guid: ctx.vdev.guid, disk, password: v.password ?? "" })
+    return api.replacePoolDisk(ctx.pool.name, { old_guid: ctx.vdev.guid, disk, password: v.password ?? "", allow_usb: v.allow_usb === "yes" })
   },
   "users.create": (v) =>
     api.createUser({

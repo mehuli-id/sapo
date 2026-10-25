@@ -77,6 +77,7 @@ type Agent struct {
 	Stats          Stats     `yaml:"stats"`
 	Files          Files     `yaml:"files"`
 	Snapshots      Snapshots `yaml:"snapshots"`
+	External       External  `yaml:"external"`
 }
 
 // Accounts mengatur akun sistem untuk berbagi file. sapod hanya menyentuh
@@ -178,6 +179,27 @@ type Files struct {
 	// file yang ditimpa; {time} = waktu snapshot / waktu pemulihan.
 	RestoreLabel  string `yaml:"restore_label"`
 	ReplacedLabel string `yaml:"replaced_label"`
+}
+
+// External mengatur penyimpanan eksternal USB (ADR 0015).
+type External struct {
+	Mount  string `yaml:"mount"`
+	Umount string `yaml:"umount"`
+	// MountBase: folder eksternal terpasang di <mount_base>/<nama>.
+	MountBase string `yaml:"mount_base"`
+	StateFile string `yaml:"state_file"`
+}
+
+func (e External) validate(poolBase string) error {
+	for _, p := range []string{e.Mount, e.Umount, e.MountBase, e.StateFile} {
+		if !filepath.IsAbs(p) {
+			return errors.New("agent.external: mount, umount, mount_base, dan state_file harus path absolut")
+		}
+	}
+	if b := filepath.Clean(e.MountBase); b == filepath.Clean(poolBase) || strings.HasPrefix(b+"/", filepath.Clean(poolBase)+"/") {
+		return errors.New("agent.external.mount_base tidak boleh di dalam agent.storage.pools.mount_base")
+	}
+	return nil
 }
 
 // Snapshots mengatur jadwal snapshot di sapod (ADR 0014).
@@ -456,6 +478,7 @@ func Default() Config {
 			Files: Files{MaxEntries: 5000, TimeoutSeconds: 30, DeleteTimeoutSeconds: 270, RestoreMaxFiles: 20000, RestoreMaxGB: 20,
 				RestoreLabel: "dipulihkan {time}", ReplacedLabel: "sebelum dipulihkan {time}"},
 			Snapshots: Snapshots{MaxPoolCapacityPercent: 90, CallTimeoutSeconds: 30},
+			External:  External{Mount: "/usr/bin/mount", Umount: "/usr/bin/umount", MountBase: "/srv/sapo-external", StateFile: "/var/lib/sapod/external.json"},
 			Network: Network{
 				IP: "/usr/sbin/ip", Systemctl: "/usr/bin/systemctl", Hostnamectl: "/usr/bin/hostnamectl",
 				InterfacesFile: "/etc/network/interfaces", ResolvConf: "/etc/resolv.conf", HostsFile: "/etc/hosts", HostnameFile: "/etc/hostname",
@@ -678,6 +701,9 @@ func (c Config) Validate() error {
 		return errors.New("agent.time.timedatectl harus path absolut")
 	}
 	if err := c.Agent.Files.validate(); err != nil {
+		return err
+	}
+	if err := c.Agent.External.validate(c.Agent.Storage.Pools.MountBase); err != nil {
 		return err
 	}
 	if err := c.Agent.Snapshots.validate(); err != nil {

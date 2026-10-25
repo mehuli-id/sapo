@@ -168,7 +168,9 @@
       "crypt": "Volume terenkripsi yang sedang terbuka",
       "removable": "Disk lepas-pasang (flashdisk) tidak dipakai untuk pool",
       "holder": "Dipegang perangkat lain (device-mapper, multipath, atau sejenisnya)",
-      "zfs_label": "Berisi label pool ZFS yang tidak aktif (pool terhapus atau dari NAS lain)"
+      "zfs_label": "Berisi label pool ZFS yang tidak aktif (pool terhapus atau dari NAS lain)",
+      "usb": "Tersambung lewat USB: tidak dipakai untuk pool kecuali diizinkan.",
+      "identity": "Nomor seri atau WWN sama dengan disk lain (enclosure USB murah), jadi disk tidak bisa dipastikan."
     }
   },
   "about": {
@@ -335,7 +337,10 @@
     "webdav_off": "WebDAV dimatikan administrator.",
     "app_password_limit": "Password aplikasi sudah terlalu banyak. Cabut yang tidak dipakai lagi.",
     "snapshot_prune_confirm": "Jadwal baru akan membuang snapshot yang ada. Masukkan password.",
-    "restore_too_large": "Terlalu besar untuk dipulihkan sekaligus. Pulihkan folder di dalamnya satu per satu, atau pakai Previous Versions di Windows."
+    "restore_too_large": "Terlalu besar untuk dipulihkan sekaligus. Pulihkan folder di dalamnya satu per satu, atau pakai Previous Versions di Windows.",
+    "disk_usb": "Disk USB tidak dipakai untuk pool kecuali diizinkan di langkah pemilihan disk.",
+    "disk_identity": "Disk punya nomor seri atau WWN yang sama dengan disk lain, jadi tidak bisa dipastikan. Sambungkan disk itu langsung (SATA) atau pakai enclosure lain.",
+    "external_unsupported": "Drive ini tidak bisa dipasang: {message}"
   },
   "pool": {
     "title": "Pool penyimpanan",
@@ -847,5 +852,31 @@
       "manual": "manual"
     },
     "pruneConfirm": "Jadwal baru ini akan membuang snapshot lama yang melebihi jumlah simpan. Masukkan password untuk melanjutkan."
+  },
+  "external": {
+    "title": "Penyimpanan eksternal",
+    "help": "Drive USB yang tercolok. Drive exFAT, FAT32, atau NTFS bisa dipasang sebagai folder eksternal untuk satu grup (baca saja atau baca-tulis), dibuka dari File Station, WebDAV, dan SMB. Sapo tidak pernah memformat atau mengubah isi drive sendiri. Lepas drive di sini sebelum mencabutnya.",
+    "none": "Belum ada drive USB yang tercolok.",
+    "mount": "Pasang",
+    "eject": "Lepas dengan aman",
+    "forget": "Lupakan",
+    "name": "Nama folder",
+    "group": "Yang boleh membuka",
+    "allUsers": "Semua pengguna",
+    "readOnly": "Baca saja",
+    "smb": "Bagikan juga lewat SMB",
+    "free": "{free} kosong",
+    "mounted": "Drive dipasang sebagai {name}.",
+    "unmounted": "{name} dilepas; drive aman dicabut.",
+    "state": {
+      "mounted": "Terpasang",
+      "disconnected": "Tidak tercolok"
+    },
+    "reason": {
+      "unsupported_fs": "Format ini belum didukung (hanya exFAT, FAT32, NTFS). Format Linux seperti ext4 dibuka di komputer Linux.",
+      "member": "Anggota pool ZFS, RAID, LVM, terenkripsi, atau swap: tidak dipasang di sini.",
+      "no_uuid": "Sistem berkas tanpa UUID tidak bisa dikenali lagi saat dicolok ulang.",
+      "mounted_elsewhere": "Sedang dipakai sistem."
+    }
   }
 }

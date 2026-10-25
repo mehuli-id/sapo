@@ -74,6 +74,13 @@ type Shares struct {
 	// "stop", atau "" = belum diketahui). Dilindungi kunci pool.
 	nfsState string
 	smbState string
+	// external: penyimpanan eksternal (nil bila tidak dipakai).
+	external *External
+	// smbMu: smb.conf ditulis satu per satu. lastSMB: masukan smb.conf dari
+	// shares.apply terakhir (nil = belum ada sejak sapod menyala), agar
+	// smb.conf bisa ditulis ulang saat drive eksternal dicolok/dicabut.
+	smbMu   sync.Mutex
+	lastSMB *smbInputs
 }
 
 // aclJob adalah penerapan izin ke isi satu folder yang berjalan di latar
@@ -322,7 +329,12 @@ func (s *Shares) ApplyOp() Handler {
 		}
 		var nfsErr, smbErr, appErr error
 		out.NFS, nfsErr = s.writeExports(ctx, exports)
-		out.SMB, smbErr = s.writeSMBConf(ctx, active, homesPool)
+		s.smbMu.Lock()
+		out.SMB, smbErr = s.writeSMBConf(ctx, active, homesPool, s.externalSMB(active, req.SMBOff))
+		if smbErr == nil {
+			s.lastSMB = &smbInputs{active: active, homesPool: homesPool, off: req.SMBOff}
+		}
+		s.smbMu.Unlock()
 		// Folder aplikasi: keadaan lengkap, jadi folder yang dicabut (atau
 		// gagal disiapkan) dilepas dari container.
 		if s.apps != nil {
@@ -339,6 +351,46 @@ func (s *Shares) ApplyOp() Handler {
 			return nil, err
 		}
 		return out, nil
+	}
+}
+
+type smbInputs struct {
+	active    []shareConf
+	homesPool string
+	off       bool
+}
+
+// externalSMB: folder eksternal terpasang yang dibagikan lewat SMB, kecuali
+// yang namanya bentrok dengan shared folder.
+func (s *Shares) externalSMB(active []shareConf, off bool) []proto.ExternalVolume {
+	if s.external == nil || off {
+		return nil
+	}
+	names := map[string]bool{}
+	for _, sc := range active {
+		names[sc.spec.Name] = true
+	}
+	var out []proto.ExternalVolume
+	for _, v := range s.external.mounted() {
+		if v.SMB && !names[v.Name] {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// refreshSMB menulis ulang smb.conf dengan masukan shares.apply terakhir dan
+// folder eksternal sekarang. Bila belum ada shares.apply sejak sapod menyala,
+// tidak ada yang ditulis (sinkronisasi berikutnya akan menyertakannya).
+func (s *Shares) refreshSMB(ctx context.Context) {
+	s.smbMu.Lock()
+	defer s.smbMu.Unlock()
+	in := s.lastSMB
+	if in == nil {
+		return
+	}
+	if _, err := s.writeSMBConf(ctx, in.active, in.homesPool, s.externalSMB(in.active, in.off)); err != nil {
+		s.p.logWarn("smb.conf gagal ditulis ulang untuk penyimpanan eksternal", "err", err)
 	}
 }
 
@@ -625,7 +677,7 @@ type shareConf struct {
 // renderSMBConf menyusun smb.conf dari templat tetap. Semua nilai sudah
 // divalidasi (nama, path, keterangan), jadi tidak bisa menambah baris atau
 // bagian baru.
-func (s *Shares) renderSMBConf(shares []shareConf, homesPool string) []byte {
+func (s *Shares) renderSMBConf(shares []shareConf, homesPool string, ext []proto.ExternalVolume) []byte {
 	var b bytes.Buffer
 	b.WriteString("# Dibuat oleh sapod (Sapo). Jangan diubah manual: atur shared folder lewat panel.\n")
 	fmt.Fprintf(&b, "[global]\n")
@@ -695,17 +747,32 @@ func (s *Shares) renderSMBConf(shares []shareConf, homesPool string) []byte {
 			fmt.Fprintf(&b, "   write list = %s\n", strings.Join(write, " "))
 		}
 	}
+	// Penyimpanan eksternal (ADR 0015): izin dari grup yang dipilih admin;
+	// nama dan grup sudah divalidasi.
+	for _, v := range ext {
+		if s.external == nil || !shareNamePattern.MatchString(v.Name) || !accountNamePattern.MatchString(v.Group) {
+			continue
+		}
+		fmt.Fprintf(&b, "\n[%s]\n   comment = Penyimpanan eksternal\n   path = %s\n", v.Name, s.external.mountPath(v.Name))
+		b.WriteString("   browseable = yes\n   guest ok = no\n")
+		fmt.Fprintf(&b, "   valid users = +%s\n", v.Group)
+		if v.ReadOnly {
+			b.WriteString("   read only = yes\n")
+		} else {
+			b.WriteString("   read only = no\n")
+		}
+	}
 	return b.Bytes()
 }
 
 // writeSMBConf menulis smb.conf (diperiksa testparm dulu) lalu meminta Samba
 // memuat ulang. Hasil: "applied", atau "unavailable" bila Samba tidak
 // terpasang.
-func (s *Shares) writeSMBConf(ctx context.Context, shares []shareConf, homesPool string) (string, error) {
+func (s *Shares) writeSMBConf(ctx context.Context, shares []shareConf, homesPool string, ext []proto.ExternalVolume) (string, error) {
 	if _, err := os.Stat(s.t.Testparm); err != nil {
 		return "unavailable", nil
 	}
-	data := s.renderSMBConf(shares, homesPool)
+	data := s.renderSMBConf(shares, homesPool, ext)
 	dir := filepath.Dir(s.t.SMBConf)
 	if err := checkSocketDir(dir); err != nil {
 		return "", fmt.Errorf("direktori smb.conf tidak aman: %w", err)

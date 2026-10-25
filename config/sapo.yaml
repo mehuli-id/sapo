@@ -159,6 +159,15 @@ agent:
     restore_label: "dipulihkan {time}"
     replaced_label: "sebelum dipulihkan {time}"
 
+  # Penyimpanan eksternal (USB, ADR 0015): drive exFAT/FAT/NTFS dipasang
+  # di <mount_base>/<nama> (di luar mount_base pool), konfigurasinya diingat
+  # per UUID di state_file.
+  external:
+    mount: /usr/bin/mount
+    umount: /usr/bin/umount
+    mount_base: /srv/sapo-external
+    state_file: /var/lib/sapod/external.json
+
   # Snapshot terjadwal (ADR 0014): snapshot otomatis berhenti diambil di pool
   # yang terisi max_pool_capacity_percent atau lebih (snapshot lama tetap
   # dibuang sesuai jadwal), dan setiap perintah zfs dibatasi waktunya.

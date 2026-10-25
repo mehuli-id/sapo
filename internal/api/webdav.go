@@ -128,7 +128,7 @@ func (s *Server) handleDAV(w http.ResponseWriter, r *http.Request) {
 	}
 	body := &davBody{r: deadlineReader{r: in, k: k}}
 	r.Body = io.NopCloser(body)
-	shares, all := s.sharesFor(u)
+	shares, all := s.sharesFor(r.Context(), u)
 	req := &davRequest{body: body, put: r.Method == http.MethodPut, method: r.Method}
 	fsys := &davFS{s: s, user: u.Username, shares: shares, all: all, req: req, stat: map[string]*davInfo{}}
 	if t, ok := s.homeTargetFor(u); ok {
@@ -343,6 +343,9 @@ func (f *davFS) resolve(name string) (davPath, error) {
 			return davPath{}, fs.ErrNotExist
 		}
 		p.target = proto.FilesTarget{User: f.user, Pool: f.all[share].Pool, Share: share}
+		if sh.External {
+			p.target = proto.FilesTarget{User: f.user, Share: share, External: true}
+		}
 		p.write = sh.Access == "write"
 	}
 	p.target.Path = clean

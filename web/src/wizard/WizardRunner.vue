@@ -331,6 +331,7 @@ const reviewRows = computed(() =>
           v-model="values[f.key]!"
           :disks="context?.disks ?? []"
           :allow-removable="!!context?.pools?.allow_removable"
+          :allow-usb="values.allow_usb === 'yes'"
           :max="f.max"
           :input-id="`wz-${f.key}`"
           :invalid="!!errors[f.key]"

@@ -615,6 +615,11 @@ func (s *Server) handleShareCreate(w http.ResponseWriter, r *http.Request) {
 		writeErrorDetail(w, http.StatusBadRequest, "nfs_invalid", "ekspor NFS tidak valid", map[string]any{"field": "nfs"})
 		return
 	}
+	// Nama yang dipakai folder eksternal (USB) tidak bisa dipakai lagi.
+	if ext, err := s.externalNames(r); err == nil && ext[req.Name] {
+		writeErrorDetail(w, http.StatusConflict, "share_taken", "nama shared folder sudah dipakai", map[string]any{"field": "name"})
+		return
+	}
 	// Memberi akses ke data: butuh password admin.
 	admin, ok := s.reauthField(w, r, req.AdminPassword, "admin_password")
 	if !ok {

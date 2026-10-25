@@ -113,6 +113,11 @@ const (
 	OpAppsStop    = "apps.stop"
 	OpAppsRemove  = "apps.remove"
 
+	// Penyimpanan eksternal (USB, ADR 0015).
+	OpExternalList    = "external.list"
+	OpExternalMount   = "external.mount"
+	OpExternalUnmount = "external.unmount"
+
 	// Snapshot ZFS terjadwal (ADR 0014).
 	OpSnapshotsList   = "snapshots.list"
 	OpSnapshotsCreate = "snapshots.create"
@@ -240,6 +245,15 @@ const (
 	DiskFree    = "free"
 	DiskHasData = "data"
 	DiskInUse   = "in_use"
+)
+
+// Kode galat pemilihan disk tambahan (ADR 0015).
+const (
+	// ErrDiskUSB: disk USB tidak dipakai untuk pool kecuali diizinkan.
+	ErrDiskUSB = "disk_usb"
+	// ErrDiskIdentity: nomor seri atau WWN disk tidak unik (enclosure USB
+	// murah), jadi disk tidak bisa dipastikan untuk operasi destruktif.
+	ErrDiskIdentity = "disk_identity"
 )
 
 // Nilai Disk.UsageReason untuk DiskInUse.
@@ -403,6 +417,8 @@ type PoolCreateParams struct {
 	Name   string    `json:"name"`
 	Layout string    `json:"layout"`
 	Disks  []DiskRef `json:"disks"`
+	// AllowUSB: admin sengaja memakai disk USB (ADR 0015).
+	AllowUSB bool `json:"allow_usb,omitempty"`
 }
 
 // DiskRef menunjuk disk yang dipilih pengguna, beserta identitas yang dilihat
@@ -432,6 +448,8 @@ type PoolReplaceParams struct {
 	Name    string  `json:"name"`
 	OldGUID string  `json:"old_guid"` // Vdev.GUID disk yang diganti
 	Disk    DiskRef `json:"disk"`     // disk pengganti
+	// AllowUSB: admin sengaja memakai disk USB (ADR 0015).
+	AllowUSB bool `json:"allow_usb,omitempty"`
 }
 
 // PoolDestroyParams adalah parameter storage.pool_destroy.
@@ -728,6 +746,8 @@ type FilesTarget struct {
 	Path  string `json:"path"`
 	// Home: folder pribadi User di Pool (Share kosong).
 	Home bool `json:"home,omitempty"`
+	// External: folder eksternal (USB) bernama Share; Pool kosong.
+	External bool `json:"external,omitempty"`
 	// Snapshot: dibaca dari snapshot ini (baca saja; list, stat, open_read),
 	// atau sumber files.restore.
 	Snapshot string `json:"snapshot,omitempty"`
@@ -931,4 +951,53 @@ type HomeStatus struct {
 type HomeDeleteParams struct {
 	Pool string `json:"pool"`
 	User string `json:"user"`
+}
+
+// ExternalVolume adalah satu sistem berkas di drive USB (disk tanpa partisi
+// atau satu partisi).
+type ExternalVolume struct {
+	UUID      string `json:"uuid"`
+	Device    string `json:"device"` // nama kernel, misalnya sdb1
+	Disk      string `json:"disk"`   // disk induk, misalnya sdb
+	Model     string `json:"model"`
+	Serial    string `json:"serial"`
+	FSType    string `json:"fstype"`
+	Label     string `json:"label"`
+	SizeBytes uint64 `json:"size_bytes"`
+	// Supported: format yang bisa dipasang (exFAT, FAT, NTFS). Reason: alasan
+	// tidak bisa dipasang (format lain, anggota pool, sedang dipakai sistem).
+	Supported bool   `json:"supported"`
+	Reason    string `json:"reason,omitempty"`
+	// Diisi bila sudah diatur sebagai folder eksternal.
+	Name     string `json:"name,omitempty"`
+	ReadOnly bool   `json:"read_only,omitempty"`
+	Group    string `json:"group,omitempty"`
+	SMB      bool   `json:"smb,omitempty"`
+	// State: available, mounted, disconnected (diatur tetapi drive tidak
+	// tercolok), error.
+	State          string `json:"state"`
+	Error          string `json:"error,omitempty"`
+	UsedBytes      uint64 `json:"used_bytes,omitempty"`
+	AvailableBytes uint64 `json:"available_bytes,omitempty"`
+}
+
+// ExternalMountParams memasang volume UUID sebagai folder eksternal Name.
+// Group: grup Sapo yang boleh membuka (sapo-users = semua pengguna).
+type ExternalMountParams struct {
+	UUID     string `json:"uuid"`
+	Name     string `json:"name"`
+	ReadOnly bool   `json:"read_only"`
+	Group    string `json:"group"`
+	SMB      bool   `json:"smb"`
+}
+
+// ExternalListParams: Cached = hanya folder yang terpasang dari pemeriksaan
+// terakhir (murah, untuk File Station), tanpa membaca ulang drive.
+type ExternalListParams struct {
+	Cached bool `json:"cached,omitempty"`
+}
+
+// ExternalParams menunjuk folder eksternal.
+type ExternalParams struct {
+	Name string `json:"name"`
 }
