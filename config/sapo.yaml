@@ -206,6 +206,8 @@ agent:
       - /etc/hostid
       - /etc/localtime
       - /etc/timezone
+      # NTP menyala/mati (Control Panel).
+      - /etc/systemd/system/sysinit.target.wants/systemd-timesyncd.service
       - /var/lib/sapo
       - /var/lib/sapod
       - /var/lib/samba

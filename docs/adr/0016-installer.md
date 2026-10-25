@@ -23,6 +23,16 @@ ISO Sapo berjalan dari RAM: semua perubahan hilang saat NAS dimatikan. Pengguna 
   7. Semua titik pasang dilepas.
 
   Bila satu langkah gagal, pemasangan berhenti. Disk pool tidak pernah disentuh.
+- **Pengaman**:
+  - `install-run` memeriksa ulang identitas disk (nomor seri, WWN, ukuran, tidak dipakai) dari `lsblk` tepat sebelum menghapusnya, hanya berjalan dari ISO, dan file parameternya sekali pakai (dihapus begitu dibaca, juga bila unit gagal dimulai);
+  - disk media ISO ditolak menurut namanya (sumber mount `live_marker`);
+  - pemasangan ditolak bila titik pasang tujuan masih terpasang dari percobaan sebelumnya;
+  - selama pemasangan berjalan, tidak ada disk yang dihapus untuk pool (buat atau ganti disk);
+  - SIGTERM (batas waktu unit) menghentikan perintah yang berjalan, dan titik pasang tetap dilepas (lazy bila perlu);
+  - akun live (`remove_users`, password umum dan sudo) gagal-tertutup: pemasangan gagal bila akun itu masih ada di passwd, shadow, group, atau gshadow sistem baru;
+  - `copy_paths` disamakan dengan sesi live (yang tidak ada di sana juga dibuang di sistem baru, misalnya NTP mati);
+  - path tujuan tidak pernah melewati symlink keluar dari sistem baru;
+  - sapo-api dihentikan sebentar selama pengaturan disalin, agar datanya utuh.
 - **Root ext4 di satu disk**, bukan ZFS-on-root. Data tetap di pool ZFS terpisah. Disk sistem rusak = pasang ulang ke disk baru; pool diimpor lagi.
 - **Setelah selesai**, panel meminta media ISO dicabut lalu NAS dinyalakan ulang. Sistem terpasang memakai akun, sertifikat HTTPS, pengaturan, dan pool yang sama, dan diperbarui lewat APT seperti biasa (ADR 0011).
 
@@ -32,3 +42,5 @@ ISO Sapo berjalan dari RAM: semua perubahan hilang saat NAS dimatikan. Pengguna 
 - Disk sistem tanpa redundansi. Mirror atau ZFS-on-root untuk sistem bisa ditambahkan nanti.
 - Perubahan setelah pemasangan (sebelum restart) tetap hanya di RAM.
 - ISO dev juga memasang menu darurat di port serial ke sistem terpasang (ISO dev adalah image pengembangan).
+- GRUB tanpa password: siapa pun di konsol fisik bisa mengubah baris perintah kernel (setara akses fisik).
+- Paket yang diperbarui selama sesi live (di RAM) tidak ikut terpasang; sistem terpasang memakai paket dari ISO lalu diperbarui lewat APT.
