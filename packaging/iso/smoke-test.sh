@@ -63,7 +63,7 @@ qemu-system-x86_64 "${accel[@]}" -m "$VM_RAM_MB" -smp 2 \
   -display none \
   -chardev "socket,id=ser0,path=$WORK/serial.sock,server=on,wait=off,logfile=$LOG" -serial chardev:ser0 &
 qemu=$!
-trap 'sudo umount -f -l "$WORK/nfs" 2>/dev/null || true; kill "$qemu" 2>/dev/null || true; rm -rf "$WORK"' EXIT
+trap 'sudo umount -f -l "$WORK/nfs" 2>/dev/null || true; kill "$qemu" 2>/dev/null || true; docker rm -f sapo-uji-s3 >/dev/null 2>&1 || true; rm -rf "$WORK" 2>/dev/null || sudo rm -rf "$WORK" || true' EXIT
 
 fail() { echo "GAGAL: $*" >&2; exit 1; }
 
@@ -938,7 +938,8 @@ echo "Backup ke NAS lain: dipasangkan dengan kode (sidik jari lain ditolak), pen
 # dengan password enkripsi, dan memulihkan salinan pertama ke folder baru.
 if command -v docker >/dev/null; then
 mkdir -p "$WORK/s3"
-docker run -d --rm --name sapo-uji-s3 -p "127.0.0.1:$S3_PORT:8333" -v "$WORK/s3:/data" \
+# --user: file data milik pengguna CI (bisa dibersihkan bersama $WORK).
+docker run -d --rm --name sapo-uji-s3 --user "$(id -u):$(id -g)" -p "127.0.0.1:$S3_PORT:8333" -v "$WORK/s3:/data" \
   chrislusf/seaweedfs:latest server -dir=/data -s3 -s3.port=8333 >/dev/null \
   || fail "server S3 uji tidak bisa dijalankan"
 for _ in $(seq 1 60); do
