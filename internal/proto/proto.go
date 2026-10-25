@@ -503,6 +503,9 @@ type SharesApplyParams struct {
 	// HomesPool: folder pribadi (Sapo Drive) di pool ini juga dibagikan
 	// lewat SMB ([homes]); kosong = tidak.
 	HomesPool string `json:"homes_pool,omitempty"`
+	// ExternalOff: folder eksternal (USB) tidak dibagikan lewat SMB
+	// (gagal-tertutup saat akun tidak bisa disinkronkan).
+	ExternalOff bool `json:"external_off,omitempty"`
 }
 
 // ShareSpec adalah satu shared folder: dataset <Pool>/<Name>. Read dan Write

@@ -330,9 +330,10 @@ func (s *Shares) ApplyOp() Handler {
 		var nfsErr, smbErr, appErr error
 		out.NFS, nfsErr = s.writeExports(ctx, exports)
 		s.smbMu.Lock()
-		out.SMB, smbErr = s.writeSMBConf(ctx, active, homesPool, s.externalSMB(active, req.SMBOff))
+		extOff := req.SMBOff || req.ExternalOff
+		out.SMB, smbErr = s.writeSMBConf(ctx, active, homesPool, s.externalSMB(active, extOff))
 		if smbErr == nil {
-			s.lastSMB = &smbInputs{active: active, homesPool: homesPool, off: req.SMBOff}
+			s.lastSMB = &smbInputs{active: active, homesPool: homesPool, off: extOff}
 		}
 		s.smbMu.Unlock()
 		// Folder aplikasi: keadaan lengkap, jadi folder yang dicabut (atau
@@ -357,7 +358,8 @@ func (s *Shares) ApplyOp() Handler {
 type smbInputs struct {
 	active    []shareConf
 	homesPool string
-	off       bool
+	// off: SMB dimatikan, atau folder eksternal ditutup (gagal-tertutup).
+	off bool
 }
 
 // externalSMB: folder eksternal terpasang yang dibagikan lewat SMB, kecuali
@@ -754,7 +756,8 @@ func (s *Shares) renderSMBConf(shares []shareConf, homesPool string, ext []proto
 			continue
 		}
 		fmt.Fprintf(&b, "\n[%s]\n   comment = Penyimpanan eksternal\n   path = %s\n", v.Name, s.external.mountPath(v.Name))
-		b.WriteString("   browseable = yes\n   guest ok = no\n")
+		// Tanpa shadow_copy2 (drive tidak punya snapshot Sapo).
+		b.WriteString("   browseable = yes\n   guest ok = no\n   vfs objects =\n")
 		fmt.Fprintf(&b, "   valid users = +%s\n", v.Group)
 		if v.ReadOnly {
 			b.WriteString("   read only = yes\n")

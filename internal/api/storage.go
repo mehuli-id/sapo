@@ -143,7 +143,7 @@ func (s *Server) handlePoolReplace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	detail := map[string]string{"pool": auditText(name), "old_guid": auditText(req.OldGUID), "disk": auditText(req.Disk.Name), "erase": strconv.FormatBool(req.Disk.Erase)}
+	detail := map[string]string{"pool": auditText(name), "old_guid": auditText(req.OldGUID), "disk": auditText(req.Disk.Name), "erase": strconv.FormatBool(req.Disk.Erase), "allow_usb": strconv.FormatBool(req.AllowUSB)}
 	s.destructive(w, r, user, "storage.pool_replace", detail, proto.OpStoragePoolReplace,
 		proto.PoolReplaceParams{Name: name, OldGUID: req.OldGUID, Disk: req.Disk, AllowUSB: req.AllowUSB}, nil)
 }

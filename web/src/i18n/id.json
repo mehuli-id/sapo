@@ -876,7 +876,9 @@
       "unsupported_fs": "Format ini belum didukung (hanya exFAT, FAT32, NTFS). Format Linux seperti ext4 dibuka di komputer Linux.",
       "member": "Anggota pool ZFS, RAID, LVM, terenkripsi, atau swap: tidak dipasang di sini.",
       "no_uuid": "Sistem berkas tanpa UUID tidak bisa dikenali lagi saat dicolok ulang.",
-      "mounted_elsewhere": "Sedang dipakai sistem."
+      "mounted_elsewhere": "Sedang dipakai sistem.",
+      "duplicate_uuid": "Ada drive lain dengan UUID yang sama (hasil kloning): cabut salah satunya dulu.",
+      "system_partition": "Partisi sistem (EFI, Microsoft Reserved, atau Recovery): tidak dipasang di sini."
     }
   }
 }

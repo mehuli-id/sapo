@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"slices"
 	"strconv"
@@ -17,13 +18,24 @@ func (s *Server) handleExternalList(w http.ResponseWriter, r *http.Request) {
 		s.agentError(w, proto.OpExternalList, err)
 		return
 	}
+	for i := range out {
+		if out[i].Group == s.cfg.Agent.Accounts.PrimaryGroup {
+			out[i].Group = allUsers
+		}
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
 // externalNames: nama folder eksternal yang diatur (terpasang atau tidak).
 func (s *Server) externalNames(r *http.Request) (map[string]bool, error) {
 	var vols []proto.ExternalVolume
-	if err := s.agent.Call(r.Context(), proto.OpExternalList, nil, &vols); err != nil {
+	err := s.agent.Call(r.Context(), proto.OpExternalList, nil, &vols)
+	var pe *proto.Error
+	if errors.As(err, &pe) && pe.Code == proto.ErrUnknownOp {
+		// sapod lama tanpa penyimpanan eksternal.
+		return map[string]bool{}, nil
+	}
+	if err != nil {
 		return nil, err
 	}
 	out := map[string]bool{}
@@ -54,9 +66,12 @@ func (s *Server) handleExternalMount(w http.ResponseWriter, r *http.Request) {
 	case s.shareExists(req.Name):
 		writeErrorDetail(w, http.StatusConflict, "share_taken", "nama sudah dipakai shared folder", map[string]any{"field": "name"})
 		return
-	case req.Group != allUsersGroup && !s.groupExists(req.Group):
+	case req.Group != allUsers && !s.groupExists(req.Group):
 		writeErrorDetail(w, http.StatusBadRequest, "bad_request", "grup tidak ditemukan", map[string]any{"field": "group"})
 		return
+	}
+	if req.Group == allUsers {
+		req.Group = s.cfg.Agent.Accounts.PrimaryGroup
 	}
 	admin, ok := s.reauthField(w, r, req.AdminPassword, "admin_password")
 	if !ok {
