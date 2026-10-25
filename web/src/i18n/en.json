@@ -1001,7 +1001,7 @@
     "codeHelp": "Enter this code on the sending NAS: Backup → To another NAS → Add destination NAS. Anyone holding this code can send backups to this NAS.",
     "copy": "Copy code",
     "copied": "Copied",
-    "partnerInfo": "Stored on pool {pool}, {keep} copies per folder",
+    "partnerInfo": "Stored on pool {pool}, copies from the last {keep} days are never removed",
     "lastSeen": "last connected {when}",
     "noCopiesYet": "No copies received yet.",
     "restoreHelp": "The copy is restored as a new shared folder on pool {pool} on this NAS, without user permissions. Grant permissions in Shared Folders afterwards.",
@@ -1009,6 +1009,8 @@
     "deletePartner": "Remove sending NAS",
     "deletePartnerHelp": "The pairing code is revoked: that NAS can no longer send backups. Copies already received are kept unless you choose to delete them.",
     "deletePartnerData": "Also delete all its copies on pool {pool}",
-    "partnerDeleted": "Sending NAS removed."
+    "partnerDeleted": "Sending NAS removed.",
+    "quota": "limit {gb} GB",
+    "revoked": "Code revoked"
   }
 }

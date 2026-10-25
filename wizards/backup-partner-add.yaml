@@ -47,7 +47,24 @@ steps:
         default: "30"
         pattern: "^([1-9][0-9]?|[12][0-9]{2}|3[0-5][0-9]|36[0-6])$"
         autocomplete: "off"
-        label: { id: Jumlah salinan disimpan per folder (1–366), en: Copies kept per folder (1–366) }
+        label: { id: "Simpan salinan yang diterima selama (hari, 1–366)", en: "Keep received copies for (days, 1–366)" }
+        help:
+          id: >-
+            Salinan yang diterima kurang dari sekian hari lalu tidak pernah
+            dibuang, walau NAS pengirim mengirim berulang-ulang. Paling banyak
+            4 salinan per folder per hari.
+          en: >-
+            Copies received less than this many days ago are never removed,
+            even if the sending NAS sends repeatedly. At most 4 copies per
+            folder per day.
+      - key: quota_gb
+        type: text
+        pattern: "^[0-9]{0,7}$"
+        autocomplete: "off"
+        label: { id: "Batas ruang untuk NAS ini (GB, kosong = tanpa batas)", en: "Space limit for this NAS (GB, empty = no limit)" }
+        help:
+          id: Mencegah NAS pengirim memenuhi pool ini.
+          en: Keeps the sending NAS from filling this pool.
 
   - id: summary
     type: review
