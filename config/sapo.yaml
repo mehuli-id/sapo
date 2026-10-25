@@ -159,6 +159,12 @@ agent:
     restore_label: "dipulihkan {time}"
     replaced_label: "sebelum dipulihkan {time}"
 
+  # Backup shared folder ke pool lain (ADR 0017): tugas dan hasilnya di
+  # state_file; satu backup atau pemulihan paling lama max_run_hours.
+  backup:
+    state_file: /var/lib/sapod/backup.json
+    max_run_hours: 24
+
   # Installer ke disk (ADR 0016): hanya saat berjalan dari ISO (live_marker
   # ada). Sistem disalin dari squashfs ISO ke disk sistem (partisi BIOS boot,
   # EFI, root ext4), lalu pengaturan sesi live di copy_paths disalin, berkas

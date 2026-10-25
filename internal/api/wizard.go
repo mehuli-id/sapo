@@ -49,7 +49,8 @@ type WizardField struct {
 	Default     string            `yaml:"default" json:"default,omitempty"`
 	Match       string            `yaml:"match" json:"match,omitempty"`
 	// Source: isian lain yang dipakai jenis isian ini (pool-layout dan
-	// erase-confirm membaca disk dari isian disk-select).
+	// erase-confirm membaca disk dari isian disk-select; pool-select dengan
+	// source share-select tidak menawarkan pool folder itu).
 	Source string `yaml:"source" json:"source,omitempty"`
 	// Pattern: pola isian teks untuk petunjuk di panel; server tetap
 	// memeriksa sendiri.
@@ -83,6 +84,7 @@ var (
 		"language": true, "totp-enroll": true, "recovery-codes": true,
 		"disk-select": true, "pool-layout": true, "erase-confirm": true, "confirm": true, "acknowledge": true,
 		"choice": true, "group-select": true, "toggle": true, "pool-select": true, "permissions": true,
+		"share-select": true,
 	}
 	// Jenis isian yang wajib merujuk isian disk-select lewat source.
 	needsDiskSource = map[string]bool{"pool-layout": true, "erase-confirm": true}
@@ -138,6 +140,9 @@ func LoadWizard(dir, id string) (*Wizard, error) {
 			}
 			if (f.Type == "confirm" && f.Match == "" && f.MatchContext == "") || (f.Type == "password-confirm" && f.Match == "") {
 				return nil, fmt.Errorf("wizard %s: isian %q butuh match", id, f.Key)
+			}
+			if f.Type == "pool-select" && f.Source != "" && types[f.Source] != "share-select" {
+				return nil, fmt.Errorf("wizard %s: source isian %q harus isian share-select", id, f.Key)
 			}
 			if needsDiskSource[f.Type] && types[f.Source] != "disk-select" {
 				return nil, fmt.Errorf("wizard %s: isian %q butuh source berupa isian disk-select", id, f.Key)

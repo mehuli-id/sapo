@@ -268,6 +268,11 @@ func New(o Options) (*Server, error) {
 	s.mux.Handle("GET /api/v1/storage/external", s.requireAdmin(http.HandlerFunc(s.handleExternalList)))
 	s.mux.Handle("POST /api/v1/storage/external/mount", s.requireAdmin(http.HandlerFunc(s.handleExternalMount)))
 	s.mux.Handle("POST /api/v1/storage/external/{name}/unmount", s.requireAdmin(http.HandlerFunc(s.handleExternalUnmount)))
+	s.mux.Handle("GET /api/v1/backups", s.requireAdmin(http.HandlerFunc(s.handleBackups)))
+	s.mux.Handle("POST /api/v1/backups", s.requireAdmin(http.HandlerFunc(s.handleBackupSet)))
+	s.mux.Handle("POST /api/v1/backups/{id}/run", s.requireAdmin(http.HandlerFunc(s.handleBackupRun)))
+	s.mux.Handle("POST /api/v1/backups/{id}/delete", s.requireAdmin(http.HandlerFunc(s.handleBackupDelete)))
+	s.mux.Handle("POST /api/v1/backups/{id}/restore", s.requireAdmin(http.HandlerFunc(s.handleBackupRestore)))
 	s.mux.Handle("GET /api/v1/snapshots/presets", s.requireAdmin(http.HandlerFunc(s.handleSnapshotPresets)))
 	s.mux.Handle("GET /api/v1/snapshots", s.requireAdmin(http.HandlerFunc(s.handleSnapshotsList)))
 	s.mux.Handle("POST /api/v1/snapshots", s.requireAdmin(http.HandlerFunc(s.handleSnapshotCreate)))
@@ -604,7 +609,7 @@ func (s *Server) agentError(w http.ResponseWriter, op string, err error) {
 			status = http.StatusServiceUnavailable
 		case proto.ErrDiskChanged, proto.ErrDiskInUse, proto.ErrDiskHasData, proto.ErrDiskRemovable, proto.ErrDiskUSB, proto.ErrDiskIdentity, proto.ErrPoolExists, proto.ErrPoolBusy:
 			status = http.StatusConflict
-		case proto.ErrConflict:
+		case proto.ErrConflict, "backup_diverged":
 			status = http.StatusConflict
 		case "pool_create_failed", "pool_scrub_failed", "pool_replace_failed", "pool_destroy_failed", "share_delete_failed", "updates_failed":
 			status = http.StatusUnprocessableEntity

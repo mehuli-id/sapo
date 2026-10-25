@@ -82,6 +82,15 @@ function sourceDisks(f: WizardField): Disk[] {
   return (props.context?.disks ?? []).filter((d) => names.has(d.name))
 }
 
+// Pool yang bisa dipilih; dengan source share-select, pool folder itu tidak
+// ditawarkan (misalnya tujuan backup harus pool lain).
+function poolChoices(f: WizardField) {
+  const all = props.context?.pools?.pools ?? []
+  if (!f.source) return all
+  const src = props.context?.shares?.find((x) => x.name === values[f.source!])
+  return all.filter((p) => p.name !== src?.pool)
+}
+
 function validateField(f: WizardField): string {
   const v = values[f.key] ?? ""
   // Kotak centang kode cadangan punya pesan sendiri (bukan "wajib diisi").
@@ -89,7 +98,8 @@ function validateField(f: WizardField): string {
   if (f.type === "erase-confirm") return v === "yes" ? "" : t("pool.mustConfirmErase")
   if (f.type === "acknowledge") return v === "yes" ? "" : t("wizard.mustAcknowledge")
   if (f.type === "choice") return f.options?.some((o) => o.value === v) ? "" : t("wizard.required")
-  if (f.type === "pool-select") return props.context?.pools?.pools.some((p) => p.name === v) ? "" : t("shares.pickPool")
+  if (f.type === "pool-select") return poolChoices(f).some((p) => p.name === v) ? "" : t("shares.pickPool")
+  if (f.type === "share-select") return props.context?.shares?.some((x) => x.name === v) ? "" : t("wizard.required")
   if (f.type === "confirm" && f.match_context === "pool") return v === props.context?.pool?.name ? "" : t("wizard.mismatch")
   if (f.type === "disk-select" && f.required && !v) return t("pool.pickDisks")
   if (f.type === "pool-layout") {
@@ -400,7 +410,7 @@ const reviewRows = computed(() =>
         <!-- Pool -->
         <div v-else-if="f.type === 'pool-select'" :id="`wz-${f.key}`" role="radiogroup" class="space-y-2">
           <button
-            v-for="p in context?.pools?.pools ?? []"
+            v-for="p in poolChoices(f)"
             :key="p.name"
             type="button"
             role="radio"
@@ -414,7 +424,27 @@ const reviewRows = computed(() =>
             </span>
             <Check v-if="values[f.key] === p.name" class="size-4 shrink-0 text-primary" />
           </button>
-          <p v-if="!(context?.pools?.pools ?? []).length" class="text-sm text-muted-foreground">{{ t("shares.noPool") }}</p>
+          <p v-if="!poolChoices(f).length" class="text-sm text-muted-foreground">{{ t("shares.noPool") }}</p>
+        </div>
+
+        <!-- Shared folder -->
+        <div v-else-if="f.type === 'share-select'" :id="`wz-${f.key}`" role="radiogroup" class="space-y-2">
+          <button
+            v-for="x in context?.shares ?? []"
+            :key="x.name"
+            type="button"
+            role="radio"
+            :aria-checked="values[f.key] === x.name"
+            :class="cn('flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-left text-sm hover:bg-accent', values[f.key] === x.name && 'border-primary ring-1 ring-primary')"
+            @click="values[f.key] = x.name"
+          >
+            <span>
+              <span class="block font-medium">{{ x.name }}</span>
+              <span class="block text-xs text-muted-foreground">{{ x.pool }}<template v-if="x.description"> · {{ x.description }}</template></span>
+            </span>
+            <Check v-if="values[f.key] === x.name" class="size-4 shrink-0 text-primary" />
+          </button>
+          <p v-if="!(context?.shares ?? []).length" class="text-sm text-muted-foreground">{{ t("backup.noShares") }}</p>
         </div>
 
         <!-- Izin folder -->

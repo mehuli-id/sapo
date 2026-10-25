@@ -113,6 +113,13 @@ const (
 	OpAppsStop    = "apps.stop"
 	OpAppsRemove  = "apps.remove"
 
+	// Backup shared folder ke pool lain (ADR 0017).
+	OpBackupsList    = "backups.list"
+	OpBackupsSet     = "backups.set"
+	OpBackupsDelete  = "backups.delete"
+	OpBackupsRun     = "backups.run"
+	OpBackupsRestore = "backups.restore"
+
 	// Installer ke disk (ADR 0016).
 	OpInstallStatus = "install.status"
 	OpInstallStart  = "install.start"
@@ -1034,4 +1041,74 @@ type InstallRun struct {
 	Step        string    `json:"step"`
 	Error       string    `json:"error,omitempty"`
 	Interrupted bool      `json:"interrupted,omitempty"`
+}
+
+// BackupJob adalah satu tugas backup: shared folder Share di SrcPool disalin
+// ke DestPool setiap hari pukul Hour (waktu lokal NAS); Keep salinan
+// disimpan di tujuan.
+type BackupJob struct {
+	ID       string `json:"id"`
+	SrcPool  string `json:"src_pool"`
+	Share    string `json:"share"`
+	DestPool string `json:"dest_pool"`
+	Hour     int    `json:"hour"`
+	Keep     int    `json:"keep"`
+	Enabled  bool   `json:"enabled"`
+}
+
+// BackupStatus: tugas, hasil terakhir, dan salinan di tujuan.
+type BackupStatus struct {
+	BackupJob
+	Running    bool         `json:"running"`
+	LastRun    time.Time    `json:"last_run,omitempty"`
+	LastOK     bool         `json:"last_ok"`
+	LastError  string       `json:"last_error,omitempty"`
+	LastBytes  uint64       `json:"last_bytes,omitempty"`
+	Copies     []BackupCopy `json:"copies"`
+	UsedBytes  uint64       `json:"used_bytes"`
+	DestExists bool         `json:"dest_exists"`
+}
+
+// BackupCopy adalah satu salinan (snapshot) di tujuan.
+type BackupCopy struct {
+	Name    string    `json:"name"`
+	Created time.Time `json:"created"`
+}
+
+// BackupsListResult: tugas backup dan pemulihan yang sedang/terakhir
+// berjalan.
+type BackupsListResult struct {
+	Jobs     []BackupStatus  `json:"jobs"`
+	Restores []BackupRestore `json:"restores"`
+}
+
+// BackupRestore: pemulihan salinan Copy dari tugas JobID menjadi shared
+// folder baru Name di Pool.
+type BackupRestore struct {
+	JobID    string    `json:"job_id"`
+	Copy     string    `json:"copy"`
+	Pool     string    `json:"pool"`
+	Name     string    `json:"name"`
+	Started  time.Time `json:"started"`
+	Finished time.Time `json:"finished,omitempty"`
+	Running  bool      `json:"running"`
+	OK       bool      `json:"ok"`
+	Error    string    `json:"error,omitempty"`
+	// Present: dataset Pool/Name masih ada sebagai shared folder Name
+	// (sapo-api hanya mendaftarkan folder pulihan yang Present).
+	Present bool `json:"present"`
+}
+
+// BackupDeleteParams: DeleteData juga menghapus salinan di tujuan.
+type BackupDeleteParams struct {
+	ID         string `json:"id"`
+	DeleteData bool   `json:"delete_data"`
+}
+
+// BackupRestoreParams memulihkan salinan Copy tugas ID menjadi shared folder
+// baru Name (di pool sumber).
+type BackupRestoreParams struct {
+	ID   string `json:"id"`
+	Copy string `json:"copy"`
+	Name string `json:"name"`
 }

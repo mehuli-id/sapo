@@ -195,6 +195,14 @@ func main() {
 	reg.Register(proto.OpSharesApply, shares.ApplyOp())
 	reg.Register(proto.OpSharesDelete, shares.DeleteOp())
 	reg.Register(proto.OpSharesUsage, shares.UsageOp())
+	bc := cfg.Agent.Backup
+	backups := agent.NewBackups(agent.BackupTools{StateFile: bc.StateFile, MaxRun: time.Duration(bc.MaxRunHours) * time.Hour}, shares)
+	go backups.Run(context.Background())
+	reg.Register(proto.OpBackupsList, backups.ListOp())
+	reg.Register(proto.OpBackupsSet, backups.SetOp())
+	reg.Register(proto.OpBackupsDelete, backups.DeleteOp())
+	reg.Register(proto.OpBackupsRun, backups.RunOp())
+	reg.Register(proto.OpBackupsRestore, backups.RestoreOp())
 	snc := cfg.Agent.Snapshots
 	snapshots := agent.NewSnapshots(shares, agent.SnapshotTools{
 		Zpool: pc.Zpool, MaxPoolCapacity: snc.MaxPoolCapacityPercent, CallTimeout: time.Duration(snc.CallTimeoutSeconds) * time.Second,

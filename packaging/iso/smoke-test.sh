@@ -777,6 +777,68 @@ res="$(api POST /api/v1/shares "{\"name\":\"tetap\",\"pool\":\"tetap\",\"permiss
 echo "tersimpan di disk" > "$WORK/tetap.txt"
 out="$(smbclient //127.0.0.1/tetap -p "$SMB_PORT" -m SMB3 -U "budi%$UPASS" -c "put $WORK/tetap.txt catatan.txt" 2>&1 || true)"
 [[ "$out" != *NT_STATUS* ]] || fail "tulis ke folder tetap: $out"
+
+# --- Backup ke pool lain (ADR 0017) -------------------------------------------------
+# Folder tetap di-backup ke pool cadangan (SAPOUJI2): penuh, lalu hanya
+# perubahannya. Folder dan pool yang dipakai tugas tidak bisa dihapus.
+# Salinan pertama dipulihkan sebagai folder baru dan dibaca budi lewat SMB.
+disks_json="$(api GET /api/v1/storage/disks)"
+res="$(api POST /api/v1/storage/pools "{\"name\":\"cadangan\",\"layout\":\"single\",\"disks\":$(refs "('SAPOUJI2',True)"),\"confirm_name\":\"cadangan\",\"password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "pool cadangan: $res"
+res="$(api POST /api/v1/backups '{"share":"tetap","dest_pool":"tetap","hour":3,"keep":5,"enabled":true,"admin_password":"'"$PASS"'"}')"
+[[ "$res" == *'"backup_same_pool"'* ]] || fail "backup ke pool yang sama harus ditolak: $res"
+# Jadwal mati agar penjadwal tidak berebut dengan "backup sekarang".
+res="$(api POST /api/v1/backups '{"share":"tetap","dest_pool":"cadangan","hour":3,"keep":5,"enabled":false,"admin_password":"'"$PASS"'"}')"
+[[ "$res" == *' 200' ]] || fail "buat tugas backup: $res"
+bk_id="tetap-cadangan"
+backup_now() { # backup_now JUMLAH_SALINAN
+  local res
+  res="$(api POST "/api/v1/backups/$bk_id/run" '{}')"
+  [[ "$res" == *' 200' ]] || fail "backup sekarang: $res"
+  for _ in $(seq 1 60); do
+    bk="$(api GET /api/v1/backups)"
+    json "import sys; j=v['jobs'][0]; sys.exit(0 if not j['running'] and len(j['copies'])==$1 else 1)" <<<"$bk" && return 0
+    sleep 2
+  done
+  fail "backup tidak selesai: $bk"
+}
+backup_now 1
+json 'j=v["jobs"][0]; assert j["last_ok"] and j["dest_exists"] and j["last_bytes"]>0, j' <<<"$bk" || fail "backup pertama: $bk"
+full_bytes="$(json 'print(v["jobs"][0]["last_bytes"])' <<<"$bk")"
+echo "sesudah backup pertama" > "$WORK/baru.txt"
+out="$(smbclient //127.0.0.1/tetap -p "$SMB_PORT" -m SMB3 -U "budi%$UPASS" -c "put $WORK/baru.txt baru.txt" 2>&1 || true)"
+[[ "$out" != *NT_STATUS* ]] || fail "tulis baru.txt: $out"
+backup_now 2
+json "j=v['jobs'][0]; assert j['last_ok'] and j['last_bytes'] > 0, j" <<<"$bk" || fail "backup kedua (perubahan saja): $bk"
+res="$(api POST /api/v1/storage/pools/cadangan/destroy "{\"confirm_name\":\"cadangan\",\"password\":\"$PASS\"}")"
+[[ "$res" == *' 409' ]] || fail "pool tujuan backup tidak boleh dihapus: $res"
+res="$(api POST /api/v1/shares/tetap/delete "{\"confirm_name\":\"tetap\",\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 409' ]] || fail "folder yang di-backup tidak boleh dihapus: $res"
+first="$(json 'print(v["jobs"][0]["copies"][0]["name"])' <<<"$bk")"
+res="$(api POST "/api/v1/backups/$bk_id/restore" "{\"copy\":\"$first\",\"name\":\"tetap\",\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *'"share_taken"'* ]] || fail "pemulihan tidak boleh menimpa folder yang ada: $res"
+res="$(api POST "/api/v1/backups/$bk_id/restore" "{\"copy\":\"$first\",\"name\":\"pulih\",\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "pulihkan: $res"
+for _ in $(seq 1 60); do
+  bk="$(api GET /api/v1/backups)"
+  json 'import sys; r=v["restores"][-1]; sys.exit(0 if not r["running"] else 1)' <<<"$bk" && break
+  sleep 2
+done
+json 'r=v["restores"][-1]; assert r["ok"] and r["present"], r' <<<"$bk" || fail "pemulihan: $bk"
+res="$(api GET /api/v1/shares)"
+json 'p=[s for s in v if s["name"]=="pulih"][0]; assert p["pool"]=="tetap" and p["permissions"]=={"user:budi":"write"}, p' <<<"$res" || fail "folder pulihan: $res"
+for _ in $(seq 1 10); do
+  out="$(smbclient //127.0.0.1/pulih -p "$SMB_PORT" -m SMB3 -U "budi%$UPASS" -c "get catatan.txt $WORK/pulih.txt; ls" 2>&1 || true)"
+  [[ "$out" == *catatan.txt* ]] && break
+  sleep 2
+done
+cmp -s "$WORK/pulih.txt" "$WORK/tetap.txt" || fail "isi folder pulihan lewat SMB: $out"
+[[ "$out" != *baru.txt* ]] || fail "salinan pertama tidak boleh berisi file sesudahnya: $out"
+res="$(api POST "/api/v1/backups/$bk_id/delete" "{\"delete_data\":true,\"confirm_name\":\"$bk_id\",\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "hapus tugas backup: $res"
+res="$(api POST /api/v1/storage/pools/cadangan/destroy "{\"confirm_name\":\"cadangan\",\"password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "hapus pool cadangan setelah tugas dihapus: $res"
+echo "Backup: folder tetap ke pool cadangan (penuh $full_bytes byte, lalu inkremental), pool dan folder yang dipakai tidak bisa dihapus, salinan pertama dipulihkan sebagai folder pulih dan terbaca lewat SMB"
 res="$(api GET /api/v1/system/install)"
 json 'assert v["live"] and not v["running"], v' <<<"$res" || fail "installer harus tersedia di ISO: $res"
 sysref="$(json "

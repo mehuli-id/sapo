@@ -80,6 +80,7 @@ type Agent struct {
 	Snapshots      Snapshots `yaml:"snapshots"`
 	External       External  `yaml:"external"`
 	Install        Install   `yaml:"install"`
+	Backup         Backup    `yaml:"backup"`
 }
 
 // Accounts mengatur akun sistem untuk berbagi file. sapod hanya menyentuh
@@ -181,6 +182,19 @@ type Files struct {
 	// file yang ditimpa; {time} = waktu snapshot / waktu pemulihan.
 	RestoreLabel  string `yaml:"restore_label"`
 	ReplacedLabel string `yaml:"replaced_label"`
+}
+
+// Backup mengatur backup shared folder ke pool lain (ADR 0017).
+type Backup struct {
+	StateFile   string `yaml:"state_file"`
+	MaxRunHours int    `yaml:"max_run_hours"`
+}
+
+func (b Backup) validate() error {
+	if !filepath.IsAbs(b.StateFile) || b.MaxRunHours < 1 || b.MaxRunHours > 168 {
+		return errors.New("agent.backup: state_file path absolut, max_run_hours 1–168")
+	}
+	return nil
 }
 
 // Install mengatur installer ke disk (ADR 0016).
@@ -538,6 +552,7 @@ func Default() Config {
 				RestoreLabel: "dipulihkan {time}", ReplacedLabel: "sebelum dipulihkan {time}"},
 			Snapshots: Snapshots{MaxPoolCapacityPercent: 90, CallTimeoutSeconds: 30},
 			External:  External{Mount: "/usr/bin/mount", Umount: "/usr/bin/umount", MountBase: "/srv/sapo-external", StateFile: "/var/lib/sapod/external.json"},
+			Backup:    Backup{StateFile: "/var/lib/sapod/backup.json", MaxRunHours: 24},
 			Install: Install{LiveMarker: "/run/live/medium", SquashfsRoot: "/run/live/rootfs/filesystem.squashfs", MinDiskGB: 16,
 				Unit: "sapo-install.service", ParamsFile: "/var/lib/sapod/install-params.json", LogFile: "/var/lib/sapod/install.log",
 				ResultFile: "/var/lib/sapod/install-result.json", TimeoutSeconds: 3600, Target: "/mnt/sapo-install",
@@ -767,6 +782,9 @@ func (c Config) Validate() error {
 		return errors.New("agent.time.timedatectl harus path absolut")
 	}
 	if err := c.Agent.Files.validate(); err != nil {
+		return err
+	}
+	if err := c.Agent.Backup.validate(); err != nil {
 		return err
 	}
 	if err := c.Agent.Install.validate(); err != nil {

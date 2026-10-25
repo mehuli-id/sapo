@@ -1,0 +1,99 @@
+# Wizard tugas backup (ADR 0017): satu shared folder disalin setiap hari ke
+# pool lain (misalnya pool di drive USB). sapod memeriksa ulang folder dan
+# pool; data di folder asal tidak pernah diubah oleh backup.
+id: backup-create
+action: backups.create
+admin_only: true
+title:
+  id: Buat tugas backup
+  en: Create backup task
+finish_label:
+  id: Buat tugas
+  en: Create task
+
+steps:
+  - id: source
+    title: { id: Folder yang di-backup, en: Folder to back up }
+    description:
+      id: >-
+        Backup menyalin isi shared folder ke pool lain setiap hari. Bila
+        disk di pool asal rusak semua, data masih ada di pool backup.
+      en: >-
+        A backup copies a shared folder to another pool every day. If all
+        disks in the original pool fail, the data is still on the backup
+        pool.
+    help:
+      id: >-
+        Snapshot melindungi dari file yang terhapus atau berubah; backup
+        melindungi dari kerusakan pool. Sebaiknya pakai keduanya.
+      en: >-
+        Snapshots protect against deleted or changed files; backups protect
+        against losing the pool. It's best to use both.
+    fields:
+      - key: share
+        type: share-select
+        required: true
+        label: { id: Shared folder, en: Shared folder }
+
+  - id: destination
+    title: { id: Tujuan backup, en: Backup destination }
+    description:
+      id: >-
+        Pilih pool lain, sebaiknya di disk terpisah. Untuk drive USB,
+        buat dulu pool di Storage Manager dengan pilihan "izinkan disk USB".
+      en: >-
+        Pick another pool, preferably on separate disks. For a USB drive,
+        first create a pool in Storage Manager with "allow USB disks" on.
+    help:
+      id: >-
+        Salinan di pool tujuan tidak dibagikan lewat jaringan dan tidak bisa
+        diubah. Pool tujuan tidak bisa dihapus selama tugas backup ini ada.
+      en: >-
+        Copies on the destination pool are not shared on the network and
+        can't be changed. The destination pool can't be deleted while this
+        backup task exists.
+    fields:
+      - key: dest_pool
+        type: pool-select
+        source: share
+        required: true
+        label: { id: Pool tujuan, en: Destination pool }
+
+  - id: schedule
+    title: { id: Jadwal, en: Schedule }
+    description:
+      id: >-
+        Backup pertama menyalin semua isi folder; berikutnya hanya bagian
+        yang berubah sejak backup sebelumnya.
+      en: >-
+        The first backup copies the whole folder; later ones copy only what
+        changed since the previous backup.
+    fields:
+      - key: hour
+        type: text
+        required: true
+        default: "1"
+        pattern: "^([01]?[0-9]|2[0-3])$"
+        autocomplete: "off"
+        label: { id: Jam backup setiap hari (0–23, waktu NAS), en: Daily backup hour (0–23, NAS time) }
+      - key: keep
+        type: text
+        required: true
+        default: "30"
+        pattern: "^([1-9][0-9]?|[12][0-9]{2}|3[0-5][0-9]|36[0-6])$"
+        autocomplete: "off"
+        label: { id: Jumlah salinan yang disimpan (1–366), en: Copies to keep (1–366) }
+        help:
+          id: Satu salinan per hari. 30 berarti bisa kembali ke keadaan sampai sebulan lalu.
+          en: One copy per day. 30 means you can go back up to a month.
+
+  - id: summary
+    type: review
+    title: { id: Ringkasan, en: Summary }
+    fields:
+      - key: admin_password
+        type: current-password
+        required: true
+        secret: true
+        autocomplete: current-password
+        label: { id: Password Anda, en: Your password }
