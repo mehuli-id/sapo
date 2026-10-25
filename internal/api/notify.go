@@ -92,6 +92,11 @@ func openNotifier(dir string) (*notifier, error) {
 	if n.cur.Alerts == nil {
 		n.cur.Alerts = map[string]*notifyAlert{}
 	}
+	for k, a := range n.cur.Alerts {
+		if a == nil {
+			delete(n.cur.Alerts, k)
+		}
+	}
 	return n, nil
 }
 
@@ -150,12 +155,17 @@ func (s *Server) notifyMessages() (config.NotifyMessages, bool) {
 	return config.NotifyMessages{}, false
 }
 
-func notifyHost() string {
-	h, err := os.Hostname()
-	if err != nil || h == "" {
-		return "sapo"
+// notifyHost: nama host saat ini dari sapod (sapo-api berjalan dengan
+// ProtectHostname, jadi os.Hostname hanya nama saat layanan mulai).
+func (s *Server) notifyHost(ctx context.Context) string {
+	var info proto.SystemInfo
+	if err := s.agent.Call(ctx, proto.OpSystemInfo, nil, &info); err == nil && info.Hostname != "" {
+		return info.Hostname
 	}
-	return h
+	if h, err := os.Hostname(); err == nil && h != "" {
+		return h
+	}
+	return "sapo"
 }
 
 func fill(tmpl string, kv ...string) string { return strings.NewReplacer(kv...).Replace(tmpl) }
@@ -177,28 +187,29 @@ func (s *Server) NotifyLoop(ctx context.Context) {
 
 // collect membaca kondisi saat ini. ok[event]: sumber kejadian itu berhasil
 // dibaca (hanya kejadian dari sumber yang terbaca yang boleh dianggap pulih).
-func (s *Server) notifyCollect(ctx context.Context, st NotifySettings) (map[string]*notifyAlert, map[string]bool) {
-	cur := map[string]*notifyAlert{}
-	ok := map[string]bool{}
+// cleared: disk yang terbaca sehat (SMART lulus); masalah disk hanya pulih
+// untuk disk itu, bukan untuk disk yang tidur, tidak terbaca, atau hilang.
+func (s *Server) notifyCollect(ctx context.Context, st NotifySettings, active map[string]*notifyAlert) (cur map[string]*notifyAlert, ok, cleared map[string]bool) {
+	cur, ok, cleared = map[string]*notifyAlert{}, map[string]bool{}, map[string]bool{}
 	add := func(event, key, name, detail string) {
 		cur[event+":"+key] = &notifyAlert{Event: event, Name: name, Detail: detail}
 	}
-	known := func(err error) bool {
-		var pe *proto.Error
-		return err == nil || (errors.As(err, &pe) && pe.Code == proto.ErrUnknownOp)
-	}
+
 	pct := st.CapacityPct
 	if pct == 0 {
 		pct = s.cfg.API.Notify.DefaultCapacityPct
 	}
 	var pools proto.PoolsResult
-	if err := s.agent.Call(ctx, proto.OpStoragePools, nil, &pools); known(err) {
+	if err := s.agent.Call(ctx, proto.OpStoragePools, nil, &pools); err == nil {
 		ok["pool_health"], ok["pool_full"] = true, true
 		for _, p := range pools.Pools {
 			if p.Health != "" && p.Health != "ONLINE" {
 				add("pool_health", p.Name, p.Name, p.Health)
 			}
-			if p.CapacityPct >= pct {
+			// Histeresis: masalah yang sudah aktif baru pulih 2 poin di bawah
+			// ambang (kapasitas yang naik-turun di sekitar ambang tidak
+			// membanjiri email).
+			if _, was := active["pool_full:"+p.Name]; p.CapacityPct >= pct || (was && p.CapacityPct >= pct-2) {
 				add("pool_full", p.Name, p.Name, strconv.Itoa(p.CapacityPct))
 			}
 		}
@@ -207,18 +218,19 @@ func (s *Server) notifyCollect(ctx context.Context, st NotifySettings) (map[stri
 	if time.Since(s.notify.lastSMART) >= time.Duration(s.cfg.API.Notify.SMARTMinutes)*time.Minute {
 		var disks []proto.Disk
 		if err := s.agent.Call(ctx, proto.OpStorageDisks, nil, &disks); err == nil {
-			all := true
 			for _, d := range disks {
+				key := d.Serial
+				if key == "" {
+					key = d.Name
+				}
 				var sm proto.SMART
 				if err := s.agent.Call(ctx, proto.OpStorageSMART, proto.SMARTParams{Device: d.Name}, &sm); err != nil {
-					all = false
 					continue
 				}
+				if sm.Status == proto.SMARTPassed {
+					cleared["disk_smart:"+key] = true
+				}
 				if sm.Status == proto.SMARTFailed || sm.Status == proto.SMARTWarning {
-					key := d.Serial
-					if key == "" {
-						key = d.Name
-					}
 					name := strings.TrimSpace(d.Model + " " + d.Serial)
 					if name == "" {
 						name = d.Name
@@ -230,12 +242,13 @@ func (s *Server) notifyCollect(ctx context.Context, st NotifySettings) (map[stri
 					add("disk_smart", key, name+" ("+d.Name+")", detail)
 				}
 			}
-			ok["disk_smart"] = all
+			ok["disk_smart"] = true
 			s.notify.lastSMART = time.Now()
 		}
 	}
 	var bk proto.BackupsListResult
-	if err := s.agent.Call(ctx, proto.OpBackupsList, nil, &bk); known(err) {
+	// sapod lama (operasi tidak dikenal) = tidak ada data, bukan "pulih".
+	if err := s.agent.Call(ctx, proto.OpBackupsList, nil, &bk); err == nil {
 		ok["backup_failed"] = true
 		for _, j := range bk.Jobs {
 			if !j.LastOK && j.LastError != "" {
@@ -243,7 +256,7 @@ func (s *Server) notifyCollect(ctx context.Context, st NotifySettings) (map[stri
 			}
 		}
 	}
-	return cur, ok
+	return cur, ok, cleared
 }
 
 // notifyCheck: satu putaran pemeriksaan dan (bila perlu) satu email.
@@ -256,10 +269,12 @@ func (s *Server) notifyCheck(ctx context.Context) {
 	if !st.Enabled {
 		return
 	}
-	cur, ok := s.notifyCollect(ctx, st)
+	cur, ok, cleared := s.notifyCollect(ctx, st, s.notify.get().Alerts)
 	now := s.now().UTC()
 	var fresh, resolved []*notifyAlert
-	_ = s.notify.update(func(f *notifyFile) {
+	// Bila catatan tidak bisa disimpan, tidak ada email: tanpa catatan, email
+	// yang sama akan terkirim setiap putaran.
+	if err := s.notify.update(func(f *notifyFile) {
 		for k, a := range cur {
 			if slices.Contains(st.EventsOff, a.Event) {
 				continue
@@ -276,7 +291,7 @@ func (s *Server) notifyCheck(ctx context.Context) {
 				delete(f.Alerts, k)
 				continue
 			}
-			if _, still := cur[k]; !still && ok[a.Event] {
+			if _, still := cur[k]; !still && ok[a.Event] && (a.Event != "disk_smart" || cleared[k]) {
 				if !a.Notified {
 					delete(f.Alerts, k)
 					continue
@@ -292,7 +307,12 @@ func (s *Server) notifyCheck(ctx context.Context) {
 				fresh = append(fresh, a)
 			}
 		}
-	})
+	}); err != nil {
+		if s.log != nil {
+			s.log.Error("catatan notifikasi tidak bisa disimpan; email ditunda", "err", err)
+		}
+		return
+	}
 	if len(fresh) == 0 && len(resolved) == 0 {
 		return
 	}
@@ -301,7 +321,7 @@ func (s *Server) notifyCheck(ctx context.Context) {
 		s.notifyResult(errors.New("teks email tidak ada di konfigurasi (api.notify.messages)"), nil, nil)
 		return
 	}
-	host := notifyHost()
+	host := s.notifyHost(ctx)
 	order := func(l []*notifyAlert) {
 		sort.Slice(l, func(i, j int) bool { return l[i].Event+l[i].Name < l[j].Event+l[j].Name })
 	}
@@ -446,8 +466,8 @@ func (s *Server) handleNotifySet(w http.ResponseWriter, r *http.Request) {
 	in.EventsOff = off
 	old := s.notify.get().Settings
 	if in.Password == "" && !req.ClearPassword && in.Username != "" {
-		if old.Password == "" || old.Host != in.Host || old.Username != in.Username {
-			writeErrorDetail(w, http.StatusBadRequest, "smtp_password_required", "password SMTP wajib diisi untuk server atau username baru", map[string]any{"field": "password"})
+		if old.Password == "" || old.Host != in.Host || old.Username != in.Username || old.Port != in.Port || old.Security != in.Security {
+			writeErrorDetail(w, http.StatusBadRequest, "smtp_password_required", "password SMTP wajib diisi untuk server, port, keamanan, atau username baru", map[string]any{"field": "password"})
 			return
 		}
 		in.Password = old.Password
@@ -497,7 +517,7 @@ func (s *Server) handleNotifyTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.notify.sending.Unlock()
-	host := notifyHost()
+	host := s.notifyHost(r.Context())
 	ctx, cancel := context.WithTimeout(r.Context(), 50*time.Second)
 	defer cancel()
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(55 * time.Second))

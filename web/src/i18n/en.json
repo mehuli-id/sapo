@@ -352,7 +352,7 @@
     "email_invalid": "The email address is not valid.",
     "email_recipients": "Enter 1 to {max} recipient addresses.",
     "smtp_invalid": "The SMTP server settings are not valid.",
-    "smtp_password_required": "Enter the SMTP password: the server or username changed.",
+    "smtp_password_required": "Enter the SMTP password: the server, port, security, or username changed.",
     "notify_failed": "The email could not be sent. Check the server settings below.",
     "notify_not_configured": "Email notifications are not set up yet."
   },
