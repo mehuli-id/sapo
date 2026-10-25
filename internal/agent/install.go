@@ -9,9 +9,12 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/mehuli-id/sapo/internal/proto"
@@ -36,17 +39,19 @@ type InstallTools struct {
 	Timeout                  time.Duration
 	Target                   string
 	Programs                 InstallPrograms
-	KernelCmdline            string
-	CopyPaths, RemovePaths   []string
-	RemoveUsers              []string
-	PurgePackages            []string
+	// StopService: dihentikan selama pengaturan disalin (sapo-api).
+	StopService            string
+	KernelCmdline          string
+	CopyPaths, RemovePaths []string
+	RemoveUsers            []string
+	PurgePackages          []string
 }
 
 // InstallPrograms: program yang dipakai install-run (path absolut).
 type InstallPrograms struct {
 	Wipefs, Sgdisk, MkfsVfat, MkfsExt4 string
 	Mount, Umount, Cp, Chroot, Blkid   string
-	Udevadm, Sync                      string
+	Udevadm, Sync, Lsblk               string
 }
 
 // Install melayani install.*.
@@ -59,7 +64,9 @@ type Install struct {
 
 // NewInstall menyiapkan installer.
 func NewInstall(t InstallTools, st *Storage, pools *Pools) *Install {
-	return &Install{t: t, st: st, pools: pools}
+	in := &Install{t: t, st: st, pools: pools}
+	pools.installing = in.running
+	return in
 }
 
 func (in *Install) live() bool {
@@ -102,11 +109,14 @@ func (in *Install) StatusOp() Handler {
 }
 
 // installRunParams: isi file parameter install-run (ditulis sapod, 0600).
+// Ref: identitas disk yang dipilih; install-run memeriksanya lagi tepat
+// sebelum menghapus disk.
 type installRunParams struct {
-	Disk     string       `json:"disk"`
-	Tools    InstallTools `json:"tools"`
-	Started  time.Time    `json:"started"`
-	DiskName string       `json:"disk_name"`
+	Disk     string        `json:"disk"`
+	Tools    InstallTools  `json:"tools"`
+	Started  time.Time     `json:"started"`
+	DiskName string        `json:"disk_name"`
+	Ref      proto.DiskRef `json:"ref"`
 }
 
 // StartOp mengembalikan handler install.start. Disk diperiksa seketat disk
@@ -134,6 +144,14 @@ func (in *Install) StartOp() Handler {
 		if in.running(ctx) {
 			return nil, &OpError{Code: proto.ErrBusy, Message: "pemasangan sedang berjalan"}
 		}
+		if isMountPoint(in.t.Target) {
+			return nil, &OpError{Code: proto.ErrConflict, Message: "pemasangan sebelumnya masih terpasang di " + in.t.Target + "; nyalakan ulang dulu"}
+		}
+		// Disk media ISO tidak pernah dipilih (walau tidak terlihat terpasang,
+		// misalnya boot dengan toram).
+		if dev := mountSource(in.t.LiveMarker); dev != "" && (dev == p.Disk.Name || strings.HasPrefix(dev, p.Disk.Name)) {
+			return nil, &OpError{Code: proto.ErrDiskInUse, Message: "disk " + p.Disk.Name + " adalah media ISO yang sedang dipakai"}
+		}
 		// Tidak bersamaan dengan operasi pool (disk yang sama bisa dipilih).
 		if !in.pools.write.TryLock() {
 			return nil, &OpError{Code: proto.ErrBusy, Message: "operasi pool lain sedang berjalan"}
@@ -156,7 +174,7 @@ func (in *Install) StartOp() Handler {
 		if disk.SizeBytes < in.t.MinDiskBytes {
 			return nil, &OpError{Code: "install_disk_small", Message: fmt.Sprintf("disk terlalu kecil (minimal %d GB)", in.t.MinDiskBytes/1e9)}
 		}
-		params := installRunParams{Disk: "/dev/" + disk.Name, DiskName: disk.Name, Tools: in.t, Started: time.Now().UTC()}
+		params := installRunParams{Disk: "/dev/" + disk.Name, DiskName: disk.Name, Tools: in.t, Started: time.Now().UTC(), Ref: p.Disk}
 		data, err := json.Marshal(params)
 		if err != nil {
 			return nil, err
@@ -170,14 +188,32 @@ func (in *Install) StartOp() Handler {
 			"--property=Type=exec", fmt.Sprintf("--property=RuntimeMaxSec=%d", int(in.t.Timeout.Seconds())),
 		}, in.t.Self, "install-run", in.t.ParamsFile)
 		if err != nil {
+			_ = os.Remove(in.t.ParamsFile)
 			return nil, err
 		}
 		if res.ExitCode != 0 {
+			_ = os.Remove(in.t.ParamsFile)
 			return nil, &OpError{Code: "install_failed", Message: clipTo(firstLine(res.Stderr), maxErrorText)}
 		}
 		in.pools.logInfo("pemasangan ke disk dimulai", "disk", disk.Name)
 		return map[string]bool{"ok": true}, nil
 	}
+}
+
+// mountSource: nama perangkat (tanpa /dev/) yang terpasang di mountpoint,
+// dari /proc/self/mounts; kosong bila tidak ada.
+func mountSource(mountpoint string) string {
+	data, err := os.ReadFile("/proc/self/mounts")
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		f := strings.Fields(line)
+		if len(f) >= 2 && f[1] == mountpoint && strings.HasPrefix(f[0], "/dev/") {
+			return strings.TrimPrefix(f[0], "/dev/")
+		}
+	}
+	return ""
 }
 
 // partPath: nama partisi n disk (sda → sda3, nvme0n1 → nvme0n1p3).
@@ -201,6 +237,9 @@ type installer struct {
 	step func(name string)
 	// wait menunggu partisi baru muncul (diganti di test).
 	wait func(path string, d time.Duration) error
+	// verify memeriksa ulang identitas disk tepat sebelum dihapus (diganti
+	// di test).
+	verify func() error
 }
 
 func (r *installer) do(prog string, args ...string) error {
@@ -224,11 +263,20 @@ func (r *installer) install() error {
 	bios, esp, rootPart := partPath(disk, 1), partPath(disk, 2), partPath(disk, 3)
 	var mounts []string
 	defer func() {
-		// Dilepas terbalik, apa pun hasilnya.
+		// Dilepas terbalik, apa pun hasilnya; bila gagal, lazy.
 		for i := len(mounts) - 1; i >= 0; i-- {
-			_ = r.do(pr.Umount, "--", mounts[i])
+			if err := r.do(pr.Umount, "--", mounts[i]); err != nil {
+				_ = r.do(pr.Umount, "-l", "--", mounts[i])
+			}
 		}
 	}()
+	if isMountPoint(t.Target) {
+		return fmt.Errorf("%s masih terpasang dari pemasangan sebelumnya", t.Target)
+	}
+	r.step("periksa disk")
+	if err := r.verify(); err != nil {
+		return err
+	}
 	mount := func(args ...string) error {
 		if err := r.do(pr.Mount, args...); err != nil {
 			return err
@@ -285,14 +333,24 @@ func (r *installer) install() error {
 	}
 
 	r.step("salin pengaturan")
+	// sapo-api dihentikan selama menyalin agar datanya utuh (panel tidak
+	// bisa dibuka sebentar).
+	if t.StopService != "" {
+		_ = r.do(t.Systemctl, "stop", "--", t.StopService)
+		defer func() { _ = r.do(t.Systemctl, "start", "--", t.StopService) }()
+	}
 	for _, p := range t.CopyPaths {
 		src := filepath.Join(r.root, p)
-		if _, err := os.Lstat(src); errors.Is(err, os.ErrNotExist) {
-			continue
+		dst, err := r.safeTarget(p)
+		if err != nil {
+			return err
 		}
-		dst := r.target(p)
+		// Disamakan dengan sesi live: yang tidak ada di sana juga dibuang.
 		if err := os.RemoveAll(dst); err != nil {
 			return err
+		}
+		if _, err := os.Lstat(src); errors.Is(err, os.ErrNotExist) {
+			continue
 		}
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return err
@@ -303,7 +361,11 @@ func (r *installer) install() error {
 	}
 	// Berkas khusus ISO (tmpfs untuk image, log ke serial, …) dibuang.
 	for _, p := range t.RemovePaths {
-		if err := os.RemoveAll(r.target(p)); err != nil {
+		dst, err := r.safeTarget(p)
+		if err != nil {
+			return err
+		}
+		if err := os.RemoveAll(dst); err != nil {
 			return err
 		}
 	}
@@ -321,7 +383,7 @@ func (r *installer) install() error {
 	if !uuidPattern.MatchString(rootUUID) || !uuidPattern.MatchString(espUUID) {
 		return errors.New("UUID partisi baru tidak terbaca")
 	}
-	fstab := fmt.Sprintf("# Dibuat installer Sapo.\nUUID=%s / ext4 errors=remount-ro 0 1\nUUID=%s /boot/efi vfat umask=0077 0 1\n", rootUUID, espUUID)
+	fstab := fmt.Sprintf("# Dibuat installer Sapo.\nUUID=%s / ext4 errors=remount-ro 0 1\nUUID=%s /boot/efi vfat umask=0077 0 2\n", rootUUID, espUUID)
 	if err := os.WriteFile(r.target("etc/fstab"), []byte(fstab), 0o644); err != nil {
 		return err
 	}
@@ -341,9 +403,21 @@ func (r *installer) install() error {
 	if fi, err := os.Stat("/sys/firmware/efi/efivars"); err == nil && fi.IsDir() {
 		_ = mount("-t", "efivarfs", "--", "efivarfs", r.target("sys/firmware/efi/efivars"))
 	}
-	_ = r.chroot("systemd-machine-id-setup")
+	if err := r.chroot("systemd-machine-id-setup"); err != nil {
+		return err
+	}
+	// Akun live (password umum, sudo) tidak boleh terbawa: gagal-tertutup.
 	for _, u := range t.RemoveUsers {
-		_ = r.chroot("userdel", "--remove", "--", u)
+		if hasAccount(r.target("etc/passwd"), u) {
+			// Direktori rumah dari sesi live tidak tersalin, jadi userdel
+			// boleh mengeluh soal itu; yang diperiksa hasilnya di bawah.
+			_ = r.chroot("userdel", "--remove", "--", u)
+		}
+		for _, f := range []string{"etc/passwd", "etc/shadow", "etc/group", "etc/gshadow"} {
+			if hasAccount(r.target(f), u) || hasMember(r.target(f), u) {
+				return fmt.Errorf("akun live %s masih ada di %s", u, f)
+			}
+		}
 	}
 	if len(t.PurgePackages) > 0 {
 		if err := r.chroot(append([]string{"dpkg", "--purge", "--force-depends", "--"}, t.PurgePackages...)...); err != nil {
@@ -407,11 +481,21 @@ func InstallRunMain(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+	// Sekali pakai: file parameter dibuang begitu dibaca.
+	_ = os.Remove(args[0])
 	var p installRunParams
-	if err := json.Unmarshal(data, &p); err != nil || !strings.HasPrefix(p.Disk, "/dev/") || !deviceNamePattern.MatchString(p.DiskName) || p.Disk != "/dev/"+p.DiskName {
+	if err := json.Unmarshal(data, &p); err != nil || !strings.HasPrefix(p.Disk, "/dev/") || !deviceNamePattern.MatchString(p.DiskName) || p.Disk != "/dev/"+p.DiskName || p.Ref.Name != p.DiskName {
 		fmt.Fprintln(os.Stderr, "parameter pemasangan tidak valid")
 		return 2
 	}
+	if _, err := os.Stat(p.Tools.LiveMarker); err != nil {
+		fmt.Fprintln(os.Stderr, "installer hanya berjalan dari ISO")
+		return 2
+	}
+	// SIGTERM (batas waktu unit, systemctl stop): perintah yang berjalan
+	// dihentikan dan titik pasang tetap dilepas.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
 	run := proto.InstallRun{Disk: p.DiskName, StartedAt: time.Now().UTC()}
 	writeResult := func() {
 		b, _ := json.Marshal(run)
@@ -427,10 +511,16 @@ func InstallRunMain(args []string) int {
 	w := bufio.NewWriter(logf)
 	flush := func() { _ = w.Flush() }
 	r := &installer{p: p, log: w, root: "/", wait: waitPath,
+		verify: func() error { return verifyDisk(p.Tools.Programs.Lsblk, p.Ref, p.DiskName) },
 		run: func(prog string, args ...string) (string, error) {
 			fmt.Fprintf(w, "$ %s %s\n", filepath.Base(prog), strings.Join(args, " "))
 			flush()
-			cmd := exec.Command(prog, args...)
+			// Melepas titik pasang tetap dijalankan walau sudah dihentikan.
+			runCtx := ctx
+			if prog == p.Tools.Programs.Umount {
+				runCtx = context.Background()
+			}
+			cmd := exec.CommandContext(runCtx, prog, args...)
 			cmd.Dir = "/"
 			cmd.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C.UTF-8", "DEBIAN_FRONTEND=noninteractive"}
 			var out strings.Builder
@@ -466,4 +556,89 @@ func InstallRunMain(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// safeTarget: path p di dalam Target tanpa melewati symlink yang mengarah
+// keluar Target (misalnya /var/run → /run milik sistem live).
+func (r *installer) safeTarget(p string) (string, error) {
+	dst := r.target(p)
+	dir := filepath.Dir(dst)
+	for {
+		if _, err := os.Lstat(dir); err == nil {
+			break
+		}
+		dir = filepath.Dir(dir)
+	}
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return "", err
+	}
+	base, err := filepath.EvalSymlinks(r.p.Tools.Target)
+	if err != nil {
+		return "", err
+	}
+	if resolved != base && !strings.HasPrefix(resolved+"/", base+"/") {
+		return "", fmt.Errorf("%s melewati symlink keluar dari sistem baru", p)
+	}
+	return dst, nil
+}
+
+// hasAccount: baris "<nama>:" ada di file akun (passwd, shadow, group,
+// gshadow).
+func hasAccount(path, name string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, name+":") {
+			return true
+		}
+	}
+	return false
+}
+
+// hasMember: name tercatat sebagai anggota grup (kolom terakhir group atau
+// gshadow).
+func hasMember(path, name string) bool {
+	if !strings.HasSuffix(path, "group") && !strings.HasSuffix(path, "gshadow") {
+		return false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		f := strings.Split(line, ":")
+		if len(f) >= 4 && slices.Contains(strings.Split(f[len(f)-1], ","), name) {
+			return true
+		}
+	}
+	return false
+}
+
+// verifyDisk: disk di path masih disk yang dipilih (nomor seri, WWN,
+// ukuran) dan tidak sedang dipakai (lsblk dibaca ulang).
+func verifyDisk(lsblk string, ref proto.DiskRef, name string) error {
+	out, err := exec.Command(lsblk, lsblkFlags...).Output()
+	if err != nil {
+		return fmt.Errorf("lsblk: %w", err)
+	}
+	disks, err := parseLsblk(out, nil)
+	if err != nil {
+		return err
+	}
+	for _, d := range disks {
+		if d.Name != name {
+			continue
+		}
+		if d.Serial != ref.Serial || d.WWN != ref.WWN || d.SizeBytes != ref.SizeBytes {
+			return fmt.Errorf("disk %s sudah berbeda dari yang dipilih; tidak ada yang dihapus", name)
+		}
+		if d.Usage == proto.DiskInUse {
+			return fmt.Errorf("disk %s sedang dipakai (%s); tidak ada yang dihapus", name, d.UsageReason)
+		}
+		return nil
+	}
+	return fmt.Errorf("disk %s tidak ditemukan; tidak ada yang dihapus", name)
 }

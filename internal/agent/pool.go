@@ -53,6 +53,9 @@ type Pools struct {
 	// beforeDestroy dijalankan berurutan sebelum pool dihapus (misalnya
 	// menolak bila ada data aplikasi, mencabut ekspor NFS).
 	beforeDestroy []func(ctx context.Context, pool string) error
+	// installing: pemasangan ke disk sedang berjalan (ADR 0016); pool baru
+	// atau ganti disk ditolak selama itu. nil = tidak diperiksa.
+	installing func(ctx context.Context) bool
 }
 
 // NewPools menyiapkan operasi pool di atas st.
@@ -571,6 +574,10 @@ func (p *Pools) checkCreateParams(req proto.PoolCreateParams) (proto.PoolLayout,
 // checkDisks membandingkan disk yang dipilih dengan keadaan sekarang. force
 // bernilai true bila zpool create perlu -f.
 func (p *Pools) checkDisks(refs []proto.DiskRef, disks []proto.Disk, allowUSB bool) (force bool, err error) {
+	// Selama Sapo dipasang ke disk, tidak ada disk yang dihapus untuk pool.
+	if p.installing != nil && p.installing(context.Background()) {
+		return false, &OpError{Code: proto.ErrBusy, Message: "Sapo sedang dipasang ke disk; tunggu sampai selesai"}
+	}
 	byName := map[string]proto.Disk{}
 	// Nomor seri dan WWN yang dipakai lebih dari satu disk tidak bisa
 	// membedakan disk (enclosure USB 2-bay murah sering melaporkan nomor

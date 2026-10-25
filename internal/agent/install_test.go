@@ -53,8 +53,9 @@ func TestInstallerSteps(t *testing.T) {
 			}
 			return "", nil
 		},
-		step: func(string) {},
-		wait: func(string, time.Duration) error { return nil },
+		step:   func(string) {},
+		wait:   func(string, time.Duration) error { return nil },
+		verify: func() error { return nil },
 	}
 	if err := r.install(); err != nil {
 		t.Fatal(err)
@@ -70,7 +71,6 @@ func TestInstallerSteps(t *testing.T) {
 		"cp -a --one-file-system -- /run/live/rootfs/filesystem.squashfs/. "+target+"/",
 		"mount -- /dev/vdd2 "+target+"/boot/efi",
 		"cp -a -- "+live+"/etc/sapo "+target+"/etc/sapo",
-		"chroot -- "+target+" userdel --remove -- user",
 		"chroot -- "+target+" dpkg --purge --force-depends -- live-boot",
 		"chroot -- "+target+" update-initramfs -u -k all",
 		"chroot -- "+target+" grub-install --target=i386-pc -- /dev/vdd",
@@ -111,8 +111,9 @@ func TestInstallerStopsOnFailure(t *testing.T) {
 			}
 			return "", nil
 		},
-		step: func(string) {},
-		wait: func(string, time.Duration) error { return nil },
+		step:   func(string) {},
+		wait:   func(string, time.Duration) error { return nil },
+		verify: func() error { return nil },
 	}
 	if err := r.install(); err == nil {
 		t.Fatal("galat harus dilaporkan")
@@ -134,5 +135,70 @@ func TestInstallStartRefusesOutsideLive(t *testing.T) {
 	raw, _ = json.Marshal(proto.InstallStartParams{Disk: proto.DiskRef{Name: "../sda"}})
 	if _, err := in.StartOp()(context.Background(), raw); !errors.As(err, &oe) || oe.Code != proto.ErrInvalidParams {
 		t.Fatalf("nama disk aneh: %v", err)
+	}
+}
+
+// Disk berubah (identitas lain) saat pemasangan mulai: tidak ada yang dihapus.
+func TestInstallerVerifiesDisk(t *testing.T) {
+	var calls []string
+	r := &installer{
+		root: t.TempDir(),
+		p:    installRunParams{Disk: "/dev/vdd", Tools: InstallTools{Target: t.TempDir(), Programs: InstallPrograms{Wipefs: "wipefs", Umount: "umount"}}},
+		run: func(prog string, args ...string) (string, error) {
+			calls = append(calls, prog)
+			return "", nil
+		},
+		step:   func(string) {},
+		wait:   func(string, time.Duration) error { return nil },
+		verify: func() error { return errors.New("disk vdd sudah berbeda") },
+	}
+	if err := r.install(); err == nil || len(calls) != 0 {
+		t.Fatalf("err = %v, panggilan = %v", err, calls)
+	}
+}
+
+// Akun live yang tidak terhapus membuat pemasangan gagal.
+func TestInstallerRemovesLiveUser(t *testing.T) {
+	base := t.TempDir()
+	target := filepath.Join(base, "target")
+	_ = os.MkdirAll(filepath.Join(target, "etc/default"), 0o755)
+	_ = os.WriteFile(filepath.Join(target, "etc/passwd"), []byte("root:x:0:0::/root:/bin/sh\nuser:x:1000:1000::/home/user:/bin/bash\n"), 0o644)
+	r := &installer{
+		root: t.TempDir(),
+		p: installRunParams{Disk: "/dev/vdd", Tools: InstallTools{Target: target, RemoveUsers: []string{"user"},
+			Programs: InstallPrograms{Wipefs: "wipefs", Sgdisk: "sgdisk", MkfsVfat: "mkfs.vfat", MkfsExt4: "mkfs.ext4", Mount: "mount",
+				Umount: "umount", Cp: "cp", Chroot: "chroot", Blkid: "blkid", Udevadm: "udevadm", Sync: "sync"}}},
+		run: func(prog string, args ...string) (string, error) {
+			if prog == "blkid" {
+				return "1111-2222\n", nil
+			}
+			return "", nil // userdel tiruan tidak menghapus apa pun
+		},
+		step:   func(string) {},
+		wait:   func(string, time.Duration) error { return nil },
+		verify: func() error { return nil },
+	}
+	if err := r.install(); err == nil || !strings.Contains(err.Error(), "akun live user") {
+		t.Fatalf("akun live harus menggagalkan pemasangan: %v", err)
+	}
+	if !hasMember("x/group", "") && hasMember("/tidak/ada/group", "user") {
+		t.Fatal("hasMember")
+	}
+}
+
+// Path pengaturan yang melewati symlink keluar dari sistem baru ditolak.
+func TestInstallerSafeTarget(t *testing.T) {
+	base := t.TempDir()
+	target := filepath.Join(base, "target")
+	outside := filepath.Join(base, "luar")
+	_ = os.MkdirAll(filepath.Join(target, "var"), 0o755)
+	_ = os.MkdirAll(outside, 0o755)
+	_ = os.Symlink(outside, filepath.Join(target, "var/run"))
+	r := &installer{p: installRunParams{Tools: InstallTools{Target: target}}}
+	if _, err := r.safeTarget("/var/run/x"); err == nil {
+		t.Fatal("symlink keluar harus ditolak")
+	}
+	if p, err := r.safeTarget("/etc/sapo/sapo.yaml"); err != nil || p != filepath.Join(target, "etc/sapo/sapo.yaml") {
+		t.Fatalf("path biasa: %q %v", p, err)
 	}
 }
