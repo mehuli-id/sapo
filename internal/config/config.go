@@ -194,6 +194,8 @@ type Cloud struct {
 	SecretsDir  string `yaml:"secrets_dir"`
 	CacheDir    string `yaml:"cache_dir"`
 	MaxRunHours int    `yaml:"max_run_hours"`
+	// ListMaxEntries: batas isi satu folder saat menelusuri salinan.
+	ListMaxEntries int `yaml:"list_max_entries"`
 }
 
 func (c Cloud) validate() error {
@@ -204,6 +206,9 @@ func (c Cloud) validate() error {
 	}
 	if c.MaxRunHours < 1 || c.MaxRunHours > 168 {
 		return errors.New("agent.cloud.max_run_hours 1–168")
+	}
+	if c.ListMaxEntries < 100 || c.ListMaxEntries > 100000 {
+		return errors.New("agent.cloud.list_max_entries 100–100000")
 	}
 	return nil
 }
@@ -633,7 +638,7 @@ func Default() Config {
 			External:  External{Mount: "/usr/bin/mount", Umount: "/usr/bin/umount", MountBase: "/srv/sapo-external", StateFile: "/var/lib/sapod/external.json"},
 			Backup:    Backup{StateFile: "/var/lib/sapod/backup.json", MaxRunHours: 24},
 			Cloud: Cloud{Restic: "/usr/bin/restic", Journalctl: "/usr/bin/journalctl", StateFile: "/var/lib/sapod/cloud.json", SecretsDir: "/var/lib/sapod/cloud",
-				CacheDir: "/var/cache/sapo-restic", MaxRunHours: 24},
+				CacheDir: "/var/cache/sapo-restic", MaxRunHours: 24, ListMaxEntries: 5000},
 			Install: Install{LiveMarker: "/run/live/medium", SquashfsRoot: "/run/live/rootfs/filesystem.squashfs", MinDiskGB: 16,
 				Unit: "sapo-install.service", ParamsFile: "/var/lib/sapod/install-params.json", LogFile: "/var/lib/sapod/install.log",
 				ResultFile: "/var/lib/sapod/install-result.json", TimeoutSeconds: 3600, Target: "/mnt/sapo-install",

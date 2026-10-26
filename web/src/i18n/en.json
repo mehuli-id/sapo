@@ -1039,6 +1039,17 @@
     "sizes": "{added} newly uploaded of {total}",
     "keepDays": "Keep copies for (days)",
     "keepWarning": "Copies older than this will be removed from the cloud at the next backup.",
-    "deleteJobHelp": "The task is deleted. Copies already in the cloud are kept and can be restored."
+    "deleteJobHelp": "The task is deleted. Copies already in the cloud are kept and can be restored.",
+    "restoreWhat": "What to restore",
+    "restoreAll": "The whole folder",
+    "restorePick": "A specific file or folder",
+    "pickHelp": "Open a folder by clicking its name, then select the file or folder you want to restore. It appears in the new folder at the same location as in the original folder.",
+    "browseRoot": "Copy contents",
+    "select": "Select",
+    "selected": "Selected: {path}",
+    "noneSelected": "No file or folder selected yet.",
+    "emptyFolder": "This folder is empty.",
+    "truncated": "Only the first {n} items are shown.",
+    "restoreItemStarted": "Restoring {path} to the new folder {name} has started. The folder appears in Shared Folders when done."
   }
 }

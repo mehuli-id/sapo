@@ -1,16 +1,17 @@
 <script setup lang="ts">
 // Backup ke S3/cloud (ADR 0020): penyimpanan (wizards/cloud-repo-add.yaml,
 // cloud-repo-connect.yaml), tugas (cloud-job-create.yaml), dan pemulihan ke
-// shared folder baru. Password enkripsi repo baru tampil sekali dan harus
+// shared folder baru (seluruh salinan, atau satu file/folder yang dipilih
+// dengan menelusuri isi salinan). Password enkripsi repo baru tampil sekali dan harus
 // dinyatakan sudah dicatat.
-import { onMounted, onUnmounted, reactive, ref } from "vue"
+import { onMounted, onUnmounted, reactive, ref, watch } from "vue"
 import { useI18n } from "vue-i18n"
-import { ArchiveRestore, CircleCheck, Cloud, Copy, KeyRound, LoaderCircle, Play, Plus, Settings2, Trash2, TriangleAlert } from "@lucide/vue"
+import { ArchiveRestore, ChevronRight, CircleCheck, Cloud, Copy, File as FileIcon, Folder, KeyRound, LoaderCircle, Play, Plus, Settings2, Trash2, TriangleAlert } from "@lucide/vue"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import type { CloudJob, CloudList, CloudRepo, CloudSnapshot, PoolsResult, SharedFolder, Wizard } from "@/lib/api"
+import type { CloudFiles, CloudJob, CloudList, CloudRepo, CloudSnapshot, PoolsResult, SharedFolder, Wizard } from "@/lib/api"
 import { api, ApiError, wizardActions } from "@/lib/api"
 import { formatBytes } from "@/lib/format"
 import { useSession } from "@/composables/useSession"
@@ -98,6 +99,8 @@ function start(m: string, key: string, j?: CloudJob) {
 }
 async function startRestore(r: CloudRepo) {
   start("restore", r.id)
+  pick.value = false
+  resetBrowse()
   snaps.value = null
   busy.value = r.id
   try {
@@ -134,15 +137,50 @@ const saveJob = (j: CloudJob) =>
 const runNow = (j: CloudJob) => run(j.id, () => api.runCloudJob(j.id), t("backup.started", { name: j.share }))
 const removeJob = (j: CloudJob) => run(j.id, () => api.deleteCloudJob(j.id, form.password), t("backup.deleted"))
 const removeRepo = (r: CloudRepo) => run(r.id, () => api.deleteCloudRepo(r.id, form.password), t("cloud.repoDeleted"))
-const restore = (r: CloudRepo) =>
-  run(
+
+// --- Telusuri isi salinan (pemulihan satu file/folder) ---
+const pick = ref(false)
+const dir = ref("")
+const files = ref<CloudFiles | null>(null)
+const picked = ref("")
+const browsing = ref(false)
+const join = (a: string, b: string) => (a ? `${a}/${b}` : b)
+const crumbs = () => dir.value.split("/").filter(Boolean).map((name, i, all) => ({ name, path: all.slice(0, i + 1).join("/") }))
+async function browse(r: CloudRepo, path: string) {
+  browsing.value = true
+  error.value = detail.value = ""
+  try {
+    files.value = await api.cloudFiles(r.id, form.snapshot, path)
+    dir.value = path
+  } catch (e) {
+    show(e)
+  } finally {
+    browsing.value = false
+  }
+}
+function resetBrowse() {
+  dir.value = picked.value = ""
+  files.value = null
+}
+// Salinan lain atau mode lain dipilih: mulai lagi dari akar salinan.
+watch([() => form.snapshot, pick], () => {
+  resetBrowse()
+  const r = data.value?.repos.find((x) => mode.value === `restore:${x.id}`)
+  if (pick.value && r && form.snapshot) browse(r, "")
+})
+
+const restore = (r: CloudRepo) => {
+  const path = pick.value ? picked.value : ""
+  const name = form.name.trim()
+  return run(
     r.id,
     async () => {
-      await api.restoreCloud(r.id, { snapshot: form.snapshot, pool: form.pool, name: form.name.trim(), admin_password: form.password })
+      await api.restoreCloud(r.id, { snapshot: form.snapshot, pool: form.pool, name, path: path || undefined, admin_password: form.password })
       emit("restored")
     },
-    t("rbackup.restoreStarted", { name: form.name.trim() }),
+    path ? t("cloud.restoreItemStarted", { path, name }) : t("rbackup.restoreStarted", { name }),
   )
+}
 </script>
 
 <template>
@@ -214,6 +252,37 @@ const restore = (r: CloudRepo) =>
                     <option v-for="s in snaps" :key="s.id" :value="s.id">{{ when(s.time) }} · {{ s.share || s.path }} · {{ s.hostname }}</option>
                   </select>
                 </div>
+                <fieldset class="space-y-2 sm:col-span-3">
+                  <legend class="text-sm font-medium">{{ t("cloud.restoreWhat") }}</legend>
+                  <div class="flex flex-wrap gap-4 text-sm">
+                    <label class="flex items-center gap-2"><input v-model="pick" type="radio" :value="false" class="size-4 accent-primary" />{{ t("cloud.restoreAll") }}</label>
+                    <label class="flex items-center gap-2"><input v-model="pick" type="radio" :value="true" class="size-4 accent-primary" />{{ t("cloud.restorePick") }}</label>
+                  </div>
+                  <div v-if="pick" class="space-y-2 rounded-lg border p-2">
+                    <p class="text-xs text-muted-foreground">{{ t("cloud.pickHelp") }}</p>
+                    <nav class="flex flex-wrap items-center gap-0.5 text-sm" :aria-label="t('cloud.browseRoot')">
+                      <button type="button" class="rounded px-1 hover:bg-muted" :disabled="browsing" @click="browse(r, '')">{{ snaps.find((s) => s.id === form.snapshot)?.share || t("cloud.browseRoot") }}</button>
+                      <template v-for="c in crumbs()" :key="c.path">
+                        <ChevronRight class="size-3.5 text-muted-foreground" />
+                        <button type="button" class="rounded px-1 break-all hover:bg-muted" :disabled="browsing" @click="browse(r, c.path)">{{ c.name }}</button>
+                      </template>
+                      <LoaderCircle v-if="browsing" class="ml-1 size-3.5 animate-spin" />
+                    </nav>
+                    <ul v-if="files" class="max-h-64 divide-y overflow-y-auto rounded-md border text-sm">
+                      <li v-if="!files.entries.length" class="px-2 py-1.5 text-xs text-muted-foreground">{{ t("cloud.emptyFolder") }}</li>
+                      <li v-for="e in files.entries" :key="e.name" class="flex items-center gap-2 px-2 py-1" :class="picked === join(dir, e.name) ? 'bg-primary/10' : ''">
+                        <Folder v-if="e.type === 'dir'" class="size-4 shrink-0 text-muted-foreground" />
+                        <FileIcon v-else class="size-4 shrink-0 text-muted-foreground" />
+                        <button v-if="e.type === 'dir'" type="button" class="min-w-0 flex-1 truncate text-left hover:underline" :disabled="browsing" @click="browse(r, join(dir, e.name))">{{ e.name }}</button>
+                        <span v-else class="min-w-0 flex-1 truncate">{{ e.name }}</span>
+                        <span v-if="e.type !== 'dir'" class="shrink-0 text-xs text-muted-foreground tabular-nums">{{ size(e.size) }}</span>
+                        <Button type="button" size="sm" variant="ghost" class="h-7 shrink-0" :aria-pressed="picked === join(dir, e.name)" @click="picked = join(dir, e.name)">{{ t("cloud.select") }}</Button>
+                      </li>
+                    </ul>
+                    <p v-if="files?.truncated" class="text-xs text-muted-foreground">{{ t("cloud.truncated", { n: files.entries.length }) }}</p>
+                    <p class="text-xs break-all" :class="picked ? 'font-medium' : 'text-muted-foreground'">{{ picked ? t("cloud.selected", { path: picked }) : t("cloud.noneSelected") }}</p>
+                  </div>
+                </fieldset>
                 <div class="space-y-1.5">
                   <Label :for="`cl-p-${r.id}`">{{ t("cloud.pool") }}</Label>
                   <select
@@ -235,7 +304,7 @@ const restore = (r: CloudRepo) =>
               </div>
             </template>
             <div class="flex gap-2">
-              <Button v-if="snaps.length" type="submit" size="sm" :disabled="!!busy || !form.password || !form.snapshot || !form.pool || !form.name.trim()">{{ t("backup.restore") }}</Button>
+              <Button v-if="snaps.length" type="submit" size="sm" :disabled="!!busy || !form.password || !form.snapshot || !form.pool || !form.name.trim() || (pick && !picked)">{{ t("backup.restore") }}</Button>
               <Button type="button" size="sm" variant="ghost" @click="mode = ''">{{ t("common.cancel") }}</Button>
             </div>
           </form>

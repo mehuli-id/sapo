@@ -964,6 +964,10 @@ res="$(s3repo true "password-yang-salah")"
 res="$(api POST /api/v1/cloud/jobs '{"repo":"'"$crepo"'","share":"tetap","hour":3,"keep_days":30,"enabled":false,"admin_password":"'"$PASS"'"}')"
 [[ "$res" == *' 200' ]] || fail "tugas cloud: $res"
 cjob="$(json 'print(v["id"])' <<<"$res")"
+# File di subfolder dengan karakter pola ([ ]) untuk pemulihan satu file.
+echo "satu file saja" > "$WORK/isi.txt"
+out="$(smbclient //127.0.0.1/tetap -p "$SMB_PORT" -m SMB3 -U "budi%$UPASS" -c 'mkdir "foto [1]"; put '"$WORK"'/isi.txt "foto [1]/isi [x].txt"' 2>&1 || true)"
+[[ "$out" != *NT_STATUS* ]] || fail "tulis foto [1]/isi [x].txt: $out"
 cloud_now() {
   local res
   res="$(api POST "/api/v1/cloud/jobs/$cjob/run" '{}')"
@@ -995,6 +999,7 @@ crepo="$(json 'print(v["id"])' <<<"$res")"
 res="$(curl -ksS -b "$JAR" -w ' %{http_code}' --max-time 300 "$HTTPS/api/v1/cloud/repos/$crepo/snapshots")"
 json 'assert len(v)==2 and all(s["share"]=="tetap" for s in v), v' <<<"$res" || fail "salinan di cloud: $res"
 cfirst="$(json 'print(v[0]["id"])' <<<"$res")"
+clast="$(json 'print(v[1]["id"])' <<<"$res")"
 res="$(api POST "/api/v1/cloud/repos/$crepo/restore" '{"snapshot":"'"$cfirst"'","pool":"tetap","name":"dari-cloud","admin_password":"'"$PASS"'"}')"
 [[ "$res" == *' 200' ]] || fail "pulihkan dari cloud: $res"
 for _ in $(seq 1 90); do
@@ -1014,10 +1019,37 @@ cmp -s "$WORK/dari-cloud.txt" "$WORK/tetap.txt" || fail "isi folder dari cloud l
 [[ "$out" != *awan.txt* ]] || fail "salinan pertama tidak boleh berisi file sesudahnya: $out"
 res="$(api POST /api/v1/shares/dari-cloud/delete "{\"confirm_name\":\"dari-cloud\",\"admin_password\":\"$PASS\"}")"
 [[ "$res" == *' 200' ]] || fail "hapus folder dari-cloud: $res"
+# Telusuri salinan terakhir, lalu pulihkan satu file saja ke folder baru.
+res="$(api GET "/api/v1/cloud/repos/$crepo/snapshots/$clast/files?path=")"
+json 'n={e["name"]:e["type"] for e in v["entries"]}; assert n.get("foto [1]")=="dir" and n.get("catatan.txt")=="file" and n.get("awan.txt")=="file", v' <<<"$res" \
+  || fail "isi akar salinan cloud: $res"
+res="$(api GET "/api/v1/cloud/repos/$crepo/snapshots/$clast/files?path=foto%20%5B1%5D")"
+json 'assert [(e["name"],e["size"]) for e in v["entries"]]==[("isi [x].txt",15)], v' <<<"$res" || fail "isi subfolder salinan cloud: $res"
+res="$(api GET "/api/v1/cloud/repos/$crepo/snapshots/$clast/files?path=..%2F..%2Fetc")"
+[[ "$res" == *' 400' ]] || fail "path keluar salinan harus ditolak: $res"
+res="$(api POST "/api/v1/cloud/repos/$crepo/restore" '{"snapshot":"'"$clast"'","pool":"tetap","name":"satu-file","path":"foto [1]/isi [x].txt","admin_password":"'"$PASS"'"}')"
+[[ "$res" == *' 200' ]] || fail "pulihkan satu file dari cloud: $res"
+for _ in $(seq 1 90); do
+  bk="$(api GET /api/v1/backups)"
+  json 'import sys; r=v["restores"][-1]; sys.exit(0 if r["name"]=="satu-file" and not r["running"] else 1)' <<<"$bk" && break
+  sleep 2
+done
+json 'r=v["restores"][-1]; assert r["ok"] and r["present"], r' <<<"$bk" || fail "pemulihan satu file dari cloud: $bk"
+res="$(api POST /api/v1/shares/satu-file "{\"permissions\":{\"user:budi\":\"read\"},\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "izin folder satu-file: $res"
+for _ in $(seq 1 10); do
+  out="$(smbclient //127.0.0.1/satu-file -p "$SMB_PORT" -m SMB3 -U "budi%$UPASS" -c 'get "foto [1]/isi [x].txt" '"$WORK"'/satu.txt; ls' 2>&1 || true)"
+  [[ "$out" == *"foto [1]"* ]] && break
+  sleep 2
+done
+cmp -s "$WORK/satu.txt" "$WORK/isi.txt" || fail "isi file satuan dari cloud lewat SMB: $out"
+[[ "$out" != *catatan.txt* ]] || fail "pemulihan satu file tidak boleh membawa file lain: $out"
+res="$(api POST /api/v1/shares/satu-file/delete "{\"confirm_name\":\"satu-file\",\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "hapus folder satu-file: $res"
 res="$(api POST "/api/v1/cloud/repos/$crepo/delete" '{"admin_password":"'"$PASS"'"}')"
 [[ "$res" == *' 200' ]] || fail "lupakan repo cloud: $res"
 docker rm -f sapo-uji-s3 >/dev/null 2>&1 || true
-echo "Backup cloud: repo restic terenkripsi di S3 (SeaweedFS), penuh lalu inkremental, isi tidak terbaca di server S3, repo dan password salah ditolak, pemulihan bencana dengan password saja ke folder baru terbaca lewat SMB"
+echo "Backup cloud: repo restic terenkripsi di S3 (SeaweedFS), penuh lalu inkremental, isi tidak terbaca di server S3, repo dan password salah ditolak, pemulihan bencana dengan password saja ke folder baru terbaca lewat SMB, isi salinan bisa ditelusuri dan satu file dipulihkan sendiri"
 else
 echo "Backup cloud: dilewati (docker tidak ada untuk server S3 uji)"
 fi
