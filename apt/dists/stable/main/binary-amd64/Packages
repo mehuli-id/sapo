@@ -1,0 +1,20 @@
+Package: sapo
+Version: 26.10
+Architecture: amd64
+Maintainer: PT. Mehuli Data Media <maintainer@mehuli.id>
+Installed-Size: 21090
+Depends: systemd, nftables, chrony, smartmontools, avahi-daemon, ca-certificates, wpasupplicant, iw, wireless-regdb
+Section: admin
+Priority: optional
+Homepage: https://github.com/mehuli-id/sapo
+Description: Sapo by Mehuli - sistem NAS dengan panel web ala DSM
+ Sapo mengelola storage, shared folder, akses jarak jauh, dan aplikasi
+ lewat panel web dengan wizard dan petunjuk. Paket ini memasang sapod
+ (agen sistem), sapo-api (server panel), dan panel web.
+ .
+ Tahap pra-alpha: jangan dipakai untuk data sungguhan.
+Filename: pool/main/s/sapo/sapo_26.10_amd64.deb
+Size: 5249956
+MD5sum: 050899a104d557cc1945aab4de6a600a
+SHA256: 7827afc802a4f22026b51c0f3d72fde32924dc0af05d11acd774edc34c8b7400
+
