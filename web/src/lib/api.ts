@@ -671,7 +671,9 @@ export const api = {
   addCloudRepo: (req: CloudRepoRequest) => post<{ id: string; password?: string }>("/api/v1/cloud/repos", req),
   deleteCloudRepo: (id: string, admin_password: string) => post<{ ok: boolean }>(`/api/v1/cloud/repos/${encodeURIComponent(id)}/delete`, { admin_password }),
   cloudSnapshots: (id: string) => get<CloudSnapshot[]>(`/api/v1/cloud/repos/${encodeURIComponent(id)}/snapshots`),
-  restoreCloud: (id: string, req: { snapshot: string; pool: string; name: string; admin_password: string }) =>
+  cloudFiles: (id: string, snap: string, path: string) =>
+    get<CloudFiles>(`/api/v1/cloud/repos/${encodeURIComponent(id)}/snapshots/${encodeURIComponent(snap)}/files?path=${encodeURIComponent(path)}`),
+  restoreCloud: (id: string, req: { snapshot: string; pool: string; name: string; path?: string; admin_password: string }) =>
     post<{ ok: boolean }>(`/api/v1/cloud/repos/${encodeURIComponent(id)}/restore`, req),
   setCloudJob: (req: { id?: string; repo: string; share: string; hour: number; keep_days: number; enabled: boolean; admin_password: string }) =>
     post<{ id: string }>("/api/v1/cloud/jobs", req),
@@ -841,6 +843,16 @@ export interface CloudSnapshot {
   share?: string
   job?: string
   path: string
+}
+export interface CloudEntry {
+  name: string
+  type: "dir" | "file" | "symlink" | "other"
+  size: number
+  mtime: string
+}
+export interface CloudFiles {
+  entries: CloudEntry[]
+  truncated: boolean
 }
 export interface CloudRepoRequest {
   name: string

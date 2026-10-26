@@ -63,6 +63,23 @@ func TestCloudAPI(t *testing.T) {
 	if rec := h.do(http.MethodPost, "/api/v1/cloud/repos/abc123/restore", map[string]any{"snapshot": "0123abcd", "pool": "tank", "name": "dari-cloud", "admin_password": adminPassword}); rec.Code != http.StatusOK {
 		t.Fatalf("pulihkan: %d %s", rec.Code, rec.Body)
 	}
+	// Satu file saja: path diteruskan ke sapod dan tercatat di audit.
+	if rec := h.do(http.MethodPost, "/api/v1/cloud/repos/abc123/restore", map[string]any{"snapshot": "0123abcd", "pool": "tank", "name": "satu-file", "path": "foto/liburan.jpg", "admin_password": adminPassword}); rec.Code != http.StatusOK {
+		t.Fatalf("pulihkan file: %d %s", rec.Code, rec.Body)
+	}
+	if p, _ := agent.param(proto.OpCloudRestore).(proto.CloudRestoreParams); p.Path != "foto/liburan.jpg" || p.Name != "satu-file" {
+		t.Fatalf("cloud.restore = %+v", p)
+	}
+	if logs, _ := os.ReadFile(filepath.Join(h.data, "audit.log")); !strings.Contains(string(logs), "foto/liburan.jpg") {
+		t.Fatal("path pemulihan tidak tercatat di audit")
+	}
+	agent.results[proto.OpCloudLs] = proto.CloudLsResult{Entries: []proto.CloudEntry{{Name: "liburan.jpg", Type: "file", Size: 3}}}
+	if rec := h.do(http.MethodGet, "/api/v1/cloud/repos/abc123/snapshots/0123abcd/files?path=foto%2Fa%20b", nil); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "liburan.jpg") {
+		t.Fatalf("isi salinan: %d %s", rec.Code, rec.Body)
+	}
+	if p, _ := agent.param(proto.OpCloudLs).(proto.CloudLsParams); p.Repo != "abc123" || p.Snapshot != "0123abcd" || p.Path != "foto/a b" {
+		t.Fatalf("cloud.ls = %+v", p)
+	}
 	// Backup cloud gagal: email; sumber cloud tidak terbaca bukan "pulih".
 	sent := &sentMail{}
 	h.s.notify.send = sent.send

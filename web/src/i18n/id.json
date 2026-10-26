@@ -1039,6 +1039,17 @@
     "sizes": "{added} baru diunggah dari {total}",
     "keepDays": "Simpan salinan selama (hari)",
     "keepWarning": "Salinan yang lebih lama dari ini akan dihapus dari cloud saat backup berikutnya.",
-    "deleteJobHelp": "Tugas dihapus. Salinan yang sudah ada di cloud tetap disimpan dan bisa dipulihkan."
+    "deleteJobHelp": "Tugas dihapus. Salinan yang sudah ada di cloud tetap disimpan dan bisa dipulihkan.",
+    "restoreWhat": "Yang dipulihkan",
+    "restoreAll": "Seluruh folder",
+    "restorePick": "File atau folder tertentu",
+    "pickHelp": "Buka folder dengan mengklik namanya, lalu pilih file atau folder yang ingin dipulihkan. Isinya muncul di folder baru dengan letak yang sama seperti di folder asal.",
+    "browseRoot": "Isi salinan",
+    "select": "Pilih",
+    "selected": "Dipilih: {path}",
+    "noneSelected": "Belum ada file atau folder yang dipilih.",
+    "emptyFolder": "Folder ini kosong.",
+    "truncated": "Hanya {n} isi pertama yang ditampilkan.",
+    "restoreItemStarted": "Pemulihan {path} ke folder baru {name} dimulai. Folder muncul di Shared Folder setelah selesai."
   }
 }

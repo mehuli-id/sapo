@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -20,6 +21,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/mehuli-id/sapo/internal/proto"
 )
@@ -51,6 +53,8 @@ type CloudTools struct {
 	StateFile, SecretsDir                                  string
 	CacheDir                                               string
 	MaxRun                                                 time.Duration
+	// ListMax: batas isi satu folder saat menelusuri salinan.
+	ListMax int
 }
 
 // Cloud melayani cloud.* dan menjalankan jadwalnya.
@@ -66,7 +70,18 @@ type Cloud struct {
 	// clockOK: jam NAS bisa dipercaya untuk memangkas salinan (diganti di
 	// test).
 	clockOK func(ctx context.Context) bool
+	// snapCache: daftar salinan per repo untuk menelusuri isi (setiap klik
+	// folder tidak perlu meminta daftar salinan lagi ke S3).
+	cacheMu   sync.Mutex
+	snapCache map[string]cachedSnaps
 }
+
+type cachedSnaps struct {
+	at   time.Time
+	list []proto.CloudSnapshot
+}
+
+const snapCacheTTL = 2 * time.Minute
 
 type cloudJobState struct {
 	proto.CloudJob
@@ -89,7 +104,10 @@ func NewCloud(t CloudTools, b *Backups) *Cloud {
 	if t.MaxRun == 0 {
 		t.MaxRun = 24 * time.Hour
 	}
-	c := &Cloud{t: t, b: b, running: map[string]bool{}}
+	if t.ListMax == 0 {
+		t.ListMax = 5000
+	}
+	c := &Cloud{t: t, b: b, running: map[string]bool{}, snapCache: map[string]cachedSnaps{}}
 	c.exec = c.systemdExec
 	c.clockOK = c.ntpOK
 	b.shares.cloud = c
@@ -802,6 +820,10 @@ func (c *Cloud) RestoreOp() Handler {
 		case !shareNamePattern.MatchString(p.Name) || slices.Contains(reservedShares, p.Name):
 			return nil, &OpError{Code: proto.ErrInvalidParams, Message: "nama folder tidak valid"}
 		}
+		rel, err := cloudRelPath(p.Path)
+		if err != nil {
+			return nil, err
+		}
 		st, err := c.get()
 		if err != nil {
 			return nil, err
@@ -823,18 +845,18 @@ func (c *Cloud) RestoreOp() Handler {
 		if err != nil {
 			return nil, err
 		}
-		var match []proto.CloudSnapshot
-		for _, s := range snaps {
-			if strings.HasPrefix(s.ID, p.Snapshot) {
-				match = append(match, s)
-			}
+		snap, err := pickSnapshot(snaps, p.Snapshot)
+		if err != nil {
+			return nil, err
 		}
-		if len(match) != 1 {
-			return nil, &OpError{Code: proto.ErrNotFound, Message: "salinan tidak ditemukan di repo (atau ID tidak unik)"}
-		}
-		snap := match[0]
-		target := p.Pool + "/" + p.Name
 		mp := filepath.Join(c.b.shares.t.MountBase, p.Pool, p.Name)
+		args := []string{"restore", snap.ID + ":" + snap.Path, "--target", mp}
+		if rel != "" {
+			// Hanya file/folder itu (beserta isinya); folder induknya ikut
+			// dibuat sehingga letaknya sama seperti di folder asal.
+			args = append(args, "--include", "/"+resticPattern(rel))
+		}
+		target := p.Pool + "/" + p.Name
 		repo := *r
 		return map[string]bool{"ok": true}, c.b.runRestore(ctx, "cloud:"+repo.ID, snap.ID[:min(len(snap.ID), 16)], p.Pool, p.Name, func(ctx context.Context) error {
 			if _, err := c.b.zfs(ctx, []string{"create", "-o", sharePropName + "=" + p.Name, "-o", "devices=off", "-o", "setuid=off"}, target); err != nil {
@@ -844,10 +866,17 @@ func (c *Cloud) RestoreOp() Handler {
 				_, _ = c.b.zfs(context.WithoutCancel(ctx), []string{"destroy", "-r"}, target)
 				return errors.New("folder baru tidak terpasang di " + mp)
 			}
-			if _, err := c.restic(ctx, repo, modeRestore(mp), "restore", snap.ID+":"+snap.Path, "--target", mp); err != nil {
+			if _, err := c.restic(ctx, repo, modeRestore(mp), args...); err != nil {
 				// Folder baru buatan pemulihan ini sendiri: aman dibuang.
 				_, _ = c.b.zfs(context.WithoutCancel(ctx), []string{"destroy", "-r"}, target)
 				return resticError(err)
+			}
+			// restic tidak menganggap --include tanpa hasil sebagai galat.
+			if rel != "" {
+				if _, err := os.Lstat(filepath.Join(mp, rel)); err != nil {
+					_, _ = c.b.zfs(context.WithoutCancel(ctx), []string{"destroy", "-r"}, target)
+					return &OpError{Code: proto.ErrNotFound, Message: "file atau folder tidak ada di salinan"}
+				}
 			}
 			// UID dan ACL dari repo bisa milik orang lain di NAS ini.
 			if err := c.b.resetFn(mp); err != nil {
@@ -857,6 +886,156 @@ func (c *Cloud) RestoreOp() Handler {
 			return nil
 		})
 	}
+}
+
+// pickSnapshot: satu salinan dengan awalan ID prefix (harus unik).
+func pickSnapshot(snaps []proto.CloudSnapshot, prefix string) (proto.CloudSnapshot, error) {
+	var match []proto.CloudSnapshot
+	for _, s := range snaps {
+		if strings.HasPrefix(s.ID, prefix) {
+			match = append(match, s)
+		}
+	}
+	if len(match) != 1 {
+		return proto.CloudSnapshot{}, &OpError{Code: proto.ErrNotFound, Message: "salinan tidak ditemukan di repo (atau ID tidak unik)"}
+	}
+	return match[0], nil
+}
+
+// cloudRelPath memeriksa path file/folder di dalam salinan (dari panel):
+// relatif, tanpa "."/".." atau komponen kosong. Hasil tanpa "/" di ujung.
+func cloudRelPath(p string) (string, error) {
+	p = strings.Trim(p, "/")
+	if p == "" {
+		return "", nil
+	}
+	bad := &OpError{Code: proto.ErrInvalidParams, Message: "path di dalam salinan tidak valid"}
+	if len(p) > 4096 || !utf8.ValidString(p) || strings.ContainsAny(p, "\x00\n\r") {
+		return "", bad
+	}
+	for _, part := range strings.Split(p, "/") {
+		if part == "" || part == "." || part == ".." {
+			return "", bad
+		}
+	}
+	return p, nil
+}
+
+// resticPattern: path sebagai pola --include restic yang hanya cocok dengan
+// path itu sendiri (karakter pola di-escape).
+func resticPattern(p string) string {
+	var b strings.Builder
+	for _, r := range p {
+		if strings.ContainsRune(`\*?[]`, r) {
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// cachedSnapshots: daftar salinan repo, dari cache bila belum lama.
+func (c *Cloud) cachedSnapshots(ctx context.Context, r proto.CloudRepo) ([]proto.CloudSnapshot, error) {
+	c.cacheMu.Lock()
+	e, ok := c.snapCache[r.ID]
+	c.cacheMu.Unlock()
+	if ok && time.Since(e.at) < snapCacheTTL {
+		return e.list, nil
+	}
+	list, err := c.listSnapshots(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	c.cacheMu.Lock()
+	c.snapCache[r.ID] = cachedSnaps{at: time.Now(), list: list}
+	c.cacheMu.Unlock()
+	return list, nil
+}
+
+// LsOp: cloud.ls. Isi satu folder di dalam salinan (hanya nama, jenis,
+// ukuran, waktu; isi file tidak dibaca). Akar salinan diambil dari daftar
+// salinan repo, bukan dari panel.
+func (c *Cloud) LsOp() Handler {
+	return func(ctx context.Context, raw json.RawMessage) (any, error) {
+		var p proto.CloudLsParams
+		if err := decodeParams(raw, &p); err != nil {
+			return nil, err
+		}
+		if !resticIDPattern.MatchString(p.Snapshot) {
+			return nil, &OpError{Code: proto.ErrInvalidParams, Message: "salinan tidak valid"}
+		}
+		rel, err := cloudRelPath(p.Path)
+		if err != nil {
+			return nil, err
+		}
+		st, err := c.get()
+		if err != nil {
+			return nil, err
+		}
+		r, ok := st.Repos[p.Repo]
+		if !ok {
+			return nil, &OpError{Code: proto.ErrNotFound, Message: "repo tidak ditemukan"}
+		}
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		defer cancel()
+		snaps, err := c.cachedSnapshots(ctx, *r)
+		if err != nil {
+			return nil, err
+		}
+		snap, err := pickSnapshot(snaps, p.Snapshot)
+		if err != nil {
+			return nil, err
+		}
+		dir := path.Clean(snap.Path)
+		if rel != "" {
+			dir = path.Join(dir, rel)
+		}
+		out, err := c.restic(ctx, *r, modeRead, "ls", "--json", snap.ID, dir)
+		if err != nil {
+			return nil, resticError(err)
+		}
+		return parseResticLs(out, dir, c.t.ListMax), nil
+	}
+}
+
+// parseResticLs: anak langsung dir dari keluaran restic ls --json (baris
+// pertama data salinan, lalu satu node per baris; dir sendiri ikut).
+func parseResticLs(out []byte, dir string, limit int) proto.CloudLsResult {
+	res := proto.CloudLsResult{Entries: []proto.CloudEntry{}}
+	for _, line := range bytes.Split(out, []byte("\n")) {
+		var n struct {
+			Struct string    `json:"struct_type"`
+			Name   string    `json:"name"`
+			Type   string    `json:"type"`
+			Path   string    `json:"path"`
+			Size   uint64    `json:"size"`
+			MTime  time.Time `json:"mtime"`
+		}
+		if json.Unmarshal(line, &n) != nil || n.Struct != "node" || path.Dir(n.Path) != dir || path.Base(n.Path) != n.Name || n.Name == "" {
+			continue
+		}
+		if len(res.Entries) >= limit {
+			res.Truncated = true
+			break
+		}
+		switch n.Type {
+		case "dir", "file", "symlink":
+		default:
+			n.Type = "other"
+		}
+		if n.Type == "dir" {
+			n.Size = 0
+		}
+		res.Entries = append(res.Entries, proto.CloudEntry{Name: n.Name, Type: n.Type, Size: n.Size, MTime: n.MTime.UTC()})
+	}
+	sort.Slice(res.Entries, func(i, j int) bool {
+		a, b := res.Entries[i], res.Entries[j]
+		if (a.Type == "dir") != (b.Type == "dir") {
+			return a.Type == "dir"
+		}
+		return a.Name < b.Name
+	})
+	return res
 }
 
 // ntpOK: jam tersinkron NTP, atau NTP sengaja dimatikan admin (jam diatur

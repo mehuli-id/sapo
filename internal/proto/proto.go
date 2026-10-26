@@ -143,6 +143,7 @@ const (
 	OpCloudJobDelete  = "cloud.job_delete"
 	OpCloudRun        = "cloud.run"
 	OpCloudRestore    = "cloud.restore"
+	OpCloudLs         = "cloud.ls"
 
 	// Installer ke disk (ADR 0016).
 	OpInstallStatus = "install.status"
@@ -1305,6 +1306,31 @@ type CloudRestoreParams struct {
 	Snapshot string `json:"snapshot"`
 	Pool     string `json:"pool"`
 	Name     string `json:"name"`
+	// Path: file/folder di dalam salinan (relatif terhadap akarnya) yang
+	// dipulihkan saja; kosong = seluruh salinan.
+	Path string `json:"path,omitempty"`
+}
+
+// CloudLsParams menelusuri satu folder (Path relatif, kosong = akar) di
+// dalam salinan Snapshot.
+type CloudLsParams struct {
+	Repo     string `json:"repo"`
+	Snapshot string `json:"snapshot"`
+	Path     string `json:"path"`
+}
+
+// CloudEntry: satu isi folder di salinan. Type: dir, file, symlink, other.
+type CloudEntry struct {
+	Name  string    `json:"name"`
+	Type  string    `json:"type"`
+	Size  uint64    `json:"size"`
+	MTime time.Time `json:"mtime"`
+}
+
+// CloudLsResult: isi folder; Truncated bila lebih dari batas daftar.
+type CloudLsResult struct {
+	Entries   []CloudEntry `json:"entries"`
+	Truncated bool         `json:"truncated"`
 }
 
 // CloudIDParams: satu repo atau tugas.

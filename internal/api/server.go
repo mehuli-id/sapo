@@ -305,6 +305,7 @@ func New(o Options) (*Server, error) {
 	s.mux.Handle("POST /api/v1/cloud/repos", s.requireAdmin(http.HandlerFunc(s.handleCloudRepoAdd)))
 	s.mux.Handle("POST /api/v1/cloud/repos/{id}/delete", s.requireAdmin(http.HandlerFunc(s.handleCloudRepoDelete)))
 	s.mux.Handle("GET /api/v1/cloud/repos/{id}/snapshots", s.requireAdmin(http.HandlerFunc(s.handleCloudSnapshots)))
+	s.mux.Handle("GET /api/v1/cloud/repos/{id}/snapshots/{snap}/files", s.requireAdmin(http.HandlerFunc(s.handleCloudLs)))
 	s.mux.Handle("POST /api/v1/cloud/repos/{id}/restore", s.requireAdmin(http.HandlerFunc(s.handleCloudRestore)))
 	s.mux.Handle("POST /api/v1/cloud/jobs", s.requireAdmin(http.HandlerFunc(s.handleCloudJobSet)))
 	s.mux.Handle("POST /api/v1/cloud/jobs/{id}/run", s.requireAdmin(http.HandlerFunc(s.handleCloudJobRun)))

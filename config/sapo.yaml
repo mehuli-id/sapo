@@ -167,7 +167,8 @@ agent:
 
   # Backup ke S3/cloud dengan restic (ADR 0020). Password repo dan kunci S3
   # disimpan di secrets_dir (0600, hanya root); restic berjalan di unit
-  # systemd terkunci, paling lama max_run_hours.
+  # systemd terkunci, paling lama max_run_hours. Saat menelusuri isi salinan,
+  # satu folder menampilkan paling banyak list_max_entries isi.
   cloud:
     restic: /usr/bin/restic
     journalctl: /usr/bin/journalctl
@@ -175,6 +176,7 @@ agent:
     secrets_dir: /var/lib/sapod/cloud
     cache_dir: /var/cache/sapo-restic
     max_run_hours: 24
+    list_max_entries: 5000
 
   # Installer ke disk (ADR 0016): hanya saat berjalan dari ISO (live_marker
   # ada). Sistem disalin dari squashfs ISO ke disk sistem (partisi BIOS boot,

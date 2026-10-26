@@ -101,6 +101,21 @@ func (s *Server) handleCloudSnapshots(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// handleCloudLs: isi satu folder di dalam salinan (nama file saja), untuk
+// memilih file/folder yang dipulihkan.
+func (s *Server) handleCloudLs(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(5*time.Minute + 10*time.Second))
+	var out proto.CloudLsResult
+	p := proto.CloudLsParams{Repo: r.PathValue("id"), Snapshot: r.PathValue("snap"), Path: r.URL.Query().Get("path")}
+	if err := s.agent.Call(ctx, proto.OpCloudLs, p, &out); err != nil {
+		s.agentError(w, proto.OpCloudLs, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // handleCloudJobSet: butuh password admin (data keluar dari NAS, dan lama
 // simpan yang lebih pendek membuang salinan lama).
 func (s *Server) handleCloudJobSet(w http.ResponseWriter, r *http.Request) {
@@ -183,14 +198,16 @@ func (s *Server) handleCloudJobDelete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-// handleCloudRestore: salinan dipulihkan menjadi shared folder baru (tanpa
-// izin pengguna bila folder asal tidak ada di NAS ini). Didaftarkan lewat
+// handleCloudRestore: salinan (atau satu file/folder di dalamnya, Path)
+// dipulihkan menjadi shared folder baru (tanpa izin pengguna bila folder asal
+// tidak ada di NAS ini). Didaftarkan lewat
 // GET /api/v1/backups setelah selesai, seperti pemulihan lain.
 func (s *Server) handleCloudRestore(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Snapshot      string `json:"snapshot"`
 		Pool          string `json:"pool"`
 		Name          string `json:"name"`
+		Path          string `json:"path"`
 		AdminPassword string `json:"admin_password"`
 	}
 	if !decodeJSON(w, r, &req) {
@@ -218,8 +235,11 @@ func (s *Server) handleCloudRestore(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(5*time.Minute + 10*time.Second))
 	repo := r.PathValue("id")
-	err = s.agent.Call(ctx, proto.OpCloudRestore, proto.CloudRestoreParams{Repo: repo, Snapshot: req.Snapshot, Pool: req.Pool, Name: req.Name}, nil)
+	err = s.agent.Call(ctx, proto.OpCloudRestore, proto.CloudRestoreParams{Repo: repo, Snapshot: req.Snapshot, Pool: req.Pool, Name: req.Name, Path: req.Path}, nil)
 	detail := map[string]string{"repo": auditText(repo), "snapshot": auditText(req.Snapshot), "pool": auditText(req.Pool), "share": req.Name}
+	if req.Path != "" {
+		detail["path"] = auditText(req.Path)
+	}
 	if err != nil {
 		detail["error"] = errorCode(err)
 	}

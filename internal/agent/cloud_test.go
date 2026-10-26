@@ -315,3 +315,107 @@ func TestResetOwnership(t *testing.T) {
 		t.Fatal("symlink harus tetap symlink")
 	}
 }
+
+const testSnapJSON = `[{"id":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","time":"2026-10-28T03:00:00Z","hostname":"nas-lama","paths":["/srv/sapo/tank/keluarga/.zfs/snapshot/sapo-cloud-x"],"tags":["sapo","job:x","share:keluarga"]}]`
+
+func TestCloudLs(t *testing.T) {
+	c, fr, _, _ := testCloud(t)
+	c.t.ListMax = 2
+	res, err := cloudCall(t, c.RepoAddOp(), proto.CloudRepoParams{Name: "x", Endpoint: "s3.example.com", Bucket: "abc", AccessKey: "a", SecretKey: "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := res.(proto.CloudRepoAdded).ID
+	fr.out["snapshots"] = testSnapJSON
+	base := "/srv/sapo/tank/keluarga/.zfs/snapshot/sapo-cloud-x"
+	fr.out["ls"] = `{"time":"2026-10-28T03:00:00Z","paths":["` + base + `"],"id":"0123","struct_type":"snapshot"}
+{"name":"foto","type":"dir","path":"` + base + `/foto","size":4096,"struct_type":"node"}
+{"name":"foto","type":"dir","path":"` + base + `/foto/foto","struct_type":"node"}
+{"name":"b.txt","type":"file","path":"` + base + `/foto/b.txt","size":5,"mtime":"2026-10-27T10:00:00+07:00","struct_type":"node"}
+{"name":"a","type":"dir","path":"` + base + `/foto/a","struct_type":"node"}
+{"name":"palsu","type":"file","path":"` + base + `/lain/palsu","struct_type":"node"}
+{"name":"z","type":"fifo","path":"` + base + `/foto/z","struct_type":"node"}
+potongan`
+	var oe *OpError
+	for _, bad := range []string{"../etc", "foto/../..", "foto//a", "a\x00b"} {
+		if _, err := cloudCall(t, c.LsOp(), proto.CloudLsParams{Repo: repo, Snapshot: "01234567", Path: bad}); !errors.As(err, &oe) || oe.Code != proto.ErrInvalidParams {
+			t.Errorf("path %q harus ditolak: %v", bad, err)
+		}
+	}
+	out, err := cloudCall(t, c.LsOp(), proto.CloudLsParams{Repo: repo, Snapshot: "01234567", Path: "/foto/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ls := out.(proto.CloudLsResult)
+	// Hanya anak langsung foto/, dibatasi ListMax (urutan restic), folder dulu.
+	if len(ls.Entries) != 2 || !ls.Truncated || ls.Entries[0].Name != "foto" || ls.Entries[1].Name != "b.txt" || ls.Entries[0].Type != "dir" {
+		t.Fatalf("isi = %+v", ls)
+	}
+	if argv := strings.Join(fr.find("ls"), " "); !strings.Contains(argv, "ls --json 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef "+base+"/foto") ||
+		!strings.Contains(argv, "--property=CapabilityBoundingSet= ") {
+		t.Fatalf("argv ls: %s", argv)
+	}
+	c.t.ListMax = 10
+	out, _ = cloudCall(t, c.LsOp(), proto.CloudLsParams{Repo: repo, Snapshot: "01234567", Path: "foto"})
+	if ls := out.(proto.CloudLsResult); len(ls.Entries) != 4 || ls.Truncated || ls.Entries[2].Name != "b.txt" || ls.Entries[2].Size != 5 || ls.Entries[3].Type != "other" {
+		t.Fatalf("isi = %+v", ls)
+	}
+	// Daftar salinan diambil sekali (cache).
+	n := 0
+	for _, a := range fr.calls {
+		if hasSub(a, "snapshots") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("daftar salinan diminta %d kali", n)
+	}
+}
+
+func TestCloudRestorePath(t *testing.T) {
+	c, fr, f, b := testCloud(t)
+	res, err := cloudCall(t, c.RepoAddOp(), proto.CloudRepoParams{Name: "x", Endpoint: "s3.example.com", Bucket: "abc", AccessKey: "a", SecretKey: "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := res.(proto.CloudRepoAdded).ID
+	fr.out["snapshots"] = testSnapJSON
+	mp := filepath.Join(b.shares.t.MountBase, "tank/pulih")
+	orig := b.propsFn
+	b.propsFn = func(ctx context.Context, ds string, names ...string) (map[string]string, error) {
+		if _, ok := f.ds[ds]; ok && strings.HasPrefix(ds, "tank/pulih") {
+			return map[string]string{"mounted": "yes", "mountpoint": filepath.Join(b.shares.t.MountBase, ds), "type": "filesystem"}, nil
+		}
+		return orig(ctx, ds, names...)
+	}
+	var oe *OpError
+	if _, err := cloudCall(t, c.RestoreOp(), proto.CloudRestoreParams{Repo: repo, Snapshot: "01234567", Pool: "tank", Name: "pulih", Path: "../x"}); !errors.As(err, &oe) || oe.Code != proto.ErrInvalidParams {
+		t.Fatalf("path keluar salinan: %v", err)
+	}
+	// "restic" memulihkan file yang diminta.
+	_ = os.MkdirAll(filepath.Join(mp, "foto [2026]"), 0o755)
+	_ = os.WriteFile(filepath.Join(mp, "foto [2026]/a*.jpg"), []byte("x"), 0o644)
+	if _, err := cloudCall(t, c.RestoreOp(), proto.CloudRestoreParams{Repo: repo, Snapshot: "01234567", Pool: "tank", Name: "pulih", Path: "foto [2026]/a*.jpg"}); err != nil {
+		t.Fatal(err)
+	}
+	b.runMu.Lock()
+	b.runMu.Unlock()
+	argv := fr.find("restore")
+	if got := argv[len(argv)-2:]; got[0] != "--include" || got[1] != `/foto \[2026\]/a\*.jpg` {
+		t.Fatalf("include = %q", got)
+	}
+	st, _ := b.loadLocked()
+	if r := st.Restores[len(st.Restores)-1]; !r.OK {
+		t.Fatalf("pemulihan = %+v", r)
+	}
+	// Tidak ada di salinan: folder baru dibuang, pemulihan gagal.
+	if _, err := cloudCall(t, c.RestoreOp(), proto.CloudRestoreParams{Repo: repo, Snapshot: "01234567", Pool: "tank", Name: "pulih2", Path: "tidak-ada.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	b.runMu.Lock()
+	b.runMu.Unlock()
+	st, _ = b.loadLocked()
+	if r := st.Restores[len(st.Restores)-1]; r.OK || r.Name != "pulih2" || !strings.Contains(strings.Join(f.calls, "\n"), "destroy -r tank/pulih2") {
+		t.Fatalf("pemulihan file yang tidak ada = %+v", r)
+	}
+}
