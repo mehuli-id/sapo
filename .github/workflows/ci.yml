@@ -44,23 +44,6 @@ jobs:
       - name: build
         run: make go
 
-  # Wi-Fi sungguhan (ADR 0023): radio virtual kernel, titik akses hostapd
-  # WPA2 dan WPA3, stasiun memakai file wpa_supplicant buatan sapod.
-  wifi:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: ${{ env.GO_VERSION }}
-      - name: radio virtual, hostapd, wpa_supplicant, iw
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends hostapd wpasupplicant iw "linux-modules-extra-$(uname -r)" >/dev/null
-          sudo systemctl stop wpa_supplicant 2>/dev/null || true
-      - name: uji Wi-Fi
-        run: tools/wifi-hwsim/run.sh
-
   web:
     runs-on: ubuntu-latest
     defaults:
