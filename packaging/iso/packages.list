@@ -4,9 +4,14 @@ sapo
 live-boot
 live-config
 live-config-systemd
-# Membuat user live (user/live) untuk debugging dari konsol.
-user-setup
-sudo
+# Firmware kartu jaringan kabel (Realtek, Broadcom, dan lainnya) dan
+# microcode CPU untuk komputer sungguhan (area non-free-firmware).
+firmware-realtek
+firmware-bnx2
+firmware-bnx2x
+firmware-misc-nonfree
+amd64-microcode
+intel-microcode
 # Pool ZFS (fitur storage-zfs). Modul dikompilasi DKMS saat ISO dibangun,
 # jadi header kernel ikut terpasang.
 linux-headers-amd64
