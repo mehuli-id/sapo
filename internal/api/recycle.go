@@ -43,6 +43,10 @@ func (s *Server) handleShareRecycle(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "shared folder tidak ditemukan")
 		return
 	}
+	if sh.TimeMachine != nil && req.Days > 0 {
+		writeErrorDetail(w, http.StatusConflict, "time_machine_share", "folder Time Machine tidak memakai tempat sampah", map[string]any{"field": "days"})
+		return
+	}
 	admin, ok := s.reauthField(w, r, req.AdminPassword, "admin_password")
 	if !ok {
 		return

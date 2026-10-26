@@ -265,6 +265,9 @@ export interface SharedFolder {
   // Tempat sampah: lama simpan (hari, 0 = mati) dan galat penyiapannya.
   recycle_days: number
   recycle_error?: string
+  // Tujuan Time Machine Mac dengan kuota (GB); tidak ada = bukan.
+  time_machine?: { quota_gb: number }
+  time_machine_error?: string
 }
 
 export interface ShareNFS {
@@ -718,6 +721,8 @@ export const api = {
   setSharePolicy: (share: string, policy: SnapshotPolicy | null, admin_password = "") =>
     post<{ ok: boolean; warning?: string }>(`/api/v1/shares/${encodeURIComponent(share)}/snapshot-policy`, { policy, admin_password }),
   recycle: () => get<RecycleUsage[]>("/api/v1/recycle"),
+  setShareTimeMachine: (share: string, enabled: boolean, quota_gb: number, admin_password: string) =>
+    post<{ ok: boolean; warning?: string }>(`/api/v1/shares/${encodeURIComponent(share)}/time-machine`, { enabled, quota_gb, admin_password }),
   setShareRecycle: (share: string, days: number, admin_password: string) =>
     post<{ ok: boolean; warning?: string }>(`/api/v1/shares/${encodeURIComponent(share)}/recycle`, { days, admin_password }),
   emptyShareRecycle: (share: string, confirm_name: string, admin_password: string) =>

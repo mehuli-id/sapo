@@ -72,7 +72,8 @@ const empty = () =>
     <p v-if="notice" class="flex items-center gap-2 text-sm"><CircleCheck class="size-4 text-emerald-600" />{{ notice }}</p>
     <p v-if="error" class="flex items-center gap-2 text-sm text-destructive" role="alert"><TriangleAlert class="size-4" />{{ error }}</p>
 
-    <form class="space-y-3" @submit.prevent="save">
+    <p v-if="share.time_machine" class="text-xs text-muted-foreground">{{ t("recycle.tmOff") }}</p>
+    <form v-else class="space-y-3" @submit.prevent="save">
       <label class="flex items-center gap-2 text-sm"><input v-model="form.enabled" type="checkbox" class="size-4 accent-primary" />{{ t("recycle.enable") }}</label>
       <div v-if="form.enabled" class="space-y-1.5">
         <Label :for="`rc-d-${share.name}`">{{ t("recycle.days") }}</Label>

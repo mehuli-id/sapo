@@ -1068,6 +1068,21 @@
     "confirmName": "Retype the folder name",
     "emptied": "Recycle bin emptied: {n} files deleted.",
     "emptyPartial": "Part of the recycle bin was deleted ({n} files). Time ran out; empty it again to continue.",
-    "error": "The recycle bin can't be used yet: {message}. Until then, items deleted over SMB are gone immediately."
+    "error": "The recycle bin can't be used yet: {message}. Until then, items deleted over SMB are gone immediately.",
+    "tmOff": "The recycle bin is not used in a Time Machine folder."
+  },
+  "timeMachine": {
+    "title": "Time Machine",
+    "on": "Time Machine destination, quota {quota} GB",
+    "off": "Not a Time Machine destination",
+    "help": "Make this folder a Time Machine backup destination for Macs on the network. The quota limits the space all Macs use in this folder; Macs see it as the disk size and remove old backups themselves when it is full. The recycle bin of this folder is turned off because Time Machine deletes many files on every backup.",
+    "enable": "Use as a Time Machine destination",
+    "quota": "Quota (GB)",
+    "quotaHelp": "Usually 2–3 times the Mac's used disk space. If several Macs use this folder, add them up.",
+    "howTo": "On the Mac: System Settings → General → Time Machine → Add Backup Disk, then choose {name} on this NAS. Sign in with a Sapo account that can write to this folder.",
+    "noWriters": "No user can write to this folder yet; grant access first so the Mac can sign in.",
+    "offHelp": "Existing Mac backups stay in the folder; the quota is removed.",
+    "saved": "Time Machine settings saved.",
+    "error": "The Time Machine quota can't be set yet: {message}"
   }
 }
