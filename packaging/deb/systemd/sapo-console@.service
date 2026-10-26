@@ -1,6 +1,7 @@
 [Unit]
 # Menu darurat Sapo di terminal fisik NAS (ADR 0008): reset password admin,
-# reset jaringan, restart, matikan. Menggantikan layar login di terminal ini
+# reset jaringan, sambungkan Wi-Fi (lewat socket sapod), restart, matikan.
+# Menggantikan layar login di terminal ini
 # (getty-nya di-mask oleh postinst); login konsol tetap ada di tty lain.
 Description=Menu darurat Sapo di %I
 Documentation=https://github.com/mehuli-id/sapo

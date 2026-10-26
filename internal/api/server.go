@@ -364,6 +364,7 @@ func New(o Options) (*Server, error) {
 	s.mux.Handle("POST /api/v1/updates/install", s.requireAdmin(http.HandlerFunc(s.handleUpdatesInstall)))
 	s.mux.Handle("GET /api/v1/network", s.requireAdmin(s.proxyRead(proto.OpNetworkStatus)))
 	s.mux.Handle("POST /api/v1/network", s.requireAdmin(http.HandlerFunc(s.handleNetworkApply)))
+	s.mux.Handle("POST /api/v1/network/wifi-scan", s.requireAdmin(http.HandlerFunc(s.handleWiFiScan)))
 	// Konfirmasi dan pembatalan cukup dengan token dari network.apply (256
 	// bit, hanya diketahui browser admin): setelah alamat NAS berubah, admin
 	// belum login di alamat baru.

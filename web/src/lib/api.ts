@@ -283,6 +283,16 @@ export interface NetworkInterfaceConfig {
   // IPv4 dengan prefiks, misalnya 192.168.1.10/24
   address?: string
   gateway?: string
+  // Wi-Fi (ADR 0023): password hanya dikirim, tidak pernah diterima;
+  // kosong = tetap memakai password tersimpan untuk SSID yang sama.
+  wifi?: { ssid: string; password?: string }
+}
+
+export interface WiFiSeen {
+  ssid: string
+  signal_dbm: number
+  // WPA2/WPA3 Personal (yang bisa dipakai)
+  secure: boolean
 }
 
 export interface NetworkConfig {
@@ -295,7 +305,7 @@ export interface NetworkStatus {
   hostname: string
   // Pengaturan terakhir yang dikonfirmasi (kosong = belum diatur dari panel).
   config?: NetworkConfig
-  interfaces: { name: string; mac: string; up: boolean; speed_mbps?: number; addresses: string[] }[]
+  interfaces: { name: string; mac: string; up: boolean; speed_mbps?: number; addresses: string[]; wireless?: boolean; ssid?: string; signal_dbm?: number }[]
   gateway?: string
   dns: string[]
   pending?: { confirm_by: string; config: NetworkConfig }
@@ -746,6 +756,7 @@ export const api = {
   applyNetwork: (config: NetworkConfig, admin_password: string) => post<NetworkApplyResult>("/api/v1/network", { config, admin_password }),
   confirmNetwork: (token: string) => post<{ ok: boolean }>("/api/v1/network/confirm", { token }),
   cancelNetwork: (token: string) => post<{ ok: boolean }>("/api/v1/network/cancel", { token }),
+  scanWiFi: (iface: string) => post<WiFiSeen[]>("/api/v1/network/wifi-scan", { interface: iface }),
   scrubPool: (name: string, action: "start" | "stop") =>
     post<{ ok: boolean }>(`/api/v1/storage/pools/${encodeURIComponent(name)}/scrub`, { action }),
   replacePoolDisk: (name: string, req: { old_guid: string; disk: DiskRef; password: string; allow_usb?: boolean }) =>

@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/mehuli-id/sapo/internal/proto"
 )
@@ -37,8 +39,9 @@ func (s *Server) handleNetworkApply(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// networkText: pengaturan untuk log audit (tanpa password Wi-Fi).
 func networkText(c proto.NetworkConfig) string {
-	b, _ := json.Marshal(c)
+	b, _ := json.Marshal(c.Redacted())
 	s := string(b)
 	if len(s) > 1000 {
 		s = s[:1000] + "…"
@@ -69,4 +72,20 @@ func (s *Server) handleNetworkToken(op, action string) http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	}
+}
+
+// handleWiFiScan: jaringan Wi-Fi di sekitar antarmuka nirkabel (ADR 0023).
+func (s *Server) handleWiFiScan(w http.ResponseWriter, r *http.Request) {
+	var req proto.WiFiScanParams
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+	defer cancel()
+	var out []proto.WiFiSeen
+	if err := s.agent.Call(ctx, proto.OpNetworkWiFiScan, req, &out); err != nil {
+		s.agentError(w, proto.OpNetworkWiFiScan, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }

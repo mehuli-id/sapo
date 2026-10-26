@@ -5,11 +5,11 @@ Ada dua jenis ISO dari skrip yang sama (`FLAVOR` di `build.sh`, data di `iso.con
 - **Rilis** (`sapo_<versi>_amd64.iso`): dari tag `v*`, dilampirkan ke halaman [GitHub Releases](https://github.com/mehuli-id/sapo/releases). Untuk memasang Sapo ke komputer. Tanpa akun debug.
 - **Dev** (`sapo-dev_<versi>_amd64.iso`): dari setiap push ke `main`, untuk pengembang dan penguji. Ada akun debug `user` di konsol.
 
-Keduanya berisi firmware kartu jaringan (Realtek, Broadcom, Intel), GPU Intel dan AMD, dan microcode CPU (area `non-free-firmware` Debian; Wi-Fi dan firmware GPU NVIDIA tidak), dan keduanya lolos uji asap QEMU yang sama sebelum diterbitkan.
+Keduanya berisi firmware kartu jaringan kabel dan Wi-Fi (Realtek, Broadcom, Intel, Atheros/Qualcomm, MediaTek), GPU Intel dan AMD, dan microcode CPU (area `non-free-firmware` Debian; firmware GPU NVIDIA tidak), dan keduanya lolos uji asap QEMU yang sama sebelum diterbitkan.
 
 ## Memasang Sapo ke komputer (ISO rilis)
 
-Komputer Intel/AMD 64-bit (BIOS atau UEFI), RAM minimal 4 GB, disk sistem minimal 16 GB, dan **kabel LAN** (Wi-Fi belum didukung). Sebaiknya satu disk lagi (atau lebih) untuk data, karena disk sistem tidak dipakai untuk pool.
+Komputer Intel/AMD 64-bit (BIOS atau UEFI), RAM minimal 4 GB, disk sistem minimal 16 GB, dan kabel LAN atau Wi-Fi (WPA2/WPA3 Personal). Kabel lebih cepat dan stabil untuk NAS. Sebaiknya satu disk lagi (atau lebih) untuk data, karena disk sistem tidak dipakai untuk pool.
 
 1. **Unduh** `sapo_<versi>_amd64.iso` dan `.sha256` dari GitHub Releases, lalu periksa: `shasum -a 256 -c sapo_<versi>_amd64.iso.sha256` (macOS) atau `sha256sum -c …` (Linux).
 2. **Tulis ke flashdisk** (minimal 2 GB; seluruh isinya terhapus). ISO ini *hybrid*: ditulis apa adanya, tanpa diekstrak.
@@ -18,9 +18,10 @@ Komputer Intel/AMD 64-bit (BIOS atau UEFI), RAM minimal 4 GB, disk sistem minima
    - Linux: `sudo dd if=sapo_<versi>_amd64.iso of=/dev/sdX bs=4M conv=fsync`.
    - Periksa nomor disk dua kali: `dd` ke disk yang salah menghapusnya.
 3. **Boot dari flashdisk** lewat menu boot komputer (biasanya F12, F11, F8, atau Esc). Bila ditolak, matikan **Secure Boot** di BIOS/UEFI (belum didukung).
-4. Setelah boot, layar konsol menampilkan alamat panel (`https://<IP>:5001`) dan sidik jari sertifikat. Buka dari komputer lain di jaringan yang sama, cocokkan sidik jarinya, lalu jalankan setup awal (akun admin dan 2FA).
-5. **Storage Manager → Pasang ke disk** (ADR 0016): pilih disk sistem, ketik ulang namanya, masukkan password. Disk itu dihapus total. Pengaturan dari sesi USB (admin, pengguna, pool) ikut tersalin.
-6. Cabut flashdisk dan restart. Sapo boot dari disk. Buat pool data di Storage Manager bila belum.
+4. Tanpa kabel LAN: di menu konsol pilih **5. Sambungkan Wi-Fi**, pilih jaringan, lalu ketik password-nya (tidak tampil di layar). Bila tidak tersambung, pengaturan lama dikembalikan.
+5. Setelah boot, layar konsol menampilkan alamat panel (`https://<IP>:5001`) dan sidik jari sertifikat. Buka dari komputer lain di jaringan yang sama, cocokkan sidik jarinya, lalu jalankan setup awal (akun admin dan 2FA).
+6. **Storage Manager → Pasang ke disk** (ADR 0016): pilih disk sistem, ketik ulang namanya, masukkan password. Disk itu dihapus total. Pengaturan dari sesi USB (admin, pengguna, pool) ikut tersalin.
+7. Cabut flashdisk dan restart. Sapo boot dari disk. Buat pool data di Storage Manager bila belum.
 
 Pembaruan Sapo berikutnya datang dari repo APT saluran *stable* (Control Panel → Pembaruan).
 
@@ -108,6 +109,6 @@ Hasilnya `dist/sapo-dev_<versi>_amd64.iso` (atau `sapo_<versi>_amd64.iso`) beser
 
 Installer ke disk sudah ada di panel (ADR 0016). Yang belum:
 
-- Secure Boot (shim bertanda tangan) dan Wi-Fi,
+- Secure Boot (shim bertanda tangan), Wi-Fi Enterprise (802.1X),
 - repo APT lokal berisi paket fitur utama agar fitur bisa diaktifkan tanpa internet,
 - sistem di atas ZFS boot environments untuk rollback update.

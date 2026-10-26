@@ -87,7 +87,7 @@ var staticCfg = proto.NetworkConfig{
 
 func TestNetworkCheckConfig(t *testing.T) {
 	n, _, _ := testNetwork(t)
-	good, err := n.checkConfig(proto.NetworkConfig{Hostname: "sapo", Interfaces: []proto.NetworkInterface{{Name: "eth1", Mode: "static", Address: "192.168.5.20/24"}}})
+	good, err := n.checkConfig(proto.NetworkConfig{Hostname: "sapo", Interfaces: []proto.NetworkInterface{{Name: "eth1", Mode: "static", Address: "192.168.5.20/24"}}}, proto.NetworkConfig{})
 	if err != nil || len(good.Interfaces) != 2 || good.Interfaces[0].Mode != "dhcp" {
 		t.Fatalf("antarmuka yang tidak disebut harus DHCP: %+v %v", good, err)
 	}
@@ -108,7 +108,7 @@ func TestNetworkCheckConfig(t *testing.T) {
 		"DNS loopback":          {Hostname: "sapo", DNS: []string{"127.0.0.1"}, Interfaces: []proto.NetworkInterface{{Name: "eth0", Mode: "static", Address: "192.168.1.10/24"}, {Name: "eth1", Mode: "off"}}},
 	}
 	for name, c := range bad {
-		if _, err := n.checkConfig(c); err == nil {
+		if _, err := n.checkConfig(c, proto.NetworkConfig{}); err == nil {
 			t.Errorf("%s harus ditolak", name)
 		}
 	}
@@ -234,11 +234,11 @@ func TestNetworkCancelAndRecover(t *testing.T) {
 func TestNetworkOffAndUnmanagedFiles(t *testing.T) {
 	n, dir, _ := testNetwork(t)
 	cfg := proto.NetworkConfig{Hostname: "sapo", Interfaces: []proto.NetworkInterface{{Name: "eth0", Mode: "dhcp"}, {Name: "eth1", Mode: "off"}}}
-	got, err := n.checkConfig(cfg)
+	got, err := n.checkConfig(cfg, proto.NetworkConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := string(renderInterfaces(got))
+	r := string(renderInterfaces(got, n.wpaConfPath))
 	if strings.Contains(r, "auto eth1") || !strings.Contains(r, "iface eth1 inet manual") || !strings.Contains(r, "auto eth0\niface eth0 inet dhcp") {
 		t.Fatalf("antarmuka yang tidak dipakai tidak boleh dinyalakan:\n%s", r)
 	}

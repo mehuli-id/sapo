@@ -1,5 +1,6 @@
 // Package console adalah menu darurat di konsol NAS (sapo-console, ADR
-// 0008): reset password admin, reset jaringan, restart, dan matikan. Menu
+// 0008): reset password admin, reset jaringan, sambungkan Wi-Fi (ADR 0023),
+// restart, dan matikan. Menu
 // hanya membaca keyboard dan menulis ke layar yang terpasang ke NAS; tidak
 // ada masukan dari jaringan.
 package console
@@ -50,6 +51,14 @@ type Menu struct {
 	// SecretTimeout: password sementara dihapus dari layar setelah selang
 	// ini bila tidak ada yang menekan Enter.
 	SecretTimeout time.Duration
+	// Agent: operasi sapod (Wi-Fi); nil = tidak tersedia.
+	Agent Agent
+	// Echo menyalakan/mematikan gema keyboard (password Wi-Fi tidak tampil);
+	// Sleep diganti di test.
+	Echo  func(on bool)
+	Sleep func(time.Duration)
+	// DevLogin: ada akun debug ISO dev (petunjuk login konsol ditampilkan).
+	DevLogin bool
 
 	msg   map[string]string
 	lines chan lineResult
@@ -57,7 +66,10 @@ type Menu struct {
 
 type lineResult struct {
 	line string
-	err  error
+	// raw: baris apa adanya (tanpa akhir baris), untuk SSID dan password
+	// yang boleh berawalan atau berakhiran spasi.
+	raw string
+	err error
 }
 
 // NewMenu menyiapkan menu dengan bahasa setup awal (bawaan Indonesia).
@@ -100,6 +112,12 @@ func (m *Menu) readLine() (string, error) {
 	return r.line, r.err
 }
 
+// readRaw membaca satu baris tanpa membuang spasi.
+func (m *Menu) readRaw() (string, error) {
+	r := <-m.lines
+	return r.raw, r.err
+}
+
 // readLines membaca keyboard di latar belakang, agar menu bisa digambar
 // ulang sambil menunggu.
 func (m *Menu) readLines() {
@@ -109,7 +127,7 @@ func (m *Menu) readLines() {
 			m.lines <- lineResult{err: err}
 			return
 		}
-		m.lines <- lineResult{line: strings.TrimSpace(line)}
+		m.lines <- lineResult{line: strings.TrimSpace(line), raw: strings.TrimRight(line, "\r\n")}
 	}
 }
 
@@ -177,7 +195,9 @@ func (m *Menu) Loop(ctx context.Context) error {
 			done = m.power(ctx, "reboot", "confirmReboot")
 		case "4":
 			done = m.power(ctx, "poweroff", "confirmPoweroff")
-		case "5", "":
+		case "5":
+			done = m.connectWiFi(ctx)
+		case "6", "":
 			continue
 		default:
 			m.printf("%s\n", m.t("invalid"))
@@ -215,7 +235,11 @@ func (m *Menu) screen() {
 		text := strings.NewReplacer(`\4`, first, `\n`, host).Replace(string(data))
 		m.printf("%s", printable(text))
 	}
-	m.printf("\n%s\n\n%s\n%s", m.t("menu"), m.t("devLogin"), m.t("choose"))
+	m.printf("\n%s\n\n", m.t("menu"))
+	if m.DevLogin {
+		m.printf("%s\n", m.t("devLogin"))
+	}
+	m.printf("%s", m.t("choose"))
 }
 
 // printable membuang karakter kendali selain baris baru (tidak ada escape

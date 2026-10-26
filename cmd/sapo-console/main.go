@@ -1,5 +1,5 @@
 // sapo-console adalah menu darurat di konsol NAS (ADR 0008): reset password
-// admin, reset jaringan, restart, dan matikan. Dijalankan systemd sebagai
+// admin, reset jaringan, sambungkan Wi-Fi (ADR 0023), restart, dan matikan. Dijalankan systemd sebagai
 // root di terminal fisik (sapo-console@tty1.service); tidak menerima
 // masukan dari jaringan.
 //
@@ -16,8 +16,11 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"os/user"
 	"syscall"
+	"time"
 
+	"github.com/mehuli-id/sapo/internal/agent"
 	"github.com/mehuli-id/sapo/internal/audit"
 	"github.com/mehuli-id/sapo/internal/config"
 	"github.com/mehuli-id/sapo/internal/console"
@@ -58,6 +61,13 @@ func main() {
 		data = unavailable{err}
 	}
 	m.Data = data
+	// Wi-Fi lewat operasi sapod (root ke socket sapod).
+	m.Agent = &agent.Client{Socket: cfg.Agent.Socket, Timeout: 2 * time.Minute}
+	m.Echo = func(on bool) { setEcho(int(os.Stdin.Fd()), on) }
+	// Akun debug hanya ada di ISO dev (packages-dev.list).
+	if _, err := user.Lookup("user"); err == nil {
+		m.DevLogin = true
+	}
 	if err := m.Loop(ctx); err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

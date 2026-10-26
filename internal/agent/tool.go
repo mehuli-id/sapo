@@ -36,20 +36,30 @@ func runTool(ctx context.Context, timeout time.Duration, prog string, flags []st
 	return runToolInput(ctx, timeout, prog, nil, flags, operands...)
 }
 
+// runToolArgs menjalankan prog dengan args apa adanya, TANPA "--". Hanya
+// untuk program yang menolak "--" (iw); pemanggil wajib memastikan tidak ada
+// argumen dari luar yang berawal "-" (misalnya nama antarmuka yang sudah
+// diperiksa ada di sistem).
+func runToolArgs(ctx context.Context, timeout time.Duration, prog string, args ...string) (toolResult, error) {
+	return runCommand(ctx, timeout, prog, nil, args)
+}
+
 // runToolInput sama dengan runTool, dengan stdin berisi input (misalnya
 // password untuk smbpasswd -s, agar tidak pernah muncul di argumen proses).
 func runToolInput(ctx context.Context, timeout time.Duration, prog string, input []byte, flags []string, operands ...string) (toolResult, error) {
+	args := make([]string, 0, len(flags)+1+len(operands))
+	args = append(args, flags...)
+	args = append(args, "--")
+	args = append(args, operands...)
+	return runCommand(ctx, timeout, prog, input, args)
+}
+
+func runCommand(ctx context.Context, timeout time.Duration, prog string, input []byte, args []string) (toolResult, error) {
 	if !filepath.IsAbs(prog) {
 		return toolResult{}, fmt.Errorf("%w: %q bukan path absolut", errToolMissing, prog)
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-
-	args := make([]string, 0, len(flags)+1+len(operands))
-	args = append(args, flags...)
-	args = append(args, "--")
-	args = append(args, operands...)
-
 	cmd := exec.CommandContext(ctx, prog, args...)
 	cmd.Env = toolEnv
 	cmd.Dir = "/"

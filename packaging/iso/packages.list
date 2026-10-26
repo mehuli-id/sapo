@@ -5,9 +5,14 @@ live-boot
 live-config
 live-config-systemd
 # Firmware untuk komputer sungguhan (area non-free-firmware): kartu jaringan
-# kabel (Realtek, Broadcom, Intel), GPU Intel dan AMD (layar konsol; di
-# Debian 13 dipisah dari firmware-misc-nonfree), dan microcode CPU. Wi-Fi
-# dan firmware GPU NVIDIA sengaja tidak disertakan.
+# kabel dan Wi-Fi (Realtek, Broadcom, Intel, Atheros/Qualcomm, MediaTek;
+# ADR 0023), GPU Intel dan AMD (layar konsol; di Debian 13 dipisah dari
+# firmware-misc-nonfree), dan microcode CPU. Firmware GPU NVIDIA sengaja
+# tidak disertakan.
+firmware-iwlwifi
+firmware-atheros
+firmware-brcm80211
+firmware-mediatek
 firmware-realtek
 firmware-bnx2
 firmware-bnx2x

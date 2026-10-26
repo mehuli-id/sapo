@@ -613,6 +613,20 @@
       "ok": "The new network settings were confirmed and saved.",
       "failed": "No network change is waiting for confirmation (it may already be confirmed, cancelled, or expired).",
       "open": "Open the panel"
+    },
+    "wifi": {
+      "help": "WPA2/WPA3 Personal. Scan to pick a network, or type the name of a hidden network.",
+      "scan": "Scan",
+      "none": "No networks visible.",
+      "strong": "strong signal",
+      "medium": "medium signal",
+      "weak": "weak signal",
+      "unsupported": "open/Enterprise (not supported)",
+      "ssid": "Network name (SSID)",
+      "password": "Wi-Fi password",
+      "keepPassword": "leave empty to keep the saved password",
+      "connected": "Connected to {ssid} ({signal})",
+      "notConnected": "Not connected"
     }
   },
   "monitor": {
