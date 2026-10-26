@@ -118,8 +118,15 @@ func main() {
 		Exportfs: shc.Exportfs, Systemctl: shc.Systemctl, ExportsFile: shc.ExportsFile, NFSService: shc.NFSService, SMBService: shc.SMBService,
 		DenyNetworks: []string{cfg.Agent.Apps.Subnet},
 		IDMin:        ac.IDMin, IDMax: ac.IDMax,
+		RecycleExclude: cfg.Agent.Recycle.Exclude,
 	})
 	shares.SetAccounts(accounts)
+	rc := cfg.Agent.Recycle
+	recycle := agent.NewRecycle(shares, agent.RecycleTools{Check: time.Duration(rc.CheckMinutes) * time.Minute,
+		EmptyTimeout: time.Duration(rc.EmptyTimeoutSeconds) * time.Second})
+	go recycle.Run(context.Background())
+	reg.Register(proto.OpRecycleStatus, recycle.StatusOp())
+	reg.Register(proto.OpRecycleEmpty, recycle.EmptyOp())
 	ec := cfg.Agent.External
 	external := agent.NewExternal(agent.ExternalTools{
 		Mount: ec.Mount, Umount: ec.Umount, Lsblk: sc.Lsblk, MountBase: ec.MountBase, StateFile: ec.StateFile,
@@ -139,7 +146,7 @@ func main() {
 		Helper: self, MountBase: pc.MountBase, GroupFile: ac.GroupFile, MaxEntries: fc.MaxEntries,
 		Timeout: time.Duration(fc.TimeoutSeconds) * time.Second, DeleteTimeout: time.Duration(fc.DeleteTimeoutSeconds) * time.Second,
 		RestoreMaxFiles: fc.RestoreMaxFiles, RestoreMaxBytes: int64(fc.RestoreMaxGB) << 30,
-		RestoreLabel: fc.RestoreLabel, ReplacedLabel: fc.ReplacedLabel,
+		RestoreLabel: fc.RestoreLabel, ReplacedLabel: fc.ReplacedLabel, DeletedLabel: fc.DeletedLabel,
 		IDMin: ac.IDMin, IDMax: ac.IDMax,
 	}, shares, accounts.Managed)
 	apc := cfg.Agent.Apps

@@ -136,6 +136,9 @@ func fsDo(req fsRequest) (any, error) {
 		})
 	case "delete":
 		parent, name := splitParent(req.Path)
+		if req.Recycle == recycleDir && !inRecycle(req.Path) {
+			return nil, withDir(root, parent, func(pfd int) error { return moveToRecycle(root, pfd, parent, name, req.Label) })
+		}
 		return nil, withDir(root, parent, func(pfd int) error { return removeAt(pfd, name, 0) })
 	case "open_read":
 		fd, err := openBeneath(root, req.Path, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_NOCTTY, 0)
@@ -323,6 +326,48 @@ func removeAt(dirfd int, name string, depth int) error {
 		}
 	}
 	return unix.Unlinkat(dirfd, name, unix.AT_REMOVEDIR)
+}
+
+// moveToRecycle memindah name (di pfd, folder parent) ke #recycle/parent
+// di akar folder (ADR 0021), membuat folder perantara bila perlu. Nama yang
+// sudah ada di tempat sampah tidak ditimpa: diberi akhiran label.
+func moveToRecycle(root, pfd int, parent, name, label string) error {
+	var st unix.Stat_t
+	if err := unix.Fstatat(pfd, name, &st, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		return err
+	}
+	dfd, err := openOrMkdir(root, recycleDir)
+	if err != nil {
+		return err
+	}
+	if parent != "" {
+		for _, c := range strings.Split(parent, "/") {
+			nfd, err := openOrMkdir(dfd, c)
+			unix.Close(dfd)
+			if err != nil {
+				return err
+			}
+			dfd = nfd
+		}
+	}
+	defer unix.Close(dfd)
+	dest, _, err := restoreName(dfd, name, false, label)
+	if err != nil {
+		return err
+	}
+	return unix.Renameat2(pfd, name, dfd, dest, unix.RENAME_NOREPLACE)
+}
+
+// openOrMkdir membuka folder name di dfd, membuatnya dulu bila belum ada.
+func openOrMkdir(dfd int, name string) (int, error) {
+	fd, err := openBeneath(dfd, name, unix.O_PATH|unix.O_DIRECTORY, 0)
+	if errors.Is(err, unix.ENOENT) {
+		if err := unix.Mkdirat(dfd, name, 0o777); err != nil && !errors.Is(err, unix.EEXIST) {
+			return -1, err
+		}
+		fd, err = openBeneath(dfd, name, unix.O_PATH|unix.O_DIRECTORY, 0)
+	}
+	return fd, err
 }
 
 // fdSocket: unix socket ke sapod (fd 3 dari ExtraFiles; diganti di test).

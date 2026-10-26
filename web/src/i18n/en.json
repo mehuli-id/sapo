@@ -1051,5 +1051,23 @@
     "emptyFolder": "This folder is empty.",
     "truncated": "Only the first {n} items are shown.",
     "restoreItemStarted": "Restoring {path} to the new folder {name} has started. The folder appears in Shared Folders when done."
+  },
+  "recycle": {
+    "title": "Recycle bin",
+    "on": "On, items are kept for {days} days",
+    "off": "Off: deleted items are gone immediately",
+    "help": "Items deleted over SMB, File Station, or WebDAV are moved to the #recycle folder inside this folder, at the same location. To restore, open #recycle and move the files back. Items older than the retention period are removed automatically. Deleting something inside #recycle deletes it permanently. The recycle bin still uses the folder's space.",
+    "usage": "Current contents: {size} in {n} files (checked {when})",
+    "enable": "Turn on the recycle bin",
+    "days": "Keep for (days)",
+    "shorter": "Items in the recycle bin older than this will be removed at the next check.",
+    "offKeeps": "Items already in #recycle are kept until it is emptied.",
+    "saved": "Recycle bin settings saved.",
+    "empty": "Empty now",
+    "emptyHelp": "Everything in the recycle bin of folder {name} is deleted permanently and cannot be recovered (except from a snapshot or backup). Retype the folder name to confirm.",
+    "confirmName": "Retype the folder name",
+    "emptied": "Recycle bin emptied: {n} files deleted.",
+    "emptyPartial": "Part of the recycle bin was deleted ({n} files). Time ran out; empty it again to continue.",
+    "error": "The recycle bin can't be used yet: {message}. Until then, items deleted over SMB are gone immediately."
   }
 }

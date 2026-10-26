@@ -1051,5 +1051,23 @@
     "emptyFolder": "Folder ini kosong.",
     "truncated": "Hanya {n} isi pertama yang ditampilkan.",
     "restoreItemStarted": "Pemulihan {path} ke folder baru {name} dimulai. Folder muncul di Shared Folder setelah selesai."
+  },
+  "recycle": {
+    "title": "Tempat sampah",
+    "on": "Menyala, isi disimpan {days} hari",
+    "off": "Mati: yang dihapus langsung hilang",
+    "help": "Yang dihapus lewat SMB, File Station, atau WebDAV dipindah ke folder #recycle di dalam folder ini dengan letak yang sama. Untuk memulihkan, buka #recycle dan pindahkan file kembali. Isi yang lebih lama dari lama simpan dibuang otomatis. Menghapus sesuatu di dalam #recycle menghapusnya permanen. Isi tempat sampah tetap memakai ruang folder.",
+    "usage": "Isi sekarang: {size} dalam {n} file (diperiksa {when})",
+    "enable": "Nyalakan tempat sampah",
+    "days": "Simpan selama (hari)",
+    "shorter": "Isi tempat sampah yang lebih lama dari ini akan dibuang pada pemeriksaan berikutnya.",
+    "offKeeps": "Isi yang sudah ada di #recycle tetap disimpan sampai dikosongkan.",
+    "saved": "Pengaturan tempat sampah disimpan.",
+    "empty": "Kosongkan sekarang",
+    "emptyHelp": "Seluruh isi tempat sampah folder {name} dihapus permanen dan tidak bisa dikembalikan (kecuali dari snapshot atau backup). Ketik ulang nama folder untuk memastikan.",
+    "confirmName": "Ketik ulang nama folder",
+    "emptied": "Tempat sampah dikosongkan: {n} file dihapus.",
+    "emptyPartial": "Sebagian isi tempat sampah sudah dihapus ({n} file). Waktu habis; kosongkan lagi untuk melanjutkan.",
+    "error": "Tempat sampah belum bisa dipakai: {message}. Selama itu, yang dihapus lewat SMB langsung hilang."
   }
 }

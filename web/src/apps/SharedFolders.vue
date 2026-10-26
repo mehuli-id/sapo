@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Shared folder (hanya admin): daftar folder, cara membukanya dari komputer
-// lain, izin per pengguna dan grup, ekspor NFS, dan hapus folder. Folder
+// lain, izin per pengguna dan grup, ekspor NFS, snapshot, tempat sampah, dan
+// hapus folder. Folder
 // baru dibuat lewat wizard (wizards/share-create.yaml).
 import { onMounted, reactive, ref } from "vue"
 import { useI18n } from "vue-i18n"
@@ -11,9 +12,10 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useSession } from "@/composables/useSession"
-import type { PoolsResult, ShareAccess, SharedFolder, SnapshotPolicy, UserAccount, UserGroup, Wizard } from "@/lib/api"
+import type { PoolsResult, RecycleUsage, ShareAccess, SharedFolder, SnapshotPolicy, UserAccount, UserGroup, Wizard } from "@/lib/api"
 import { api, ApiError, wizardActions } from "@/lib/api"
 import { formatBytes } from "@/lib/format"
+import RecyclePanel from "@/components/RecyclePanel.vue"
 import SnapshotPanel from "@/components/SnapshotPanel.vue"
 import WizardRunner from "@/wizard/WizardRunner.vue"
 
@@ -24,6 +26,7 @@ const shares = ref<SharedFolder[] | null>(null)
 const users = ref<UserAccount[]>([])
 const groups = ref<UserGroup[]>([])
 const pools = ref<PoolsResult | null>(null)
+const recycle = ref<RecycleUsage[]>([])
 const loadError = ref("")
 const syncError = ref("")
 const notice = ref("")
@@ -38,6 +41,8 @@ async function load() {
   try {
     ;[shares.value, users.value, groups.value, pools.value] = await Promise.all([api.shares(), api.users(), api.groups(), api.pools()])
     loadError.value = ""
+    // Isi tempat sampah: pelengkap, tidak menggagalkan daftar folder.
+    recycle.value = await api.recycle().catch(() => [])
     const sync = await api.syncStatus()
     syncError.value = sync.ok ? "" : sync.error
   } catch (e) {
@@ -97,7 +102,7 @@ function wizardDone(values: Record<string, string>) {
 
 // --- Ubah izin dan hapus ---
 const open = ref("")
-const mode = ref<"" | "edit" | "nfs" | "snap" | "delete">("")
+const mode = ref<"" | "edit" | "nfs" | "snap" | "recycle" | "delete">("")
 const busy = ref(false)
 const error = ref("")
 const form = reactive({
@@ -109,7 +114,7 @@ const form = reactive({
   nfsClients: "",
 })
 
-function start(s: SharedFolder, m: "edit" | "nfs" | "snap" | "delete") {
+function start(s: SharedFolder, m: "edit" | "nfs" | "snap" | "recycle" | "delete") {
   open.value = s.name
   mode.value = m
   error.value = ""
@@ -202,15 +207,17 @@ const remove = (s: SharedFolder) =>
                 {{ t("snapshots.title") }}:
                 {{ s.snapshots ? t("snapshots.summary", { ...s.snapshots, hour: String(s.snapshots.hour).padStart(2, "0") }) : t("snapshots.off") }}
               </p>
+              <p class="text-xs">{{ t("recycle.title") }}: {{ s.recycle_days > 0 ? t("recycle.on", { days: s.recycle_days }) : t("recycle.off") }}</p>
               <p v-if="s.apps && Object.keys(s.apps).length" class="text-xs">
                 {{ t("shares.apps") }}: {{ Object.entries(s.apps).map(([id, l]) => `${id} (${t(`permissions.${l}`)})`).join(", ") }}
               </p>
             </div>
           </div>
-          <div v-if="open !== s.name" class="flex gap-1">
+          <div v-if="open !== s.name" class="flex flex-wrap gap-1">
             <Button size="sm" variant="outline" @click="start(s, 'edit')">{{ t("shares.editAccess") }}</Button>
             <Button size="sm" variant="outline" @click="start(s, 'nfs')">{{ t("shares.nfs") }}</Button>
             <Button size="sm" variant="outline" @click="start(s, 'snap')">{{ t("snapshots.title") }}</Button>
+            <Button size="sm" variant="outline" @click="start(s, 'recycle')">{{ t("recycle.title") }}</Button>
             <Button size="sm" variant="ghost" class="text-destructive hover:text-destructive" @click="start(s, 'delete')"><Trash2 /></Button>
           </div>
         </div>
@@ -241,7 +248,14 @@ const remove = (s: SharedFolder) =>
           </p>
         </div>
 
-        <div v-if="open === s.name && mode === 'snap'" class="space-y-3 border-t pt-3">
+        <p v-if="s.recycle_error && !(open === s.name && mode === 'recycle')" class="flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-2.5 text-xs">
+          <TriangleAlert class="size-4 shrink-0 text-destructive" />{{ t("recycle.error", { message: s.recycle_error }) }}
+        </p>
+        <div v-if="open === s.name && mode === 'recycle'" class="space-y-3 border-t pt-3">
+          <RecyclePanel :share="s" :usage="recycle.find((u) => u.pool === s.pool && u.share === s.name)" @saved="load" />
+          <Button size="sm" variant="ghost" @click="open = ''">{{ t("common.close") }}</Button>
+        </div>
+        <div v-else-if="open === s.name && mode === 'snap'" class="space-y-3 border-t pt-3">
           <SnapshotPanel :target="{ pool: s.pool, share: s.name }" :policy="s.snapshots" :save="sharePolicy(s.name)" @saved="load" />
           <Button size="sm" variant="ghost" @click="open = ''">{{ t("common.close") }}</Button>
         </div>

@@ -186,3 +186,30 @@ func TestFilesSnapshot(t *testing.T) {
 		t.Fatalf("restore tanpa snapshot: %v", err)
 	}
 }
+
+// Tempat sampah menyala (sapo:recycle): hapus dikirim ke pembantu sebagai
+// pindah ke #recycle; mati: hapus biasa.
+func TestFilesDeleteRecycle(t *testing.T) {
+	f, reqs, _ := testFiles(t)
+	call := func(p proto.FilesTarget) error {
+		raw, _ := json.Marshal(p)
+		_, err := f.DeleteOp()(context.Background(), raw)
+		return err
+	}
+	target := proto.FilesTarget{User: "budi", Pool: "tank", Share: "keluarga", Path: "foto/a.jpg"}
+	if err := call(target); err != nil {
+		t.Fatal(err)
+	}
+	if r := (*reqs)[len(*reqs)-1]; r.Recycle != "" {
+		t.Fatalf("tempat sampah mati: %+v", r)
+	}
+	if err := f.shares.setRecycle(context.Background(), "tank/keluarga", filepath.Join(f.t.MountBase, "tank/keluarga"), 30); err != nil {
+		t.Fatal(err)
+	}
+	if err := call(target); err != nil {
+		t.Fatal(err)
+	}
+	if r := (*reqs)[len(*reqs)-1]; r.Op != "delete" || r.Recycle != recycleDir || !strings.HasPrefix(r.Label, "dihapus ") {
+		t.Fatalf("tempat sampah menyala: %+v", r)
+	}
+}
