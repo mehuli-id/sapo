@@ -158,6 +158,18 @@ agent:
     # replaced_label. {time} = waktu snapshot / waktu pemulihan.
     restore_label: "dipulihkan {time}"
     replaced_label: "sebelum dipulihkan {time}"
+    # Tempat sampah (ADR 0021): nama yang sudah ada di #recycle diberi
+    # akhiran ini ({time} = waktu dihapus).
+    deleted_label: "dihapus {time}"
+
+  # Tempat sampah shared folder (ADR 0021): yang dihapus lewat SMB, File
+  # Station, dan WebDAV dipindah ke <folder>/#recycle. Isi yang lebih lama
+  # dari lama simpan folder dibuang setiap check_minutes. File sementara
+  # aplikasi (pola exclude) dihapus langsung lewat SMB.
+  recycle:
+    check_minutes: 60
+    empty_timeout_seconds: 240
+    exclude: ["~$*", "*.tmp", "*.TMP", ".~lock.*", "*.~*"]
 
   # Backup shared folder ke pool lain (ADR 0017): tugas dan hasilnya di
   # state_file; satu backup atau pemulihan paling lama max_run_hours.
@@ -366,6 +378,10 @@ api:
   # Panel. Pembaruan tidak pernah dipasang otomatis.
   update_check:
     default_hour: 4
+
+  # Tempat sampah shared folder baru menyala dengan lama simpan ini (hari;
+  # 0 = mati). Bisa diubah per folder di Shared Folder.
+  recycle_default_days: 30
 
   notify:
     check_minutes: 5

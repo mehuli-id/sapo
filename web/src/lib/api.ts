@@ -231,6 +231,14 @@ export interface UserGroup {
 
 export type ShareAccess = "read" | "write"
 
+export interface RecycleUsage {
+  pool: string
+  share: string
+  days: number
+  bytes: number
+  files: number
+  checked: string
+}
 export interface SharedFolder {
   name: string
   pool: string
@@ -254,6 +262,9 @@ export interface SharedFolder {
   apps?: Record<string, ShareAccess>
   // Jadwal snapshot (tidak ada = mati).
   snapshots?: SnapshotPolicy
+  // Tempat sampah: lama simpan (hari, 0 = mati) dan galat penyiapannya.
+  recycle_days: number
+  recycle_error?: string
 }
 
 export interface ShareNFS {
@@ -706,6 +717,11 @@ export const api = {
   // admin_password wajib bila jadwal baru akan membuang snapshot yang ada.
   setSharePolicy: (share: string, policy: SnapshotPolicy | null, admin_password = "") =>
     post<{ ok: boolean; warning?: string }>(`/api/v1/shares/${encodeURIComponent(share)}/snapshot-policy`, { policy, admin_password }),
+  recycle: () => get<RecycleUsage[]>("/api/v1/recycle"),
+  setShareRecycle: (share: string, days: number, admin_password: string) =>
+    post<{ ok: boolean; warning?: string }>(`/api/v1/shares/${encodeURIComponent(share)}/recycle`, { days, admin_password }),
+  emptyShareRecycle: (share: string, confirm_name: string, admin_password: string) =>
+    post<{ removed: number; done: boolean }>(`/api/v1/shares/${encodeURIComponent(share)}/recycle/empty`, { confirm_name, admin_password }),
   setDrivePolicy: (policy: SnapshotPolicy | null, admin_password = "") =>
     post<{ ok: boolean; warning?: string }>("/api/v1/drive/snapshot-policy", { policy, admin_password }),
   driveAdmin: () => get<DriveAdmin>("/api/v1/drive/admin"),

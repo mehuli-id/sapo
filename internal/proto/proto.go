@@ -144,6 +144,8 @@ const (
 	OpCloudRun        = "cloud.run"
 	OpCloudRestore    = "cloud.restore"
 	OpCloudLs         = "cloud.ls"
+	OpRecycleStatus   = "recycle.status"
+	OpRecycleEmpty    = "recycle.empty"
 
 	// Installer ke disk (ADR 0016).
 	OpInstallStatus = "install.status"
@@ -559,6 +561,35 @@ type ShareSpec struct {
 	// Snapshots: jadwal snapshot folder (nil = mati; snapshot yang sudah ada
 	// tidak dihapus).
 	Snapshots *SnapshotPolicy `json:"snapshots,omitempty"`
+	// RecycleDays: tempat sampah folder (ADR 0021), isi disimpan sekian
+	// hari; 0 = mati (isi yang sudah ada tidak dihapus).
+	RecycleDays int `json:"recycle_days,omitempty"`
+}
+
+// MaxRecycleDays: batas lama simpan tempat sampah.
+const MaxRecycleDays = 365
+
+// RecycleTarget: tempat sampah satu shared folder.
+type RecycleTarget struct {
+	Pool  string `json:"pool"`
+	Share string `json:"share"`
+}
+
+// RecycleUsage: isi tempat sampah satu folder saat terakhir diperiksa.
+type RecycleUsage struct {
+	Pool    string    `json:"pool"`
+	Share   string    `json:"share"`
+	Days    int       `json:"days"`
+	Bytes   uint64    `json:"bytes"`
+	Files   int       `json:"files"`
+	Checked time.Time `json:"checked"`
+}
+
+// RecycleEmptyResult: hasil recycle.empty. Done false bila waktu habis
+// sebelum semua isi terhapus (ulangi).
+type RecycleEmptyResult struct {
+	Removed int  `json:"removed"`
+	Done    bool `json:"done"`
 }
 
 // SnapshotPolicy adalah jadwal snapshot satu dataset: berapa snapshot per
@@ -653,6 +684,8 @@ type ShareState struct {
 	NFSError string `json:"nfs_error,omitempty"`
 	// SnapshotError: folder siap, tetapi jadwal snapshot-nya gagal diatur.
 	SnapshotError string `json:"snapshot_error,omitempty"`
+	// RecycleError: folder siap, tetapi tempat sampahnya gagal disiapkan.
+	RecycleError string `json:"recycle_error,omitempty"`
 }
 
 // ShareDeleteParams adalah parameter shares.delete.

@@ -48,6 +48,9 @@ type ShareTools struct {
 	// Rentang ID akun Sapo (agent.accounts): klien NFS hanya boleh
 	// dipetakan ke akun di rentang ini.
 	IDMin, IDMax int
+	// RecycleExclude: pola nama file yang tidak masuk tempat sampah SMB
+	// (file sementara aplikasi), ADR 0021.
+	RecycleExclude []string
 }
 
 // Shares melayani shares.apply, shares.delete, dan shares.usage. Perubahan
@@ -62,6 +65,8 @@ type Shares struct {
 	isMount func(path string) bool
 	// aclTree memasang ACL ke isi folder (diganti di test).
 	aclTree func(ctx context.Context, root string, acl shareACL) error
+	// mkRecycle memastikan folder #recycle ada (diganti di test).
+	mkRecycle func(root string) error
 	// managed: UID dan GID akun buatan sapod (Accounts.Managed); nil di test.
 	managed func(name string) (uid, gid int, ok bool)
 	// apps: App Center (nil bila tidak dipakai), untuk akses aplikasi ke
@@ -99,7 +104,7 @@ type aclJob struct {
 
 // NewShares menyiapkan operasi shared folder di atas pool p.
 func NewShares(p *Pools, t ShareTools) *Shares {
-	s := &Shares{p: p, t: t, chown: os.Lchown, isMount: isMountPoint, aclTree: applyACLTree, jobs: map[string]*aclJob{}}
+	s := &Shares{p: p, t: t, chown: os.Lchown, isMount: isMountPoint, aclTree: applyACLTree, mkRecycle: makeRecycleDir, jobs: map[string]*aclJob{}}
 	// Ekspor NFS folder di pool dicabut sebelum pool dihapus.
 	p.beforeDestroy = append(p.beforeDestroy, s.unexportPool)
 	return s
@@ -292,6 +297,13 @@ func (s *Shares) ApplyOp() Handler {
 				if serr := s.setSnapPolicy(ctx, sp.Pool+"/"+sp.Name, sp.Snapshots); serr != nil {
 					st.SnapshotError = clipTo(serr.Error(), maxErrorText)
 					s.p.logWarn("jadwal snapshot gagal diatur", "folder", sp.Name, "err", serr)
+				}
+				if rerr := s.setRecycle(ctx, sp.Pool+"/"+sp.Name, path, sp.RecycleDays); rerr != nil {
+					st.RecycleError = clipTo(rerr.Error(), maxErrorText)
+					// Tanpa folder #recycle, SMB menghapus langsung: tempat
+					// sampah tidak dinyalakan di smb.conf.
+					sp.RecycleDays = 0
+					s.p.logWarn("tempat sampah gagal disiapkan", "folder", sp.Name, "err", rerr)
 				}
 			}
 			st.Path = path
@@ -751,6 +763,16 @@ func (s *Shares) renderSMBConf(shares []shareConf, homesPool string, ext []proto
 		fmt.Fprintf(&b, "   valid users = %s\n", strings.Join(valid, " "))
 		if len(write) > 0 {
 			fmt.Fprintf(&b, "   write list = %s\n", strings.Join(write, " "))
+		}
+		// Tempat sampah (ADR 0021): hapus lewat SMB = pindah ke #recycle
+		// dengan letak yang sama; hapus di dalam #recycle = permanen.
+		if sc.spec.RecycleDays > 0 {
+			b.WriteString("   vfs objects = shadow_copy2 recycle\n")
+			fmt.Fprintf(&b, "   recycle:repository = %s\n", recycleDir)
+			b.WriteString("   recycle:keeptree = yes\n   recycle:versions = yes\n   recycle:directory_mode = 0770\n   recycle:subdir_mode = 0770\n")
+			if ex := validRecycleExclude(s.t.RecycleExclude); len(ex) > 0 {
+				fmt.Fprintf(&b, "   recycle:exclude = %s\n", strings.Join(ex, ","))
+			}
 		}
 	}
 	// Penyimpanan eksternal (ADR 0015): izin dari grup yang dipilih admin;

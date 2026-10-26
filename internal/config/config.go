@@ -82,6 +82,31 @@ type Agent struct {
 	Install        Install   `yaml:"install"`
 	Backup         Backup    `yaml:"backup"`
 	Cloud          Cloud     `yaml:"cloud"`
+	Recycle        Recycle   `yaml:"recycle"`
+}
+
+// Recycle mengatur tempat sampah shared folder (ADR 0021).
+type Recycle struct {
+	// CheckMinutes: selang pembersihan isi yang sudah lewat lama simpan.
+	CheckMinutes int `yaml:"check_minutes"`
+	// EmptyTimeoutSeconds: batas waktu satu "kosongkan sekarang".
+	EmptyTimeoutSeconds int `yaml:"empty_timeout_seconds"`
+	// Exclude: pola nama file sementara yang tidak masuk tempat sampah SMB.
+	Exclude []string `yaml:"exclude"`
+}
+
+var recycleExcludePattern = regexp.MustCompile(`^[A-Za-z0-9.*?~$#_-]{1,64}$`)
+
+func (r Recycle) validate() error {
+	if r.CheckMinutes < 5 || r.CheckMinutes > 1440 || r.EmptyTimeoutSeconds < 30 || r.EmptyTimeoutSeconds > 280 {
+		return errors.New("agent.recycle: check_minutes 5–1440, empty_timeout_seconds 30–280")
+	}
+	for _, p := range r.Exclude {
+		if !recycleExcludePattern.MatchString(p) {
+			return fmt.Errorf("agent.recycle.exclude: pola %q tidak diizinkan (huruf, angka, . * ? ~ $ # _ -)", p)
+		}
+	}
+	return nil
 }
 
 // Accounts mengatur akun sistem untuk berbagi file. sapod hanya menyentuh
@@ -183,6 +208,9 @@ type Files struct {
 	// file yang ditimpa; {time} = waktu snapshot / waktu pemulihan.
 	RestoreLabel  string `yaml:"restore_label"`
 	ReplacedLabel string `yaml:"replaced_label"`
+	// DeletedLabel: akhiran nama di tempat sampah bila nama yang sama sudah
+	// ada di sana ({time} = waktu dihapus), ADR 0021.
+	DeletedLabel string `yaml:"deleted_label"`
 }
 
 // Cloud mengatur backup ke S3/cloud dengan restic (ADR 0020).
@@ -324,9 +352,9 @@ func (f Files) validate() error {
 	if f.RestoreMaxFiles < 1 || f.RestoreMaxGB < 1 {
 		return errors.New("agent.files: restore_max_files dan restore_max_gb minimal 1")
 	}
-	for _, l := range []string{f.RestoreLabel, f.ReplacedLabel} {
+	for _, l := range []string{f.RestoreLabel, f.ReplacedLabel, f.DeletedLabel} {
 		if l == "" || len(l) > 64 || !strings.Contains(l, "{time}") || strings.ContainsAny(l, "/\\\x00\n\r\t") {
-			return errors.New("agent.files: restore_label dan replaced_label wajib berisi {time}, satu baris, tanpa / atau \\")
+			return errors.New("agent.files: restore_label, replaced_label, dan deleted_label wajib berisi {time}, satu baris, tanpa / atau \\")
 		}
 	}
 	if f.MaxEntries < 100 || f.MaxEntries > 20000 || f.TimeoutSeconds < 5 || f.DeleteTimeoutSeconds < f.TimeoutSeconds || f.DeleteTimeoutSeconds > 280 {
@@ -490,6 +518,9 @@ type API struct {
 	// UpdateCheck: pemeriksaan pembaruan terjadwal (bawaan; admin bisa
 	// mengubah jam atau mematikannya di Control Panel).
 	UpdateCheck UpdateCheck `yaml:"update_check"`
+	// RecycleDefaultDays: lama simpan tempat sampah shared folder baru
+	// (0 = mati), ADR 0021.
+	RecycleDefaultDays int `yaml:"recycle_default_days"`
 }
 
 // UpdateCheck: jam bawaan (waktu NAS) pemeriksaan pembaruan harian.
@@ -633,7 +664,8 @@ func Default() Config {
 				LogFile: "/var/lib/sapod/updates.log", ResultFile: "/var/lib/sapod/updates-result.json", CheckTimeoutSeconds: 240,
 				InstallTimeoutSeconds: 3 * 3600},
 			Files: Files{MaxEntries: 5000, TimeoutSeconds: 30, DeleteTimeoutSeconds: 270, RestoreMaxFiles: 20000, RestoreMaxGB: 20,
-				RestoreLabel: "dipulihkan {time}", ReplacedLabel: "sebelum dipulihkan {time}"},
+				RestoreLabel: "dipulihkan {time}", ReplacedLabel: "sebelum dipulihkan {time}", DeletedLabel: "dihapus {time}"},
+			Recycle:   Recycle{CheckMinutes: 60, EmptyTimeoutSeconds: 240, Exclude: []string{"~$*", "*.tmp", "*.TMP", ".~lock.*", "*.~*"}},
 			Snapshots: Snapshots{MaxPoolCapacityPercent: 90, CallTimeoutSeconds: 30},
 			External:  External{Mount: "/usr/bin/mount", Umount: "/usr/bin/umount", MountBase: "/srv/sapo-external", StateFile: "/var/lib/sapod/external.json"},
 			Backup:    Backup{StateFile: "/var/lib/sapod/backup.json", MaxRunHours: 24},
@@ -692,10 +724,11 @@ func Default() Config {
 				"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", // LAN IPv4
 				"fc00::/7", "fe80::/10", // LAN IPv6
 			},
-			DeniedNetworks: []string{"172.17.0.0/16", "10.88.0.0/16"}, // bridge Docker dan Podman bawaan
-			AuditMaxMB:     10,
-			Notify:         Notify{CheckMinutes: 5, SMARTMinutes: 60, MaxRecipients: 5, DefaultCapacityPct: 90},
-			UpdateCheck:    UpdateCheck{DefaultHour: 4},
+			DeniedNetworks:     []string{"172.17.0.0/16", "10.88.0.0/16"}, // bridge Docker dan Podman bawaan
+			AuditMaxMB:         10,
+			Notify:             Notify{CheckMinutes: 5, SMARTMinutes: 60, MaxRecipients: 5, DefaultCapacityPct: 90},
+			UpdateCheck:        UpdateCheck{DefaultHour: 4},
+			RecycleDefaultDays: 30,
 			TLS: TLS{
 				Enabled:         true,
 				Listen:          ":5001",
@@ -825,6 +858,9 @@ func (c Config) Validate() error {
 	if c.API.UpdateCheck.DefaultHour < 0 || c.API.UpdateCheck.DefaultHour > 23 {
 		return errors.New("api.update_check.default_hour harus 0–23")
 	}
+	if c.API.RecycleDefaultDays < 0 || c.API.RecycleDefaultDays > proto.MaxRecycleDays {
+		return errors.New("api.recycle_default_days harus 0–365")
+	}
 	if err := c.API.Notify.validate(); err != nil {
 		return err
 	}
@@ -879,6 +915,9 @@ func (c Config) Validate() error {
 		return err
 	}
 	if err := c.Agent.Cloud.validate(); err != nil {
+		return err
+	}
+	if err := c.Agent.Recycle.validate(); err != nil {
 		return err
 	}
 	if err := c.Agent.Backup.validate(); err != nil {

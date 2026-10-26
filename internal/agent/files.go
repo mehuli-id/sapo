@@ -44,6 +44,9 @@ type FilesTools struct {
 	RestoreMaxFiles             int
 	RestoreMaxBytes             int64
 	RestoreLabel, ReplacedLabel string
+	// DeletedLabel: akhiran nama di tempat sampah bila nama yang sama sudah
+	// ada di sana ({time} = waktu dihapus), ADR 0021.
+	DeletedLabel string
 }
 
 // Files melayani operasi File Station.
@@ -77,6 +80,9 @@ func NewFiles(t FilesTools, shares *Shares, managed func(string) (int, int, bool
 	if t.RestoreLabel == "" {
 		t.RestoreLabel, t.ReplacedLabel = "dipulihkan {time}", "sebelum dipulihkan {time}"
 	}
+	if t.DeletedLabel == "" {
+		t.DeletedLabel = "dihapus {time}"
+	}
 	f := &Files{t: t, shares: shares, managed: managed, slots: make(chan struct{}, maxFileOps), longSlots: make(chan struct{}, maxLongFileOps), deleting: map[string]bool{}}
 	f.run = f.runHelper
 	return f
@@ -104,6 +110,10 @@ type fsRequest struct {
 	Replaced string `json:"replaced,omitempty"`
 	MaxFiles int    `json:"max_files,omitempty"`
 	MaxBytes int64  `json:"max_bytes,omitempty"`
+	// Recycle: delete memindah ke folder ini di akar (tempat sampah, ADR
+	// 0021), kecuali yang sudah ada di dalamnya; Label akhiran bila nama
+	// sudah ada di sana.
+	Recycle string `json:"recycle,omitempty"`
 	// Avail: ruang kosong folder tujuan (byte); Deadline: batas waktu
 	// (Unix), agar pemulihan berhenti rapi sebelum proses dihentikan.
 	Avail    int64 `json:"avail,omitempty"`
@@ -148,37 +158,38 @@ func CleanFilePath(p string) (string, error) {
 }
 
 // prepare memeriksa permintaan: akun Sapo, folder Sapo yang terpasang, dan
-// path. Mengembalikan identitas proses pembantu dan akar folder.
-func (f *Files) prepare(ctx context.Context, t proto.FilesTarget) (fsCred, string, string, error) {
+// path. Mengembalikan identitas proses pembantu, akar folder, dan apakah
+// tempat sampah folder itu menyala.
+func (f *Files) prepare(ctx context.Context, t proto.FilesTarget) (fsCred, string, string, bool, error) {
 	invalid := func(msg string) error { return &OpError{Code: proto.ErrInvalidParams, Message: msg} }
 	switch {
 	case !accountNamePattern.MatchString(t.User):
-		return fsCred{}, "", "", invalid("pengguna tidak valid")
+		return fsCred{}, "", "", false, invalid("pengguna tidak valid")
 	case t.External:
 		if t.Home || t.Pool != "" || !shareNamePattern.MatchString(t.Share) {
-			return fsCred{}, "", "", invalid("folder eksternal tidak valid")
+			return fsCred{}, "", "", false, invalid("folder eksternal tidak valid")
 		}
 	case !poolNamePattern.MatchString(t.Pool) || (t.Home != (t.Share == "")) || (!t.Home && !shareNamePattern.MatchString(t.Share)):
-		return fsCred{}, "", "", invalid("pengguna atau folder tidak valid")
+		return fsCred{}, "", "", false, invalid("pengguna atau folder tidak valid")
 	}
 	path, err := CleanFilePath(t.Path)
 	if err != nil {
-		return fsCred{}, "", "", invalid(err.Error())
+		return fsCred{}, "", "", false, invalid(err.Error())
 	}
 	cred, err := f.cred(t.User)
 	if err != nil {
-		return fsCred{}, "", "", err
+		return fsCred{}, "", "", false, err
 	}
 	// Folder eksternal (USB): hanya yang sedang terpasang oleh sapod.
 	if t.External {
 		if t.Snapshot != "" || f.shares.external == nil {
-			return fsCred{}, "", "", invalid("folder eksternal tidak punya versi sebelumnya")
+			return fsCred{}, "", "", false, invalid("folder eksternal tidak punya versi sebelumnya")
 		}
 		root, ok := f.shares.external.root(t.Share)
 		if !ok {
-			return fsCred{}, "", "", &OpError{Code: proto.ErrNotFound, Message: "folder eksternal tidak terpasang"}
+			return fsCred{}, "", "", false, &OpError{Code: proto.ErrNotFound, Message: "folder eksternal tidak terpasang"}
 		}
-		return cred, root, path, nil
+		return cred, root, path, false, nil
 	}
 	// Folder pribadi (Sapo Drive) selalu milik pengguna sesi itu sendiri.
 	ds, prop, want := t.Pool+"/"+t.Share, sharePropName, t.Share
@@ -187,14 +198,15 @@ func (f *Files) prepare(ctx context.Context, t proto.FilesTarget) (fsCred, strin
 		ds, prop, want = t.Pool+"/"+homesDataset+"/"+t.User, homePropName, t.User
 		root = homePath(f.t.MountBase, t.Pool, t.User)
 	}
-	props, err := f.shares.zfsProps(ctx, ds, "mountpoint", "mounted", prop)
+	props, err := f.shares.zfsProps(ctx, ds, "mountpoint", "mounted", prop, recyclePropName)
 	if errors.Is(err, errNoDataset) || (err == nil && (props[prop] != want || props["mountpoint"] != root || props["mounted"] != "yes")) {
-		return fsCred{}, "", "", &OpError{Code: proto.ErrNotFound, Message: "folder tidak ditemukan atau belum terpasang"}
+		return fsCred{}, "", "", false, &OpError{Code: proto.ErrNotFound, Message: "folder tidak ditemukan atau belum terpasang"}
 	}
 	if err != nil {
-		return fsCred{}, "", "", err
+		return fsCred{}, "", "", false, err
 	}
-	return cred, root, path, nil
+	// Tempat sampah hanya untuk shared folder (bukan folder pribadi).
+	return cred, root, path, !t.Home && recycleDays(props[recyclePropName]) > 0, nil
 }
 
 // cred: UID, GID, dan grup tambahan akun. Hanya akun buatan sapod; grup
@@ -220,7 +232,7 @@ func (f *Files) cred(user string) (fsCred, error) {
 
 // call menjalankan satu operasi pembantu dan menerjemahkan galatnya.
 func (f *Files) call(ctx context.Context, t proto.FilesTarget, req fsRequest, timeout time.Duration, wantFile bool) (json.RawMessage, *os.File, error) {
-	cred, root, path, err := f.prepare(ctx, t)
+	cred, root, path, recycle, err := f.prepare(ctx, t)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -251,6 +263,10 @@ func (f *Files) call(ctx context.Context, t proto.FilesTarget, req fsRequest, ti
 		}()
 	}
 	req.Root, req.Path = root, path
+	if req.Op == "delete" && recycle && t.Snapshot == "" {
+		req.Recycle = recycleDir
+		req.Label = strings.ReplaceAll(f.t.DeletedLabel, "{time}", time.Now().In(localZone()).Format("2006-01-02 15.04"))
+	}
 	if t.Snapshot != "" {
 		// Snapshot hanya dibaca: list, stat, dan open_read dijalankan di
 		// akar snapshot; restore membaca dari sana dan menulis ke folder

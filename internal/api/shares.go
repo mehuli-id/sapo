@@ -46,7 +46,10 @@ type Share struct {
 	Apps map[string]string `json:"apps,omitempty"`
 	// Snapshots: jadwal snapshot (ADR 0014); nil = mati.
 	Snapshots *proto.SnapshotPolicy `json:"snapshots,omitempty"`
-	CreatedAt time.Time             `json:"created_at"`
+	// RecycleDays: tempat sampah (ADR 0021), lama simpan dalam hari; 0 =
+	// mati.
+	RecycleDays int       `json:"recycle_days"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // ShareNFS: klien di jaringan Clients boleh memasang folder lewat NFS, dan
@@ -214,7 +217,7 @@ func (s *Server) syncSystem(ctx context.Context) (res proto.SharesApplyResult, e
 			closed := proto.SharesApplyParams{Shares: []proto.ShareSpec{}, SMBOff: v.SMBOff, NFSOff: v.NFSOff, ExternalOff: true}
 			for _, sh := range s.shares.list() {
 				// Izin dicabut, tetapi jadwal snapshot tetap berjalan.
-				closed.Shares = append(closed.Shares, proto.ShareSpec{Name: sh.Name, Pool: sh.Pool, Description: sh.Description, Read: []string{}, Write: []string{}, Snapshots: sh.Snapshots})
+				closed.Shares = append(closed.Shares, proto.ShareSpec{Name: sh.Name, Pool: sh.Pool, Description: sh.Description, Read: []string{}, Write: []string{}, Snapshots: sh.Snapshots, RecycleDays: sh.RecycleDays})
 			}
 			_ = s.agent.Call(ctx, proto.OpSharesApply, closed, nil)
 		}
@@ -264,7 +267,7 @@ func (s *Server) syncSystem(ctx context.Context) (res proto.SharesApplyResult, e
 	}
 	params := proto.SharesApplyParams{Shares: []proto.ShareSpec{}, SMBOff: v.SMBOff, NFSOff: v.NFSOff, HomesPool: homesPool}
 	for _, sh := range s.shares.list() {
-		spec := proto.ShareSpec{Name: sh.Name, Pool: sh.Pool, Description: sh.Description, Read: []string{}, Write: []string{}, Snapshots: sh.Snapshots}
+		spec := proto.ShareSpec{Name: sh.Name, Pool: sh.Pool, Description: sh.Description, Read: []string{}, Write: []string{}, Snapshots: sh.Snapshots, RecycleDays: sh.RecycleDays}
 		for p, level := range sh.Permissions {
 			if !exists[p] {
 				continue
@@ -471,6 +474,8 @@ type shareView struct {
 	// kosong = tidak diekspor); NFSError: galat ekspor terakhir dari sapod.
 	NFSAccess string `json:"nfs_access,omitempty"`
 	NFSError  string `json:"nfs_error,omitempty"`
+	// RecycleError: tempat sampah gagal disiapkan (SMB menghapus langsung).
+	RecycleError string `json:"recycle_error,omitempty"`
 }
 
 // shareStatus melengkapi tampilan folder dengan hasil sinkronisasi terakhir
@@ -480,7 +485,7 @@ func (s *Server) shareStatus(v *shareView) {
 	st, ok := s.syncShares[v.Name]
 	s.syncStateMu.Unlock()
 	if ok {
-		v.Path, v.Error, v.NFSError = st.Path, st.Error, st.NFSError
+		v.Path, v.Error, v.NFSError, v.RecycleError = st.Path, st.Error, st.NFSError, st.RecycleError
 	}
 	if v.NFS == nil {
 		return
@@ -634,7 +639,9 @@ func (s *Server) handleShareCreate(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	sh := Share{Name: req.Name, Pool: req.Pool, Description: req.Description, Permissions: cloneMap(req.Permissions), NFS: nfs, CreatedAt: s.now().UTC()}
+	// Folder baru langsung punya tempat sampah (lama simpan dari sapo.yaml).
+	sh := Share{Name: req.Name, Pool: req.Pool, Description: req.Description, Permissions: cloneMap(req.Permissions), NFS: nfs,
+		RecycleDays: s.cfg.API.RecycleDefaultDays, CreatedAt: s.now().UTC()}
 	err = s.shares.mutate(func(cur []Share) ([]Share, error) {
 		if slices.ContainsFunc(cur, func(x Share) bool { return x.Name == sh.Name }) {
 			return nil, errShareExists

@@ -345,8 +345,39 @@ res="$(api POST /api/v1/files/delete '{"share":"keluarga","path":"arsip"}')"
 [[ "$res" == *' 200' ]] || fail "File Station, hapus folder: $res"
 res="$(api GET '/api/v1/files/list?share=keluarga&path=')"
 json 'assert "arsip" not in [e["name"] for e in v["entries"]], v' <<<"$res" || fail "File Station: arsip harus terhapus: $res"
+# Tempat sampah (ADR 0021): folder baru langsung punya tempat sampah. Yang
+# dihapus (File Station dan SMB) pindah ke #recycle dengan letak yang sama;
+# hapus di dalam #recycle permanen.
+res="$(api GET '/api/v1/files/list?share=keluarga&path=%23recycle%2Farsip')"
+json 'assert "panel.txt" in [e["name"] for e in v["entries"]], v' <<<"$res" || fail "hapus di File Station harus masuk tempat sampah: $res"
+echo "akan dihapus" > "$WORK/sampah.txt"
+out="$(smb budi "put $WORK/sampah.txt sampah.txt; del sampah.txt")"
+res="$(api GET '/api/v1/files/list?share=keluarga&path=%23recycle')"
+json 'assert "sampah.txt" in [e["name"] for e in v["entries"]], v' <<<"$res" || fail "hapus lewat SMB harus masuk tempat sampah: $res $out"
+rm -f "$WORK/kembali.txt"
+out="$(smb budi "get \"#recycle/sampah.txt\" $WORK/kembali.txt")"
+cmp -s "$WORK/sampah.txt" "$WORK/kembali.txt" || fail "file di tempat sampah harus bisa diambil lewat SMB: $out"
+res="$(api POST /api/v1/files/delete '{"share":"keluarga","path":"#recycle/arsip"}')"
+[[ "$res" == *' 200' ]] || fail "hapus di tempat sampah: $res"
+res="$(api GET '/api/v1/files/list?share=keluarga&path=%23recycle')"
+json 'n=[e["name"] for e in v["entries"]]; assert "arsip" not in n and "#recycle" not in n, v' <<<"$res" || fail "hapus di tempat sampah harus permanen: $res"
+JAR="$admin_jar"
+res="$(api POST /api/v1/shares/keluarga/recycle/empty '{"confirm_name":"keluarga"}')"
+[[ "$res" == *' 401' || "$res" == *' 400' ]] || fail "kosongkan tempat sampah tanpa password harus ditolak: $res"
+res="$(api POST /api/v1/shares/keluarga/recycle/empty '{"confirm_name":"keluarga","admin_password":"'"$PASS"'"}')"
+json 'assert v["done"] and v["removed"]>=1, v' <<<"$res" || fail "kosongkan tempat sampah: $res"
+res="$(api GET /api/v1/recycle)"
+json 'u=[x for x in v if x["share"]=="keluarga"][0]; assert u["files"]==0 and u["days"]==30, v' <<<"$res" || fail "isi tempat sampah setelah dikosongkan: $res"
+# Dimatikan: hapus lewat SMB langsung hilang.
+res="$(api POST /api/v1/shares/keluarga/recycle '{"days":0,"admin_password":"'"$PASS"'"}')"
+[[ "$res" == *' 200' ]] || fail "matikan tempat sampah: $res"
+out="$(smb budi "put $WORK/sampah.txt langsung.txt; del langsung.txt")"
+login_as budi
+res="$(api GET '/api/v1/files/list?share=keluarga&path=%23recycle')"
+json 'assert "langsung.txt" not in [e["name"] for e in v["entries"]], v' <<<"$res" || fail "tempat sampah mati: hapus harus langsung: $res"
 JAR="$admin_jar"
 echo "File Station: daftar, unduh, unggah, folder baru, pindah, hapus sebagai budi; ani (baca) ditolak; file terbaca lewat SMB"
+echo "Tempat sampah: hapus lewat File Station dan SMB pindah ke #recycle (letak sama, bisa diambil lagi), hapus di dalamnya permanen, dikosongkan dengan password, dimatikan = hapus langsung"
 
 # --- Control Panel ---------------------------------------------------------------
 res="$(api POST /api/v1/settings/services '{"smb":false}')"
@@ -1149,7 +1180,8 @@ mail_txt="$(wait_mail "Masalah sudah pulih")"
 res="$(api POST /api/v1/notify '{"enabled":false,"host":"10.0.2.2","port":'"$SMTP_PORT"',"security":"none","from":"sapo@uji.local","to":["admin@uji.local"],"admin_password":"'"$PASS"'"}')"
 [[ "$res" == *' 200' ]] || fail "matikan notifikasi: $res"
 kill "$smtp_sink" 2>/dev/null || true
-smbclient //127.0.0.1/tetap -p "$SMB_PORT" -m SMB3 -U "budi%$UPASS" -c "del besar.bin" >/dev/null 2>&1 || true
+# Lewat tempat sampah, lalu dihapus permanen dari sana.
+smbclient //127.0.0.1/tetap -p "$SMB_PORT" -m SMB3 -U "budi%$UPASS" -c 'del besar.bin; del "#recycle/besar.bin"' >/dev/null 2>&1 || true
 echo "Notifikasi email: email uji, pool hampir penuh, lalu pulih diterima server SMTP di host ($(ls "$WORK"/mail | wc -l | tr -d ' ') email); login tanpa enkripsi ditolak"
 res="$(api GET /api/v1/system/install)"
 json 'assert v["live"] and not v["running"], v' <<<"$res" || fail "installer harus tersedia di ISO: $res"
