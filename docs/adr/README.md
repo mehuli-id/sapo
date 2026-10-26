@@ -26,3 +26,4 @@ Setiap keputusan arsitektur penting dicatat di sini sebagai file bernomor (`NNNN
 | [0020](0020-cloud-backup.md) | Backup ke S3/cloud dengan restic (enkripsi di NAS, unit systemd terkunci, password tampil sekali, pemulihan bencana dengan password) | Diterima |
 | [0021](0021-recycle-bin.md) | Tempat sampah per shared folder (`#recycle`: SMB vfs_recycle, File Station/WebDAV memindah, dibersihkan sapod lewat fd tanpa symlink) | Diterima |
 | [0022](0022-time-machine.md) | Time Machine untuk Mac per shared folder (kuota refquota wajib, vfs_fruit hanya di folder itu, diumumkan Samba lewat Avahi, tanpa tempat sampah) | Diterima |
+| [0023](0023-wifi.md) | Wi-Fi WPA2/WPA3 Personal (network.apply dengan konfirmasi, file wpa_supplicant 0600 heksadesimal, menu konsol "Sambungkan Wi-Fi", firmware di ISO) | Diterima |

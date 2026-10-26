@@ -229,6 +229,8 @@ agent:
       - /etc/hostname
       - /etc/hosts
       - /etc/network/interfaces
+      # File wpa_supplicant buatan sapod (Wi-Fi, ADR 0023).
+      - /etc/wpa_supplicant
       - /etc/samba/smb.conf
       - /etc/exports.d
       - /etc/containers/systemd
@@ -298,6 +300,12 @@ agent:
     avahi_service: avahi-daemon.service
     apply_delay_seconds: 3
     confirm_seconds: 120
+    # Wi-Fi (ADR 0023): file wpa_supplicant per antarmuka ditulis sapod di
+    # wpa_conf_dir (0600). wifi_country menentukan kanal dan daya pancar
+    # yang legal (kode negara ISO 3166-1).
+    iw: /usr/sbin/iw
+    wpa_conf_dir: /etc/wpa_supplicant
+    wifi_country: ID
 
 api:
   # Port panel. Siapa yang boleh membuka panel diatur oleh allowed_networks.

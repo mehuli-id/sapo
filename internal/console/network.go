@@ -46,7 +46,7 @@ func (m *Menu) resetNetwork(ctx context.Context) bool {
 	// Antarmuka diturunkan dengan pengaturan lama dulu (misalnya alamat
 	// statis), baru dinaikkan lagi dengan DHCP.
 	_ = m.systemctl(ctx, "stop", r.NetworkService)
-	err = backupAndWrite(r.InterfacesFile, ifBackup, renderInterfaces(ifaces, stamp))
+	err = backupAndWrite(r.InterfacesFile, ifBackup, renderInterfaces(ifaces, wirelessIn(r.NetDir), stamp))
 	if err == nil {
 		err = resetAPIKeys(m.AdminConfig, cfgBackup, r.ResetAPIKeys)
 	}
@@ -97,15 +97,33 @@ func physicalInterfaces(netDir string) ([]string, error) {
 	return out, nil
 }
 
+// wirelessIn: antarmuka Wi-Fi di netDir.
+func wirelessIn(netDir string) func(string) bool {
+	return func(name string) bool {
+		for _, f := range []string{"wireless", "phy80211"} {
+			if _, err := os.Stat(filepath.Join(netDir, name, f)); err == nil {
+				return true
+			}
+		}
+		return false
+	}
+}
+
 // renderInterfaces menyusun /etc/network/interfaces: loopback dan DHCP
-// (IPv4) serta SLAAC (IPv6) di setiap antarmuka fisik. Tanpa "source",
-// jadi pengaturan di interfaces.d tidak ikut dipakai.
-func renderInterfaces(ifaces []string, stamp string) []byte {
+// (IPv4) serta SLAAC (IPv6) di setiap antarmuka kabel. Wi-Fi tidak dipakai
+// (tanpa jaringan, DHCP-nya hanya menunda boot); disambungkan lagi lewat
+// menu "Sambungkan Wi-Fi". Tanpa "source", jadi pengaturan di interfaces.d
+// tidak ikut dipakai.
+func renderInterfaces(ifaces []string, wireless func(string) bool, stamp string) []byte {
 	var b bytes.Buffer
 	fmt.Fprintf(&b, "# Dibuat oleh menu darurat Sapo (reset jaringan) pada %s UTC.\n", stamp)
 	b.WriteString("# File sebelumnya disimpan di samping file ini (akhiran .sapo-<waktu>).\n\n")
 	b.WriteString("auto lo\niface lo inet loopback\n")
 	for _, i := range ifaces {
+		if wireless(i) {
+			fmt.Fprintf(&b, "\n# %s (Wi-Fi) tidak dipakai.\niface %s inet manual\n", i, i)
+			continue
+		}
 		fmt.Fprintf(&b, "\nauto %s\niface %s inet dhcp\niface %s inet6 auto\n", i, i, i)
 	}
 	return b.Bytes()

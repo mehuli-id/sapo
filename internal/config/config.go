@@ -397,13 +397,21 @@ type Network struct {
 	// dikonfirmasi dalam confirm_seconds; bila tidak, dikembalikan.
 	ApplyDelaySeconds int `yaml:"apply_delay_seconds"`
 	ConfirmSeconds    int `yaml:"confirm_seconds"`
+	// Wi-Fi (ADR 0023): program iw, direktori file wpa_supplicant buatan
+	// sapod, dan kode negara regulasi (ISO 3166-1, misalnya ID).
+	Iw          string `yaml:"iw"`
+	WPAConfDir  string `yaml:"wpa_conf_dir"`
+	WiFiCountry string `yaml:"wifi_country"`
 }
 
 func (n Network) validate() error {
-	for _, p := range []string{n.IP, n.Systemctl, n.Hostnamectl, n.InterfacesFile, n.ResolvConf, n.HostsFile, n.HostnameFile, n.NetDir, n.StateFile, n.PendingFile} {
+	for _, p := range []string{n.IP, n.Systemctl, n.Hostnamectl, n.InterfacesFile, n.ResolvConf, n.HostsFile, n.HostnameFile, n.NetDir, n.StateFile, n.PendingFile, n.Iw, n.WPAConfDir} {
 		if !filepath.IsAbs(p) {
 			return fmt.Errorf("agent.network: %q harus path absolut", p)
 		}
+	}
+	if !regexp.MustCompile(`^[A-Z]{2}$`).MatchString(n.WiFiCountry) {
+		return fmt.Errorf("agent.network.wifi_country %q harus kode negara dua huruf besar, misalnya ID", n.WiFiCountry)
 	}
 	for _, u := range []string{n.NetworkService, n.AvahiService} {
 		if !serviceName.MatchString(u) {
@@ -683,6 +691,7 @@ func Default() Config {
 				InterfacesFile: "/etc/network/interfaces", ResolvConf: "/etc/resolv.conf", HostsFile: "/etc/hosts", HostnameFile: "/etc/hostname",
 				NetDir: "/sys/class/net", StateFile: "/var/lib/sapod/network.json", PendingFile: "/var/lib/sapod/network-pending.json",
 				NetworkService: "networking.service", AvahiService: "avahi-daemon.service",
+				Iw: "/usr/sbin/iw", WPAConfDir: "/etc/wpa_supplicant", WiFiCountry: "ID",
 				ApplyDelaySeconds: 3, ConfirmSeconds: 120,
 			},
 			Storage: Storage{

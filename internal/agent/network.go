@@ -44,14 +44,18 @@ type NetworkTools struct {
 	ApplyDelay, ConfirmWindow    time.Duration
 	Timeout                      time.Duration
 	Log                          *slog.Logger
+	// Wi-Fi (ADR 0023): program iw, direktori file wpa_supplicant buatan
+	// sapod, dan kode negara regulasi.
+	Iw, WPAConfDir, WiFiCountry string
 }
 
 // Network melayani network.status, apply, confirm, dan cancel.
 type Network struct {
 	t   NetworkTools
 	now func() time.Time
-	// run dan setHostname diganti di test.
-	run func(ctx context.Context, prog string, flags []string, operands ...string) (toolResult, error)
+	// run dan runArgs (tanpa "--", untuk iw) diganti di test.
+	run     func(ctx context.Context, prog string, flags []string, operands ...string) (toolResult, error)
+	runArgs func(ctx context.Context, prog string, args ...string) (toolResult, error)
 
 	mu      sync.Mutex
 	pending *networkPending
@@ -85,6 +89,9 @@ func NewNetwork(t NetworkTools) *Network {
 	n := &Network{t: t, now: time.Now}
 	n.run = func(ctx context.Context, prog string, flags []string, operands ...string) (toolResult, error) {
 		return runTool(ctx, n.t.Timeout, prog, flags, operands...)
+	}
+	n.runArgs = func(ctx context.Context, prog string, args ...string) (toolResult, error) {
+		return runToolArgs(ctx, n.t.Timeout, prog, args...)
 	}
 	return n
 }
@@ -149,10 +156,12 @@ func (n *Network) physicalInterfaces() ([]string, error) {
 }
 
 // checkConfig memeriksa dan menyamakan pengaturan: setiap antarmuka fisik
-// ada tepat sekali (yang tidak disebut memakai DHCP), alamat tetap IPv4 yang
-// sah, paling banyak satu gateway, dan DNS hanya (dan wajib) bila semua
-// antarmuka beralamat tetap.
-func (n *Network) checkConfig(c proto.NetworkConfig) (proto.NetworkConfig, error) {
+// ada tepat sekali (kabel yang tidak disebut memakai DHCP, Wi-Fi yang tidak
+// disebut tidak dipakai), alamat tetap IPv4 yang sah, paling banyak satu
+// gateway, dan DNS hanya (dan wajib) bila semua antarmuka beralamat tetap.
+// Antarmuka Wi-Fi yang dipakai wajib punya jaringan; password kosong diisi
+// dari prev (pengaturan terakhir) bila SSID-nya sama.
+func (n *Network) checkConfig(c, prev proto.NetworkConfig) (proto.NetworkConfig, error) {
 	if !hostnamePattern.MatchString(c.Hostname) || c.Hostname == "localhost" {
 		return c, errors.New("nama host hanya huruf kecil, angka, dan tanda hubung (1-63 karakter)")
 	}
@@ -177,8 +186,34 @@ func (n *Network) checkConfig(c proto.NetworkConfig) (proto.NetworkConfig, error
 	gateways, dhcp, active := 0, false, 0
 	for _, name := range phys {
 		i, ok := byName[name]
+		wireless := n.wireless(name)
 		if !ok {
 			i = proto.NetworkInterface{Name: name, Mode: "dhcp"}
+			if wireless {
+				i.Mode = "off"
+			}
+		}
+		switch {
+		case !wireless && i.WiFi != nil:
+			return c, fmt.Errorf("%s bukan antarmuka Wi-Fi", name)
+		case wireless && i.Mode == "off":
+			i.WiFi = nil
+		case wireless:
+			if err := checkWiFi(i.WiFi); err != nil {
+				return c, fmt.Errorf("%s: %w", name, err)
+			}
+			w := *i.WiFi
+			if w.Password == "" {
+				for _, old := range prev.Interfaces {
+					if old.Name == name && old.WiFi != nil && old.WiFi.SSID == w.SSID {
+						w.Password = old.WiFi.Password
+					}
+				}
+				if w.Password == "" {
+					return c, fmt.Errorf("%s: isi password Wi-Fi %s", name, clip(w.SSID))
+				}
+			}
+			i.WiFi = &w
 		}
 		switch i.Mode {
 		case "dhcp":
@@ -248,7 +283,8 @@ func lastAddr(p netip.Prefix) netip.Addr {
 
 // renderInterfaces menyusun /etc/network/interfaces dari pengaturan yang
 // sudah diperiksa (nama antarmuka dan alamat tidak bisa menambah baris).
-func renderInterfaces(c proto.NetworkConfig) []byte {
+// Antarmuka Wi-Fi merujuk file wpa_supplicant-nya (wpaConf).
+func renderInterfaces(c proto.NetworkConfig, wpaConf func(string) string) []byte {
 	var b bytes.Buffer
 	b.WriteString("# Dibuat oleh sapod (Sapo). Jangan diubah manual: atur jaringan lewat panel.\n")
 	b.WriteString("# Menu darurat di konsol NAS bisa mengembalikan semua antarmuka ke DHCP.\n\n")
@@ -266,6 +302,9 @@ func renderInterfaces(c proto.NetworkConfig) []byte {
 			}
 		} else {
 			fmt.Fprintf(&b, "iface %s inet dhcp\n", i.Name)
+		}
+		if i.WiFi != nil {
+			fmt.Fprintf(&b, "    wpa-conf %s\n", wpaConf(i.Name))
 		}
 		fmt.Fprintf(&b, "iface %s inet6 auto\n", i.Name)
 	}
@@ -352,12 +391,14 @@ func (n *Network) StatusOp() Handler {
 	return func(ctx context.Context, _ json.RawMessage) (any, error) {
 		out := proto.NetworkStatus{Interfaces: []proto.NetworkLink{}, DNS: []string{}}
 		out.Hostname, _ = os.Hostname()
+		// Password Wi-Fi tidak pernah keluar dari sapod.
 		if cfg, ok := n.managedConfig(); ok {
+			cfg = cfg.Redacted()
 			out.Config = &cfg
 		}
 		n.mu.Lock()
 		if n.pending != nil {
-			out.Pending = &proto.NetworkPending{ConfirmBy: n.pending.ConfirmBy, Config: n.pending.Config}
+			out.Pending = &proto.NetworkPending{ConfirmBy: n.pending.ConfirmBy, Config: n.pending.Config.Redacted()}
 		}
 		n.mu.Unlock()
 		phys, err := n.physicalInterfaces()
@@ -375,6 +416,10 @@ func (n *Network) StatusOp() Handler {
 			l.Up = strings.TrimSpace(readSmall(filepath.Join(dir, "operstate"))) == "up"
 			if v, err := strconv.Atoi(strings.TrimSpace(readSmall(filepath.Join(dir, "speed")))); err == nil && v > 0 {
 				l.SpeedMbps = v
+			}
+			if n.wireless(name) {
+				l.Wireless = true
+				l.SSID, l.SignalDBm = n.wifiLink(ctx, name)
 			}
 			out.Interfaces = append(out.Interfaces, l)
 		}
@@ -477,7 +522,8 @@ func (n *Network) ApplyOp() Handler {
 		if err := decodeParams(raw, &req); err != nil {
 			return nil, err
 		}
-		cfg, err := n.checkConfig(req.Config)
+		prev, _ := n.managedConfig()
+		cfg, err := n.checkConfig(req.Config, prev)
 		if err != nil {
 			return nil, &OpError{Code: proto.ErrInvalidParams, Message: err.Error()}
 		}
@@ -497,6 +543,13 @@ func (n *Network) ApplyOp() Handler {
 		}
 		if oldHost != cfg.Hostname {
 			files = append(files, n.t.HostsFile, n.t.HostnameFile)
+		}
+		// File wpa_supplicant semua antarmuka Wi-Fi (dibuat, diganti, atau
+		// dibuang), agar ikut dikembalikan.
+		for _, i := range cfg.Interfaces {
+			if n.wireless(i.Name) {
+				files = append(files, n.wpaConfPath(i.Name))
+			}
 		}
 		for _, f := range files {
 			if fi, err := os.Lstat(f); err == nil && fi.Mode()&fs.ModeSymlink != 0 {
@@ -653,7 +706,24 @@ func (n *Network) applyPending(p *networkPending) {
 func (n *Network) writeConfig(ctx context.Context, c proto.NetworkConfig) error {
 	n.networkDown(ctx)
 	var errs []error
-	errs = append(errs, writeRootFile(n.t.InterfacesFile, renderInterfaces(c)))
+	for _, i := range c.Interfaces {
+		if !n.wireless(i.Name) {
+			continue
+		}
+		if i.WiFi == nil {
+			// Tidak dipakai: password lama tidak disimpan lagi.
+			if err := os.Remove(n.wpaConfPath(i.Name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				errs = append(errs, err)
+			}
+			continue
+		}
+		conf, err := renderWPAConf(n.t.WiFiCountry, *i.WiFi)
+		if err == nil {
+			err = writePrivateFile(n.wpaConfPath(i.Name), conf)
+		}
+		errs = append(errs, err)
+	}
+	errs = append(errs, writeRootFile(n.t.InterfacesFile, renderInterfaces(c, n.wpaConfPath)))
 	if len(c.DNS) > 0 {
 		errs = append(errs, writeRootFile(n.t.ResolvConf, renderResolvConf(c.DNS)))
 	}
@@ -723,8 +793,13 @@ func (n *Network) revertLocked(ctx context.Context, p *networkPending) {
 			if errors.Is(err, fs.ErrNotExist) {
 				err = nil
 			}
-		} else if path == n.t.StateFile {
+		} else if path == n.t.StateFile || p.OldMode[path]&0o077 == 0 {
+			// File rahasia (catatan Sapo, file wpa_supplicant) tidak pernah
+			// sempat terbaca pengguna lain.
 			err = writePrivateFile(path, []byte(*old))
+			if mode, ok := p.OldMode[path]; err == nil && ok {
+				err = os.Chmod(path, fs.FileMode(mode))
+			}
 		} else {
 			err = writeRootFile(path, []byte(*old))
 			if mode, ok := p.OldMode[path]; err == nil && ok {

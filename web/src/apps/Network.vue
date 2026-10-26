@@ -1,16 +1,16 @@
 <script setup lang="ts">
 // Pengaturan jaringan (hanya admin, ADR 0009): nama host, DHCP atau alamat
-// tetap per antarmuka, dan DNS. Setiap perubahan harus dikonfirmasi; bila
+// tetap per antarmuka, jaringan Wi-Fi (ADR 0023), dan DNS. Setiap perubahan harus dikonfirmasi; bila
 // panel tidak bisa dibuka lagi (misalnya alamat salah), sapod mengembalikan
 // pengaturan lama sendiri.
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue"
 import { useI18n } from "vue-i18n"
-import { CircleCheck, LoaderCircle, Network, RefreshCw, TriangleAlert } from "@lucide/vue"
+import { CircleCheck, LoaderCircle, Network, RefreshCw, TriangleAlert, Wifi } from "@lucide/vue"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
-import type { NetworkApplyResult, NetworkConfig, NetworkStatus } from "@/lib/api"
+import type { NetworkApplyResult, NetworkConfig, NetworkInterfaceConfig, NetworkStatus, WiFiSeen } from "@/lib/api"
 import { api, ApiError } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
@@ -21,7 +21,10 @@ const loadError = ref("")
 const notice = ref("")
 const error = ref("")
 const busy = ref(false)
-const form = reactive({ hostname: "", interfaces: [] as NetworkConfig["interfaces"], dns: "", adminPassword: "" })
+// Per antarmuka: pengaturan, ditambah isian Wi-Fi (ssid, password, SSID
+// yang tersimpan di sapod).
+type FormInterface = NetworkInterfaceConfig & { wireless: boolean; ssid: string; password: string; savedSSID: string }
+const form = reactive({ hostname: "", interfaces: [] as FormInterface[], dns: "", adminPassword: "" })
 
 function message(e: unknown) {
   const c = e instanceof ApiError ? e.code : "generic"
@@ -37,8 +40,20 @@ async function load() {
     form.hostname = cfg?.hostname ?? s.hostname
     form.interfaces = s.interfaces.map((l) => {
       const c = cfg?.interfaces.find((i) => i.name === l.name)
-      return { name: l.name, mode: c?.mode ?? "dhcp", address: c?.address ?? "", gateway: c?.gateway ?? "" }
+      const wireless = !!l.wireless
+      return {
+        name: l.name,
+        // Wi-Fi yang belum diatur tidak dipakai.
+        mode: c?.mode ?? (wireless ? "off" : "dhcp"),
+        address: c?.address ?? "",
+        gateway: c?.gateway ?? "",
+        wireless,
+        ssid: c?.wifi?.ssid ?? "",
+        password: "",
+        savedSSID: c?.wifi?.ssid ?? "",
+      }
     })
+    scans.value = {}
     form.dns = (cfg?.dns ?? []).join("\n")
     form.adminPassword = ""
   } catch (e) {
@@ -54,12 +69,31 @@ const link = (name: string) => status.value?.interfaces.find((l) => l.name === n
 function config(): NetworkConfig {
   return {
     hostname: form.hostname.trim().toLowerCase(),
-    interfaces: form.interfaces.map((i) =>
-      i.mode === "static" ? { name: i.name, mode: "static", address: i.address?.trim(), gateway: i.gateway?.trim() || undefined } : { name: i.name, mode: i.mode },
-    ),
+    interfaces: form.interfaces.map((i) => {
+      const c: NetworkInterfaceConfig =
+        i.mode === "static" ? { name: i.name, mode: "static", address: i.address?.trim(), gateway: i.gateway?.trim() || undefined } : { name: i.name, mode: i.mode }
+      if (i.wireless && i.mode !== "off") c.wifi = { ssid: i.ssid, password: i.password || undefined }
+      return c
+    }),
     dns: allStatic.value ? form.dns.split(/[\s,]+/).filter(Boolean) : [],
   }
 }
+
+// --- Wi-Fi: pindai jaringan di sekitar ---
+const scans = ref<Record<string, WiFiSeen[] | "busy" | string>>({})
+async function scan(i: FormInterface) {
+  scans.value[i.name] = "busy"
+  try {
+    scans.value[i.name] = await api.scanWiFi(i.name)
+  } catch (e) {
+    scans.value[i.name] = message(e)
+  }
+}
+const signal = (dbm: number) => t(dbm >= -60 ? "network.wifi.strong" : dbm >= -72 ? "network.wifi.medium" : "network.wifi.weak")
+// Password wajib kecuali SSID sama dengan yang tersimpan.
+const wifiIncomplete = computed(() =>
+  form.interfaces.some((i) => i.wireless && i.mode !== "off" && (!i.ssid || (i.ssid !== i.savedSSID && i.password.length < 8))),
+)
 
 // --- Terapkan dan konfirmasi ---
 const change = ref<(NetworkApplyResult & { config: NetworkConfig }) | null>(null)
@@ -200,11 +234,15 @@ async function cancel() {
         <div v-for="i in form.interfaces" :key="i.name" class="space-y-3 rounded-xl border p-4">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div class="flex items-center gap-2">
-              <Network class="size-4 text-muted-foreground" />
+              <Wifi v-if="i.wireless" class="size-4 text-muted-foreground" />
+              <Network v-else class="size-4 text-muted-foreground" />
               <span class="font-medium">{{ i.name }}</span>
               <span class="text-xs text-muted-foreground">{{ link(i.name)?.mac }}</span>
             </div>
-            <span :class="cn('text-xs', link(i.name)?.up ? 'text-emerald-600' : 'text-muted-foreground')">
+            <span v-if="i.wireless" :class="cn('text-xs', link(i.name)?.ssid ? 'text-emerald-600' : 'text-muted-foreground')">
+              {{ link(i.name)?.ssid ? t("network.wifi.connected", { ssid: link(i.name)!.ssid!, signal: signal(link(i.name)!.signal_dbm ?? -100) }) : t("network.wifi.notConnected") }}
+            </span>
+            <span v-else :class="cn('text-xs', link(i.name)?.up ? 'text-emerald-600' : 'text-muted-foreground')">
               {{ link(i.name)?.up ? t("network.up", { speed: link(i.name)?.speed_mbps ?? "?" }) : t("network.down") }}
             </span>
           </div>
@@ -222,6 +260,47 @@ async function cancel() {
             >
               {{ t(`network.mode.${m}`) }}
             </Button>
+          </div>
+          <div v-if="i.wireless && i.mode !== 'off'" class="space-y-3 rounded-lg bg-muted/50 p-3">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <p class="text-xs text-muted-foreground">{{ t("network.wifi.help") }}</p>
+              <Button type="button" size="sm" variant="outline" :disabled="scans[i.name] === 'busy'" @click="scan(i)">
+                <LoaderCircle v-if="scans[i.name] === 'busy'" class="animate-spin" /><RefreshCw v-else />{{ t("network.wifi.scan") }}
+              </Button>
+            </div>
+            <p v-if="typeof scans[i.name] === 'string' && scans[i.name] !== 'busy'" class="text-xs text-destructive">{{ scans[i.name] }}</p>
+            <ul v-else-if="Array.isArray(scans[i.name])" class="max-h-48 divide-y overflow-y-auto rounded-md border bg-background text-sm">
+              <li v-if="!(scans[i.name] as WiFiSeen[]).length" class="px-2 py-1.5 text-xs text-muted-foreground">{{ t("network.wifi.none") }}</li>
+              <li v-for="w in scans[i.name] as WiFiSeen[]" :key="w.ssid">
+                <button
+                  type="button"
+                  class="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                  :class="i.ssid === w.ssid ? 'bg-primary/10' : ''"
+                  :disabled="!w.secure"
+                  @click="i.ssid = w.ssid"
+                >
+                  <span class="min-w-0 truncate">{{ w.ssid }}</span>
+                  <span class="shrink-0 text-xs text-muted-foreground">{{ w.secure ? signal(w.signal_dbm) : t("network.wifi.unsupported") }}</span>
+                </button>
+              </li>
+            </ul>
+            <div class="grid gap-3 sm:grid-cols-2">
+              <div class="space-y-1.5">
+                <Label :for="`net-ssid-${i.name}`">{{ t("network.wifi.ssid") }}</Label>
+                <Input :id="`net-ssid-${i.name}`" v-model="i.ssid" maxlength="32" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="space-y-1.5">
+                <Label :for="`net-wpw-${i.name}`">{{ t("network.wifi.password") }}</Label>
+                <Input
+                  :id="`net-wpw-${i.name}`"
+                  v-model="i.password"
+                  type="password"
+                  maxlength="63"
+                  autocomplete="new-password"
+                  :placeholder="i.ssid && i.ssid === i.savedSSID ? t('network.wifi.keepPassword') : ''"
+                />
+              </div>
+            </div>
           </div>
           <div v-if="i.mode === 'static'" class="grid gap-3 sm:grid-cols-2">
             <div class="space-y-1.5">
@@ -253,7 +332,7 @@ async function cancel() {
           <Label for="net-pw">{{ t("account.password") }}</Label>
           <Input id="net-pw" v-model="form.adminPassword" type="password" autocomplete="current-password" />
         </div>
-        <Button type="submit" size="sm" :disabled="busy || !!change || !!status.pending || !form.adminPassword">
+        <Button type="submit" size="sm" :disabled="busy || !!change || !!status.pending || !form.adminPassword || wifiIncomplete">
           <LoaderCircle v-if="busy" class="animate-spin" />{{ t("network.apply") }}
         </Button>
       </form>

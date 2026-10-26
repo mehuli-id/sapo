@@ -1,7 +1,7 @@
 id: core
 name: { id: Sistem inti, en: Core system }
 group: core
-packages: [systemd, nftables, chrony, smartmontools, avahi-daemon, ca-certificates]
+packages: [systemd, nftables, chrony, smartmontools, avahi-daemon, ca-certificates, wpasupplicant, iw, wireless-regdb]
 services: [nftables, chrony, avahi-daemon, smartmontools]
 requires: []
 # always: selalu terpasang · setup: dipilih saat instalasi · optional: diaktifkan dari panel

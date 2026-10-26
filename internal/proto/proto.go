@@ -145,6 +145,7 @@ const (
 	OpCloudRestore    = "cloud.restore"
 	OpCloudLs         = "cloud.ls"
 	OpRecycleStatus   = "recycle.status"
+	OpNetworkWiFiScan = "network.wifi_scan"
 	OpRecycleEmpty    = "recycle.empty"
 
 	// Installer ke disk (ADR 0016).
@@ -739,6 +740,45 @@ type NetworkInterface struct {
 	// Address: IPv4 dengan prefiks, misalnya "192.168.1.10/24" (static).
 	Address string `json:"address,omitempty"`
 	Gateway string `json:"gateway,omitempty"`
+	// WiFi: jaringan Wi-Fi yang dimasuki antarmuka nirkabel (ADR 0023);
+	// wajib bila antarmuka nirkabel dipakai, tidak boleh di antarmuka kabel.
+	WiFi *WiFiNetwork `json:"wifi,omitempty"`
+}
+
+// WiFiNetwork: jaringan WPA2/WPA3 Personal. Password hanya dikirim ke
+// sapod dan tidak pernah dikembalikan; kosong = tetap memakai password yang
+// tersimpan untuk SSID yang sama.
+type WiFiNetwork struct {
+	SSID     string `json:"ssid"`
+	Password string `json:"password,omitempty"`
+}
+
+// Redacted: salinan pengaturan tanpa password Wi-Fi (untuk panel dan log).
+func (c NetworkConfig) Redacted() NetworkConfig {
+	out := c
+	out.Interfaces = make([]NetworkInterface, len(c.Interfaces))
+	for i, nic := range c.Interfaces {
+		if nic.WiFi != nil {
+			w := *nic.WiFi
+			w.Password = ""
+			nic.WiFi = &w
+		}
+		out.Interfaces[i] = nic
+	}
+	return out
+}
+
+// WiFiScanParams: antarmuka nirkabel yang memindai.
+type WiFiScanParams struct {
+	Interface string `json:"interface"`
+}
+
+// WiFiSeen: satu jaringan Wi-Fi hasil pindai (sinyal terkuat per SSID).
+// Secure: WPA2/WPA3 Personal (yang bisa dipakai Sapo).
+type WiFiSeen struct {
+	SSID      string `json:"ssid"`
+	SignalDBm int    `json:"signal_dbm"`
+	Secure    bool   `json:"secure"`
 }
 
 // NetworkStatus adalah hasil network.status.
@@ -761,6 +801,11 @@ type NetworkLink struct {
 	Up        bool     `json:"up"`
 	SpeedMbps int      `json:"speed_mbps,omitempty"`
 	Addresses []string `json:"addresses"`
+	// Wireless: antarmuka Wi-Fi; SSID dan SignalDBm jaringan yang sedang
+	// tersambung.
+	Wireless  bool   `json:"wireless,omitempty"`
+	SSID      string `json:"ssid,omitempty"`
+	SignalDBm int    `json:"signal_dbm,omitempty"`
 }
 
 // NetworkPending: perubahan yang belum dikonfirmasi.

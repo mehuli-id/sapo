@@ -252,6 +252,7 @@ func main() {
 		StateFile: nc.StateFile, PendingFile: nc.PendingFile, NetworkService: nc.NetworkService, AvahiService: nc.AvahiService,
 		ApplyDelay: time.Duration(nc.ApplyDelaySeconds) * time.Second, ConfirmWindow: time.Duration(nc.ConfirmSeconds) * time.Second,
 		Timeout: time.Minute, Log: log,
+		Iw: nc.Iw, WPAConfDir: nc.WPAConfDir, WiFiCountry: nc.WiFiCountry,
 	})
 	// Perubahan jaringan yang belum dikonfirmasi saat sapod berhenti
 	// dikembalikan sebelum sapod menerima operasi apa pun.
@@ -260,6 +261,7 @@ func main() {
 	reg.Register(proto.OpNetworkApply, network.ApplyOp())
 	reg.Register(proto.OpNetworkConfirm, network.ConfirmOp())
 	reg.Register(proto.OpNetworkCancel, network.CancelOp())
+	reg.Register(proto.OpNetworkWiFiScan, network.WiFiScanOp())
 	reg.Register(proto.OpConsolePanelAddress, agent.ConsolePanelAddressOp(agent.ConsoleTools{
 		IssueFile: cfg.Agent.Console.IssueFile,
 		Agetty:    cfg.Agent.Console.Agetty,

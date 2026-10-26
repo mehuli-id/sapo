@@ -613,6 +613,20 @@
       "ok": "Pengaturan jaringan baru dikonfirmasi dan disimpan.",
       "failed": "Tidak ada perubahan jaringan yang menunggu konfirmasi (mungkin sudah dikonfirmasi, dibatalkan, atau waktunya habis).",
       "open": "Buka panel"
+    },
+    "wifi": {
+      "help": "WPA2/WPA3 Personal. Pindai untuk memilih jaringan, atau ketik nama jaringan tersembunyi.",
+      "scan": "Pindai",
+      "none": "Tidak ada jaringan yang terlihat.",
+      "strong": "sinyal kuat",
+      "medium": "sinyal sedang",
+      "weak": "sinyal lemah",
+      "unsupported": "terbuka/Enterprise (tidak didukung)",
+      "ssid": "Nama jaringan (SSID)",
+      "password": "Password Wi-Fi",
+      "keepPassword": "kosongkan = tetap memakai password tersimpan",
+      "connected": "Tersambung ke {ssid} ({signal})",
+      "notConnected": "Tidak tersambung"
     }
   },
   "monitor": {
