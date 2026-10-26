@@ -25,3 +25,4 @@ Setiap keputusan arsitektur penting dicatat di sini sebagai file bernomor (`NNNN
 | [0019](0019-remote-backup.md) | Backup ke NAS Sapo lain lewat HTTPS sapo-api (tanpa SSH), kode pemasangan dengan sidik jari, partner tidak bisa menghapus salinan | Diterima |
 | [0020](0020-cloud-backup.md) | Backup ke S3/cloud dengan restic (enkripsi di NAS, unit systemd terkunci, password tampil sekali, pemulihan bencana dengan password) | Diterima |
 | [0021](0021-recycle-bin.md) | Tempat sampah per shared folder (`#recycle`: SMB vfs_recycle, File Station/WebDAV memindah, dibersihkan sapod lewat fd tanpa symlink) | Diterima |
+| [0022](0022-time-machine.md) | Time Machine untuk Mac per shared folder (kuota refquota wajib, vfs_fruit hanya di folder itu, diumumkan Samba lewat Avahi, tanpa tempat sampah) | Diterima |

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Shared folder (hanya admin): daftar folder, cara membukanya dari komputer
-// lain, izin per pengguna dan grup, ekspor NFS, snapshot, tempat sampah, dan
-// hapus folder. Folder
+// lain, izin per pengguna dan grup, ekspor NFS, snapshot, tempat sampah, Time
+// Machine, dan hapus folder. Folder
 // baru dibuat lewat wizard (wizards/share-create.yaml).
 import { onMounted, reactive, ref } from "vue"
 import { useI18n } from "vue-i18n"
@@ -17,6 +17,7 @@ import { api, ApiError, wizardActions } from "@/lib/api"
 import { formatBytes } from "@/lib/format"
 import RecyclePanel from "@/components/RecyclePanel.vue"
 import SnapshotPanel from "@/components/SnapshotPanel.vue"
+import TimeMachinePanel from "@/components/TimeMachinePanel.vue"
 import WizardRunner from "@/wizard/WizardRunner.vue"
 
 const { t, locale } = useI18n()
@@ -102,7 +103,7 @@ function wizardDone(values: Record<string, string>) {
 
 // --- Ubah izin dan hapus ---
 const open = ref("")
-const mode = ref<"" | "edit" | "nfs" | "snap" | "recycle" | "delete">("")
+const mode = ref<"" | "edit" | "nfs" | "snap" | "recycle" | "tm" | "delete">("")
 const busy = ref(false)
 const error = ref("")
 const form = reactive({
@@ -114,7 +115,7 @@ const form = reactive({
   nfsClients: "",
 })
 
-function start(s: SharedFolder, m: "edit" | "nfs" | "snap" | "recycle" | "delete") {
+function start(s: SharedFolder, m: "edit" | "nfs" | "snap" | "recycle" | "tm" | "delete") {
   open.value = s.name
   mode.value = m
   error.value = ""
@@ -207,7 +208,8 @@ const remove = (s: SharedFolder) =>
                 {{ t("snapshots.title") }}:
                 {{ s.snapshots ? t("snapshots.summary", { ...s.snapshots, hour: String(s.snapshots.hour).padStart(2, "0") }) : t("snapshots.off") }}
               </p>
-              <p class="text-xs">{{ t("recycle.title") }}: {{ s.recycle_days > 0 ? t("recycle.on", { days: s.recycle_days }) : t("recycle.off") }}</p>
+              <p v-if="s.time_machine" class="text-xs">{{ t("timeMachine.on", { quota: s.time_machine.quota_gb }) }}</p>
+              <p v-else class="text-xs">{{ t("recycle.title") }}: {{ s.recycle_days > 0 ? t("recycle.on", { days: s.recycle_days }) : t("recycle.off") }}</p>
               <p v-if="s.apps && Object.keys(s.apps).length" class="text-xs">
                 {{ t("shares.apps") }}: {{ Object.entries(s.apps).map(([id, l]) => `${id} (${t(`permissions.${l}`)})`).join(", ") }}
               </p>
@@ -218,6 +220,7 @@ const remove = (s: SharedFolder) =>
             <Button size="sm" variant="outline" @click="start(s, 'nfs')">{{ t("shares.nfs") }}</Button>
             <Button size="sm" variant="outline" @click="start(s, 'snap')">{{ t("snapshots.title") }}</Button>
             <Button size="sm" variant="outline" @click="start(s, 'recycle')">{{ t("recycle.title") }}</Button>
+            <Button size="sm" variant="outline" @click="start(s, 'tm')">{{ t("timeMachine.title") }}</Button>
             <Button size="sm" variant="ghost" class="text-destructive hover:text-destructive" @click="start(s, 'delete')"><Trash2 /></Button>
           </div>
         </div>
@@ -251,7 +254,14 @@ const remove = (s: SharedFolder) =>
         <p v-if="s.recycle_error && !(open === s.name && mode === 'recycle')" class="flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-2.5 text-xs">
           <TriangleAlert class="size-4 shrink-0 text-destructive" />{{ t("recycle.error", { message: s.recycle_error }) }}
         </p>
-        <div v-if="open === s.name && mode === 'recycle'" class="space-y-3 border-t pt-3">
+        <p v-if="s.time_machine_error && !(open === s.name && mode === 'tm')" class="flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-2.5 text-xs">
+          <TriangleAlert class="size-4 shrink-0 text-destructive" />{{ t("timeMachine.error", { message: s.time_machine_error }) }}
+        </p>
+        <div v-if="open === s.name && mode === 'tm'" class="space-y-3 border-t pt-3">
+          <TimeMachinePanel :share="s" @saved="load" />
+          <Button size="sm" variant="ghost" @click="open = ''">{{ t("common.close") }}</Button>
+        </div>
+        <div v-else-if="open === s.name && mode === 'recycle'" class="space-y-3 border-t pt-3">
           <RecyclePanel :share="s" :usage="recycle.find((u) => u.pool === s.pool && u.share === s.name)" @saved="load" />
           <Button size="sm" variant="ghost" @click="open = ''">{{ t("common.close") }}</Button>
         </div>

@@ -334,6 +334,7 @@ func New(o Options) (*Server, error) {
 	s.mux.Handle("POST /api/v1/snapshots/delete", s.requireAdmin(http.HandlerFunc(s.handleSnapshotDelete)))
 	s.mux.Handle("POST /api/v1/shares/{name}/snapshot-policy", s.requireAdmin(http.HandlerFunc(s.handleSharePolicy)))
 	s.mux.Handle("GET /api/v1/recycle", s.requireAdmin(http.HandlerFunc(s.handleRecycle)))
+	s.mux.Handle("POST /api/v1/shares/{name}/time-machine", s.requireAdmin(http.HandlerFunc(s.handleShareTimeMachine)))
 	s.mux.Handle("POST /api/v1/shares/{name}/recycle", s.requireAdmin(http.HandlerFunc(s.handleShareRecycle)))
 	s.mux.Handle("POST /api/v1/shares/{name}/recycle/empty", s.requireAdmin(http.HandlerFunc(s.handleShareRecycleEmpty)))
 	s.mux.Handle("POST /api/v1/drive/snapshot-policy", s.requireAdmin(http.HandlerFunc(s.handleDrivePolicy)))

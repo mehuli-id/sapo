@@ -564,7 +564,22 @@ type ShareSpec struct {
 	// RecycleDays: tempat sampah folder (ADR 0021), isi disimpan sekian
 	// hari; 0 = mati (isi yang sudah ada tidak dihapus).
 	RecycleDays int `json:"recycle_days,omitempty"`
+	// TimeMachine: folder menjadi tujuan Time Machine Mac (ADR 0022); nil =
+	// tidak. Tempat sampah selalu mati di folder ini.
+	TimeMachine *TimeMachine `json:"time_machine,omitempty"`
 }
+
+// TimeMachine: kuota folder tujuan Time Machine (GB), agar backup Mac tidak
+// memenuhi pool.
+type TimeMachine struct {
+	QuotaGB int `json:"quota_gb"`
+}
+
+// Batas kuota Time Machine (GB).
+const (
+	MinTimeMachineGB = 10
+	MaxTimeMachineGB = 1 << 20
+)
 
 // MaxRecycleDays: batas lama simpan tempat sampah.
 const MaxRecycleDays = 365
@@ -686,6 +701,8 @@ type ShareState struct {
 	SnapshotError string `json:"snapshot_error,omitempty"`
 	// RecycleError: folder siap, tetapi tempat sampahnya gagal disiapkan.
 	RecycleError string `json:"recycle_error,omitempty"`
+	// TimeMachineError: folder siap, tetapi kuota Time Machine gagal diatur.
+	TimeMachineError string `json:"time_machine_error,omitempty"`
 }
 
 // ShareDeleteParams adalah parameter shares.delete.

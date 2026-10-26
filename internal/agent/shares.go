@@ -298,6 +298,18 @@ func (s *Shares) ApplyOp() Handler {
 					st.SnapshotError = clipTo(serr.Error(), maxErrorText)
 					s.p.logWarn("jadwal snapshot gagal diatur", "folder", sp.Name, "err", serr)
 				}
+				// Time Machine menghapus banyak file kecil setiap backup:
+				// tempat sampah tidak pernah menyala di folder tujuannya.
+				if sp.TimeMachine != nil {
+					sp.RecycleDays = 0
+					if terr := s.setTimeMachine(ctx, sp.Pool+"/"+sp.Name, sp.TimeMachine); terr != nil {
+						st.TimeMachineError = clipTo(terr.Error(), maxErrorText)
+						s.p.logWarn("kuota Time Machine gagal diatur", "folder", sp.Name, "err", terr)
+					}
+				} else if terr := s.setTimeMachine(ctx, sp.Pool+"/"+sp.Name, nil); terr != nil {
+					st.TimeMachineError = clipTo(terr.Error(), maxErrorText)
+					s.p.logWarn("kuota Time Machine gagal dilepas", "folder", sp.Name, "err", terr)
+				}
 				if rerr := s.setRecycle(ctx, sp.Pool+"/"+sp.Name, path, sp.RecycleDays); rerr != nil {
 					st.RecycleError = clipTo(rerr.Error(), maxErrorText)
 					// Tanpa folder #recycle, SMB menghapus langsung: tempat
@@ -725,6 +737,17 @@ func (s *Shares) renderSMBConf(shares []shareConf, homesPool string, ext []proto
 		{"shadow:snapprefix", `^sapo-\(hourly\)\{0,1\}\(daily\)\{0,1\}\(weekly\)\{0,1\}\(manual\)\{0,1\}$`},
 		{"shadow:delimiter", "_GMT"},
 		{"shadow:format", "_GMT-%Y.%m.%d-%H.%M.%S"},
+		// Mac (vfs_fruit, hanya di folder Time Machine): metadata dan resource
+		// fork sebagai stream di xattr; folder Time Machine diumumkan lewat
+		// Avahi oleh Samba sendiri.
+		{"fruit:metadata", "stream"},
+		{"fruit:model", "MacSamba"},
+		{"fruit:posix_rename", "yes"},
+		{"fruit:veto_appledouble", "no"},
+		{"fruit:nfs_aces", "no"},
+		{"fruit:wipe_intentionally_left_blank_rfork", "yes"},
+		{"fruit:delete_empty_adfiles", "yes"},
+		{"multicast dns register", "yes"},
 		{"logging", "file"},
 		{"log file", "/var/log/samba/log.%m"},
 		{"max log size", "1000"},
@@ -764,9 +787,16 @@ func (s *Shares) renderSMBConf(shares []shareConf, homesPool string, ext []proto
 		if len(write) > 0 {
 			fmt.Fprintf(&b, "   write list = %s\n", strings.Join(write, " "))
 		}
+		// Time Machine (ADR 0022): kuota juga lewat Samba (selain refquota),
+		// handle tahan putus agar backup tidak rusak saat Wi-Fi tersendat.
+		if tm := sc.spec.TimeMachine; tm != nil {
+			b.WriteString("   vfs objects = catia fruit streams_xattr shadow_copy2\n   fruit:time machine = yes\n")
+			fmt.Fprintf(&b, "   fruit:time machine max size = %dG\n", tm.QuotaGB)
+			b.WriteString("   durable handles = yes\n   kernel oplocks = no\n   kernel share modes = no\n   posix locking = no\n")
+		}
 		// Tempat sampah (ADR 0021): hapus lewat SMB = pindah ke #recycle
 		// dengan letak yang sama; hapus di dalam #recycle = permanen.
-		if sc.spec.RecycleDays > 0 {
+		if sc.spec.RecycleDays > 0 && sc.spec.TimeMachine == nil {
 			b.WriteString("   vfs objects = shadow_copy2 recycle\n")
 			fmt.Fprintf(&b, "   recycle:repository = %s\n", recycleDir)
 			b.WriteString("   recycle:keeptree = yes\n   recycle:versions = yes\n   recycle:directory_mode = 0770\n   recycle:subdir_mode = 0770\n")

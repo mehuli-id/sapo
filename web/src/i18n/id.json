@@ -1068,6 +1068,21 @@
     "confirmName": "Ketik ulang nama folder",
     "emptied": "Tempat sampah dikosongkan: {n} file dihapus.",
     "emptyPartial": "Sebagian isi tempat sampah sudah dihapus ({n} file). Waktu habis; kosongkan lagi untuk melanjutkan.",
-    "error": "Tempat sampah belum bisa dipakai: {message}. Selama itu, yang dihapus lewat SMB langsung hilang."
+    "error": "Tempat sampah belum bisa dipakai: {message}. Selama itu, yang dihapus lewat SMB langsung hilang.",
+    "tmOff": "Tempat sampah tidak dipakai di folder Time Machine."
+  },
+  "timeMachine": {
+    "title": "Time Machine",
+    "on": "Tujuan Time Machine, kuota {quota} GB",
+    "off": "Bukan tujuan Time Machine",
+    "help": "Jadikan folder ini tujuan backup Time Machine untuk Mac di jaringan. Kuota membatasi ruang yang dipakai semua Mac di folder ini; Mac melihatnya sebagai ukuran disk dan membuang backup lama sendiri saat penuh. Tempat sampah folder ini dimatikan karena Time Machine menghapus banyak file setiap backup.",
+    "enable": "Jadikan tujuan Time Machine",
+    "quota": "Kuota (GB)",
+    "quotaHelp": "Biasanya 2–3 kali isi disk Mac. Bila beberapa Mac memakai folder ini, jumlahkan.",
+    "howTo": "Di Mac: Pengaturan Sistem → Umum → Time Machine → Tambah Disk Cadangan, lalu pilih {name} di NAS ini. Masuk dengan akun Sapo yang punya izin tulis ke folder ini.",
+    "noWriters": "Belum ada pengguna dengan izin tulis ke folder ini; beri izin dulu agar Mac bisa masuk.",
+    "offHelp": "Backup Mac yang sudah ada tetap disimpan di folder; kuota dilepas.",
+    "saved": "Pengaturan Time Machine disimpan.",
+    "error": "Kuota Time Machine belum bisa diatur: {message}"
   }
 }

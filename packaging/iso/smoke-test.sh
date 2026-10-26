@@ -378,6 +378,37 @@ json 'assert "langsung.txt" not in [e["name"] for e in v["entries"]], v' <<<"$re
 JAR="$admin_jar"
 echo "File Station: daftar, unduh, unggah, folder baru, pindah, hapus sebagai budi; ani (baca) ditolak; file terbaca lewat SMB"
 echo "Tempat sampah: hapus lewat File Station dan SMB pindah ke #recycle (letak sama, bisa diambil lagi), hapus di dalamnya permanen, dikosongkan dengan password, dimatikan = hapus langsung"
+# --- Time Machine (ADR 0022) -------------------------------------------------------
+# Folder tujuan Time Machine: vfs_fruit harus termuat (smbd menolak masuk ke
+# share bila modul VFS tidak ada), kuota terpasang tanpa galat, tempat sampah
+# mati. Pengumuman Avahi dan backup Mac sungguhan tidak bisa diuji di sini.
+res="$(api POST /api/v1/shares "{\"name\":\"mac\",\"pool\":\"uji\",\"permissions\":{\"user:budi\":\"write\"},\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "folder mac: $res"
+res="$(api POST /api/v1/shares/mac/time-machine '{"enabled":true,"quota_gb":5,"admin_password":"'"$PASS"'"}')"
+[[ "$res" == *' 400' ]] || fail "kuota Time Machine terlalu kecil harus ditolak: $res"
+res="$(api POST /api/v1/shares/mac/time-machine '{"enabled":true,"quota_gb":50,"admin_password":"'"$PASS"'"}')"
+json 'assert v["ok"] and not v.get("warning"), v' <<<"$res" || fail "jadikan tujuan Time Machine: $res"
+res="$(api GET /api/v1/shares)"
+json 'm=[s for s in v if s["name"]=="mac"][0]; assert m["time_machine"]=={"quota_gb":50} and m["recycle_days"]==0 and not m.get("time_machine_error") and not m.get("error"), m' <<<"$res" \
+  || fail "folder Time Machine: $res"
+echo "backup mac" > "$WORK/tm.txt"
+for _ in $(seq 1 10); do
+  out="$(smbclient //127.0.0.1/mac -p "$SMB_PORT" -m SMB3 -U "budi%$UPASS" -c "put $WORK/tm.txt tm.txt; del tm.txt; ls" 2>&1 || true)"
+  [[ "$out" != *NT_STATUS* ]] && break
+  sleep 2
+done
+[[ "$out" != *NT_STATUS* && "$out" == *"blocks available"* ]] || fail "folder Time Machine lewat SMB (vfs_fruit): $out"
+login_as budi
+res="$(api GET '/api/v1/files/list?share=mac&path=%23recycle')"
+[[ "$res" != *tm.txt* ]] || fail "hapus di folder Time Machine tidak boleh masuk tempat sampah: $res"
+JAR="$admin_jar"
+res="$(api POST /api/v1/shares/mac/recycle '{"days":30,"admin_password":"'"$PASS"'"}')"
+[[ "$res" == *'"time_machine_share"'* ]] || fail "tempat sampah di folder Time Machine harus ditolak: $res"
+res="$(api POST /api/v1/shares/mac/time-machine '{"enabled":false,"admin_password":"'"$PASS"'"}')"
+[[ "$res" == *' 200' ]] || fail "matikan Time Machine: $res"
+res="$(api POST /api/v1/shares/mac/delete "{\"confirm_name\":\"mac\",\"admin_password\":\"$PASS\"}")"
+[[ "$res" == *' 200' ]] || fail "hapus folder mac: $res"
+echo "Time Machine: folder tujuan dengan kuota (vfs_fruit termuat, tulis lewat SMB), kuota terlalu kecil ditolak, tempat sampah mati, dimatikan lagi"
 
 # --- Control Panel ---------------------------------------------------------------
 res="$(api POST /api/v1/settings/services '{"smb":false}')"
