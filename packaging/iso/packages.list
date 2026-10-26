@@ -4,11 +4,16 @@ sapo
 live-boot
 live-config
 live-config-systemd
-# Firmware kartu jaringan kabel (Realtek, Broadcom, dan lainnya) dan
-# microcode CPU untuk komputer sungguhan (area non-free-firmware).
+# Firmware untuk komputer sungguhan (area non-free-firmware): kartu jaringan
+# kabel (Realtek, Broadcom, Intel), GPU Intel dan AMD (layar konsol; di
+# Debian 13 dipisah dari firmware-misc-nonfree), dan microcode CPU. Wi-Fi
+# dan firmware GPU NVIDIA sengaja tidak disertakan.
 firmware-realtek
 firmware-bnx2
 firmware-bnx2x
+firmware-intel-misc
+firmware-intel-graphics
+firmware-amd-graphics
 firmware-misc-nonfree
 amd64-microcode
 intel-microcode
