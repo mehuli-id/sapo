@@ -5,7 +5,7 @@ Ada dua jenis ISO dari skrip yang sama (`FLAVOR` di `build.sh`, data di `iso.con
 - **Rilis** (`sapo_<versi>_amd64.iso`): dari tag `v*`, dilampirkan ke halaman [GitHub Releases](https://github.com/mehuli-id/sapo/releases). Untuk memasang Sapo ke komputer. Tanpa akun debug.
 - **Dev** (`sapo-dev_<versi>_amd64.iso`): dari setiap push ke `main`, untuk pengembang dan penguji. Ada akun debug `user` di konsol.
 
-Keduanya berisi firmware kartu jaringan dan microcode CPU (area `non-free-firmware` Debian), dan keduanya lolos uji asap QEMU yang sama sebelum diterbitkan.
+Keduanya berisi firmware kartu jaringan (Realtek, Broadcom, Intel), GPU Intel dan AMD, dan microcode CPU (area `non-free-firmware` Debian; Wi-Fi dan firmware GPU NVIDIA tidak), dan keduanya lolos uji asap QEMU yang sama sebelum diterbitkan.
 
 ## Memasang Sapo ke komputer (ISO rilis)
 
