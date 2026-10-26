@@ -5,7 +5,9 @@
 # dan password sengaja berisi spasi, tanda kutip, dan #. Juga memeriksa
 # parser keluaran iw sapod dengan keluaran iw sungguhan, dan bahwa password
 # salah tidak tersambung.
-# Pemakaian (Linux dengan sudo, misalnya runner CI): tools/wifi-hwsim/run.sh
+# Pemakaian (Linux dengan sudo dan modul mac80211_hwsim, misalnya Debian;
+# kernel Azure runner GitHub tidak punya modul itu): tools/wifi-hwsim/run.sh
+# Paket: hostapd wpasupplicant iw, dan Go.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 

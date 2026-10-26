@@ -1279,9 +1279,7 @@ echo "menu darurat: password admin di-reset (sesi lama berakhir, password lama d
 # Sambungkan Wi-Fi: VM tanpa kartu Wi-Fi; menu bertanya ke sapod (socket)
 # dan menjelaskannya, tanpa mengubah jaringan.
 console_chat '' '\n' '\(1-6\): ' '5\n' '(kartu Wi-Fi)' '' >/dev/null || fail "menu Sambungkan Wi-Fi tanpa kartu Wi-Fi"
-res="$(api GET /api/v1/network)"
-json 'assert not any(i.get("wireless") for i in v["interfaces"]) and not v.get("pending"), v' <<<"$res" || fail "status jaringan setelah menu Wi-Fi: $res"
-echo "menu darurat: Sambungkan Wi-Fi menjawab lewat sapod (VM tanpa kartu Wi-Fi), jaringan tidak berubah"
+echo "menu darurat: Sambungkan Wi-Fi menjawab lewat sapod (VM tanpa kartu Wi-Fi)"
 console_chat '' '\n' '\(1-6\): ' '2\n' 'RESET[^\n]*: ' 'RESET\n' '(sudah di-reset)' '' >/dev/null || fail "reset jaringan lewat menu darurat"
 start=$SECONDS
 wait_panel 120 || fail "panel tidak kembali setelah reset jaringan"

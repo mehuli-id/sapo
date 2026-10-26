@@ -149,10 +149,11 @@ func TestWiFiApply(t *testing.T) {
 	if fi.Mode().Perm() != 0o600 || strings.Contains(string(data), "rahasia") || !strings.Contains(string(data), hex.EncodeToString([]byte(`Rumah "Kita"`))) {
 		t.Fatalf("file wpa (%v):\n%s", fi.Mode().Perm(), data)
 	}
-	ifaces, _ := os.ReadFile(filepath.Join(dir, "etc/interfaces"))
-	if !strings.Contains(string(ifaces), "iface wlan0 inet dhcp\n    wpa-conf "+conf+"\n") {
-		t.Fatalf("interfaces:\n%s", ifaces)
-	}
+	want := "iface wlan0 inet dhcp\n    wpa-conf " + conf + "\n"
+	waitFor(t, func() bool {
+		ifaces, _ := os.ReadFile(filepath.Join(dir, "etc/interfaces"))
+		return strings.Contains(string(ifaces), want)
+	})
 	waitFor(t, func() bool {
 		_, err := call(t, n.ConfirmOp(), proto.NetworkTokenParams{Token: res.(proto.NetworkApplyResult).Token})
 		return err == nil
