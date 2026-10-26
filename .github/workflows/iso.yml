@@ -1,8 +1,10 @@
 name: ISO dev
 
-# ISO live untuk pengembang dan penguji (packaging/iso/). Dibangun di setiap
-# push ke main, di pull request yang mengubah pengemasan, atau manual dari tab
-# Actions. Setiap ISO di-boot di QEMU dan baru diunggah bila panel menjawab.
+# ISO live (packaging/iso/). Jenis dev (untuk pengembang dan penguji)
+# dibangun di setiap push ke main, di pull request yang mengubah pengemasan,
+# atau manual dari tab Actions. Jenis release dipanggil workflow Rilis untuk
+# tag v* dan dilampirkan ke GitHub Release. Setiap ISO di-boot di QEMU dan
+# baru diunggah bila uji asap lulus.
 on:
   push:
     branches: [main]
@@ -11,13 +13,25 @@ on:
       - packaging/**
       - .github/workflows/iso.yml
   workflow_dispatch:
+    inputs:
+      flavor:
+        description: Jenis ISO
+        type: choice
+        options: [dev, release]
+        default: dev
+  workflow_call:
+    inputs:
+      flavor:
+        description: Jenis ISO (dev atau release)
+        type: string
+        default: dev
 
 permissions:
   contents: read
 
 # Build lama untuk cabang yang sama dibatalkan bila ada commit baru.
 concurrency:
-  group: iso-${{ github.ref }}
+  group: iso-${{ github.ref }}-${{ inputs.flavor || 'dev' }}
   cancel-in-progress: true
 
 env:
@@ -26,6 +40,7 @@ env:
   BUILD_IMAGE: debian:trixie
   # Artifact ISO cukup besar; simpan sebentar saja.
   RETENTION_DAYS: 14
+  FLAVOR: ${{ inputs.flavor || 'dev' }}
 
 jobs:
   iso:
@@ -51,7 +66,7 @@ jobs:
         run: |
           # live-build butuh chroot dan mount, jadi container harus privileged.
           export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
-          docker run --rm --privileged -e SOURCE_DATE_EPOCH \
+          docker run --rm --privileged -e SOURCE_DATE_EPOCH -e FLAVOR \
             -e OWNER="$(id -u):$(id -g)" \
             -v "$PWD:/src" -w /src "$BUILD_IMAGE" bash -euc '
               apt-get update -qq
@@ -77,7 +92,7 @@ jobs:
           tail -n 200 dist/smoke-test-console.log || true
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: sapo-iso-dev
+          name: sapo-iso-${{ env.FLAVOR }}
           path: |
             dist/*.iso
             dist/*.iso.sha256

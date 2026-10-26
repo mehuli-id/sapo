@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Membangun ISO live dev Sapo dengan Debian live-build.
+# Membangun ISO live Sapo dengan Debian live-build.
 # Pemakaian (dari root repo, di Debian dengan paket live-build, sebagai root):
 #   make iso   (atau: make deb ARCH=amd64 && sudo packaging/iso/build.sh)
+# FLAVOR=release untuk ISO rilis (tanpa akun debug), bawaan dev.
 # Paket sapo diambil dari dist/sapo_*_<ARCH>.deb (hasil make deb).
 # Hasil: dist/<ISO_NAME>_<versi>_<ARCH>.iso beserta file .sha256.
 set -euo pipefail
@@ -10,6 +11,17 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 HERE="$ROOT/packaging/iso"
 # shellcheck source=/dev/null
 source "$HERE/iso.conf"
+FLAVOR="${FLAVOR:-dev}"
+case "$FLAVOR" in
+  dev | release) ;;
+  *) echo "FLAVOR harus dev atau release (bukan $FLAVOR)." >&2; exit 1 ;;
+esac
+# Nilai per jenis dari iso.conf (ISO_NAME_dev, ISO_NAME_release, …).
+pick() { local v="$1_$FLAVOR"; printf '%s' "${!v}"; }
+ISO_NAME="$(pick ISO_NAME)"
+ISO_VOLUME="$(pick ISO_VOLUME)"
+ISO_APPLICATION="$(pick ISO_APPLICATION)"
+ISO_ISSUE="$(pick ISO_ISSUE)"
 OUT_DIR="${OUT_DIR:-$ROOT/dist}"
 WORK="$ROOT/$WORK_DIR"
 
@@ -34,7 +46,7 @@ VERSION="$(dpkg-deb -f "$DEB" Version)"
 SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(git -C "$ROOT" log -1 --format=%ct 2>/dev/null || date +%s)}"
 export SOURCE_DATE_EPOCH
 
-echo "Membangun $ISO_NAME $VERSION ($ARCH, Debian $DISTRIBUTION)…"
+echo "Membangun $ISO_NAME $VERSION ($FLAVOR, $ARCH, Debian $DISTRIBUTION)…"
 rm -rf "$WORK"
 mkdir -p "$WORK"
 cd "$WORK"
@@ -68,8 +80,13 @@ grep -qx "timeout $((BOOT_TIMEOUT_S * 10))" config/bootloaders/isolinux/isolinux
 printf '\nset timeout=%s\n' "$BOOT_TIMEOUT_S" >> config/bootloaders/grub-pc/config.cfg
 
 # Daftar paket dan file tambahan (data di packaging/iso/).
-grep -v '^\s*#' "$HERE/packages.list" | sed '/^\s*$/d' > config/package-lists/sapo.list.chroot
+lists=("$HERE/packages.list")
+if [[ "$FLAVOR" == dev ]]; then lists+=("$HERE/packages-dev.list"); fi
+cat "${lists[@]}" | grep -v '^\s*#' | sed '/^\s*$/d' > config/package-lists/sapo.list.chroot
 cp -r "$HERE/includes.chroot/." config/includes.chroot/
+# Teks di layar login konsol (dibuang installer, agent.install.remove_paths).
+mkdir -p config/includes.chroot/etc/issue.d
+printf '%s\n' "$ISO_ISSUE" > config/includes.chroot/etc/issue.d/sapo-iso.issue
 # Pemeriksaan di dalam chroot (misalnya modul ZFS terkompilasi).
 cp "$HERE"/hooks/*.hook.chroot config/hooks/normal/
 # Paket lokal: live-build membuat repo APT sementara darinya, jadi Depends

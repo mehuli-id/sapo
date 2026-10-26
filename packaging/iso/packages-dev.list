@@ -1,0 +1,5 @@
+# Paket tambahan hanya untuk ISO dev (FLAVOR=dev).
+# Membuat user live (user/live) untuk debugging dari konsol. Akun ini dihapus
+# installer (agent.install.remove_users) dan tidak pernah ada di ISO rilis.
+user-setup
+sudo
