@@ -9,5 +9,5 @@ require (
 
 require (
 	golang.org/x/net v0.60.0
-	golang.org/x/sys v0.49.0
+	golang.org/x/sys v0.50.0
 )
